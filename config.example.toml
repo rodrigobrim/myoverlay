@@ -1,0 +1,49 @@
+# media-tools configuration. Copy to config.toml and edit.
+
+# Root folder where ingested/processed media lives (one subfolder per track day).
+library_root = "D:/karting/library"
+
+[camera]
+# Removable volumes with a DCIM folder are detected automatically; add fixed
+# paths here if needed (e.g. a folder you copy files into manually).
+source_dirs = []
+extensions = [".mp4", ".mov"]
+# IANA timezone the camera clock is set to; omit for system local time.
+# timezone = "America/Sao_Paulo"
+clock_tolerance_s = 900.0
+
+[mychron]
+# Where Race Studio 3 stores downloaded .xrk sessions.
+rs3_data_dirs = ["C:/AIM_SPORT/RaceStudio3/user/data"]
+extensions = [".xrk", ".xrz"]
+# timezone = "America/Sao_Paulo"
+
+[rs3]
+# Zero-touch MyChron download: drive Race Studio 3's UI automatically.
+# Brittle by nature - the pipeline also works if you click Download yourself.
+enabled = false
+# exe_path = "C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe"
+# Note: RS3's real window title has no space ("RaceStudio3 (64 bit) 3.83.11")
+window_title_re = ".*Race\\s*Studio.*"
+download_button_names = ["Data Download", "Download Data", "Download"]
+trigger_interval_s = 600.0
+
+[watch]
+poll_s = 30.0
+settle_s = 5.0
+
+[render]
+overlay_fps = 10.0
+crf = 20
+preset = "medium"
+max_rpm = 16000
+# font_path = "C:/Windows/Fonts/arialbd.ttf"
+min_sync_confidence = 0.5
+
+[youtube]
+privacy = "private"  # API uploads from unaudited projects are locked private anyway
+title_template = "Karting {track} {date} - session {session} (best lap {best_lap})"
+description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
+# playlist_id = "PL..."
+client_secret_file = "client_secret.json"
+token_file = "token.json"
