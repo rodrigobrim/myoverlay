@@ -1,0 +1,49 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Secrets: OAuth client files and tokens are per-person and must never be
+# committed. Patterns are broad on purpose - people name these files
+# whatever they like (google_account_secret.json, my_creds.json, ...).
+*secret*.json
+*cred*.json
+*client_secret*
+token.json
+.env
+
+# Machine-specific configuration (paths, track settings, YouTube privacy).
+# config.example.toml is the template that IS committed.
+config.toml
+
+# Runtime output the pipeline writes while running
+*.log
+
+# Media and telemetry: the library lives outside the repo, but guard against
+# a library_root pointed inside it - these files are huge and are never
+# source.
+*.mp4
+*.mov
+*.mkv
+*.lrf
+*.xrk
+*.xrz
+
+# Build artifacts are never committed. The launcher executable is produced
+# by packaging/build_exe.ps1 (later: CI) and distributed as a GitHub
+# Release; packaging/vendor/ holds the git+ffmpeg it downloads to bundle.
+dist/
+build/
+packaging/build/
+packaging/vendor/
+*.exe
+*.zip
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
