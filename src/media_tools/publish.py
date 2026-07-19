@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import Config
+from .i18n import strings as i18n_strings
 from .library import DayManifest, PublishRecord, utcnow
 from .overlay import fmt_laptime
 from .telemetry import complete_laps, session_laps
@@ -161,10 +162,15 @@ def publish_day(
             "best_lap": ctx.best_lap,
             "lap": render.lap_num if render.lap_num is not None else "",
         }
-        title = cfg.youtube.title_template.format(**values)
-        description = cfg.youtube.description_template.format(**values)
+        # Explicit templates in config.toml win; otherwise the defaults for
+        # the configured output language apply.
+        t = i18n_strings(cfg.language)
+        title_template = cfg.youtube.title_template or t["title_template"]
+        description_template = cfg.youtube.description_template or t["description_template"]
+        title = title_template.format(**values)
+        description = description_template.format(**values)
         if render.lap_num is not None:
-            title = f"{title} - lap {render.lap_num}"
+            title = f"{title} - {t['lap_word']} {render.lap_num}"
         if render.label:
             title = f"{title} - {render.label}"
 

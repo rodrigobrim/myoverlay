@@ -25,7 +25,7 @@ PIPELINE_PACKAGES = [
     "numpy", "pandas", "pyarrow", "dateutil", "tzdata", "six",
     "libxrk",
     # media / overlay
-    "PIL", "gpxpy",
+    "PIL", "gpxpy", "arabic_reshaper", "bidi",
     # youtube
     "googleapiclient", "google_auth_oauthlib", "google.auth", "google.oauth2",
     "google_auth_httplib2", "httplib2", "uritemplate", "requests_oauthlib",

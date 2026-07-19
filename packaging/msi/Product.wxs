@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MyOverlay MSI. Payload = the PyInstaller onedir build (dist\myoverlay,
+  harvested by heat into HarvestedFiles.wxs at build time). The setup wizard
+  (WizardUI.wxs) collects: output language, shortcut choices, Google API
+  client secret (validated, skippable with a warning) and default render
+  resolution; a deferred CA writes them to install_settings.json, which the
+  launcher applies when it creates config.toml on first run.
+
+  Build with packaging\msi\build_msi.ps1.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="MyOverlay - karting video pipeline"
+           Language="1033"
+           Version="0.1.0"
+           Manufacturer="Rodrigo Brim"
+           UpgradeCode="7C3B7A66-9A1E-4C1D-B7F1-52A70E6D0D11">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="MyOverlay setup" Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MyOverlay is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Wizard choices. Secure: passed from the UI to the elevated execute
+         sequence of this per-machine install. -->
+    <Property Id="OUTPUT_LANGUAGE" Value="en" Secure="yes" />
+    <Property Id="RESOLUTION" Value="2k" Secure="yes" />
+    <Property Id="STARTMENU_SHORTCUT" Value="1" Secure="yes" />
+    <Property Id="DESKTOP_SHORTCUT" Secure="yes" />
+    <Property Id="GOOGLE_CLIENT_SECRET" Secure="yes" />
+    <Property Id="GOOGLE_SKIPPED" Value="0" Secure="yes" />
+    <Property Id="GOOGLE_VALID" Value="0" Secure="yes" />
+    <!-- Uninstall always goes through the wizard (Programs and Features shows
+         only 'Change'), so the remove-options page - with the gcloud checkbox
+         - is always presented before uninstalling. -->
+    <Property Id="ARPNOREMOVE" Value="1" />
+    <Property Id="REMOVE_GCLOUD" Secure="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="MyOverlay" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppMenuFolder" Name="MyOverlay" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <!-- Shortcuts run `myoverlay run` (the zero-touch pipeline) in a console.
+         Non-advertised, conditioned on the wizard checkboxes. -->
+    <DirectoryRef Id="AppMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="10B3B9E4-63F2-4C89-9A57-2E24D8B10F01" Win64="yes">
+        <Condition>STARTMENU_SHORTCUT = "1"</Condition>
+        <Shortcut Id="StartMenuRun" Name="MyOverlay"
+                  Description="Run the karting video pipeline"
+                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="1B0B18A2-7B4B-45D3-8E19-6A4E2C33AB02" Win64="yes">
+        <Condition>DESKTOP_SHORTCUT = "1"</Condition>
+        <Shortcut Id="DesktopRun" Name="MyOverlay"
+                  Description="Run the karting video pipeline"
+                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="MyOverlay" Level="1" Absent="disallow" Display="hidden">
+      <ComponentGroupRef Id="MyOverlayFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Google Cloud SDK: the official Windows installer is bundled in the
+         MSI and launched from the wizard step right after language selection.
+         Runs in the UI (non-elevated) - the SDK installs per-user. -->
+    <Property Id="GCLOUD_DONE" Value="0" />
+    <Property Id="GCLOUD_EXISTS" Secure="yes" />
+    <Binary Id="GCloudInstallerExe" SourceFile="$(var.GCloudInstaller)" />
+    <CustomAction Id="RunGCloudInstaller" BinaryKey="GCloudInstallerExe"
+                  ExeCommand="" Execute="immediate" Return="ignore" Impersonate="yes" />
+
+    <!-- Google client-secret validation (runs from the wizard's Validate button). -->
+    <Binary Id="ValidateGoogleJs" SourceFile="validate_google.js" />
+    <CustomAction Id="ValidateGoogle" BinaryKey="ValidateGoogleJs"
+                  JScriptCall="ValidateGoogle" Execute="immediate" Return="ignore" />
+
+    <!-- Persist wizard choices next to the exe (elevated, after files land). -->
+    <Binary Id="WriteSettingsJs" SourceFile="write_settings.js" />
+    <CustomAction Id="WriteSettings.SetData" Property="WriteSettings"
+                  Value="[INSTALLFOLDER]|[OUTPUT_LANGUAGE]|[RESOLUTION]|[GOOGLE_CLIENT_SECRET]|[GOOGLE_SKIPPED]" />
+    <CustomAction Id="WriteSettings" BinaryKey="WriteSettingsJs"
+                  JScriptCall="WriteSettings" Execute="deferred"
+                  Impersonate="no" Return="ignore" />
+    <!-- The settings file is created by a CA, so removal must be explicit. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="SettingsCleanup" Guid="52D5B0C0-1F0E-4E7B-9C57-8E70A21F5C03" Win64="yes">
+        <RemoveFile Id="RemoveInstallSettings" Name="install_settings.json" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="Installed"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <Feature Id="Cleanup" Level="1" Absent="disallow" Display="hidden">
+      <ComponentRef Id="SettingsCleanup" />
+    </Feature>
+
+    <!-- Uninstall cleanup: wipe everything the software put on the machine
+         (launcher clone/config/token under %LOCALAPPDATA%\myoverlay, and the
+         Google Cloud SDK when the checkbox was ticked). The media library
+         (videos/telemetry) is never touched. Skipped on major upgrades. -->
+    <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />
+    <CustomAction Id="RemoveAppData" BinaryKey="UninstallCleanupJs"
+                  JScriptCall="RemoveAppData" Execute="deferred"
+                  Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveGCloud" BinaryKey="UninstallCleanupJs"
+                  JScriptCall="RemoveGCloud" Execute="deferred"
+                  Impersonate="yes" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="WriteSettings.SetData" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="WriteSettings" After="WriteSettings.SetData">NOT Installed</Custom>
+      <Custom Action="RemoveGCloud" After="InstallInitialize">REMOVE="ALL" AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RemoveAppData" After="RemoveGCloud">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+
+    <UIRef Id="MyOverlayWizard" />
+  </Product>
+</Wix>

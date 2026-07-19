@@ -518,6 +518,7 @@ def render_clip(
         font_path=cfg.render.font_path,
         max_speed_kmh=max_speed_kmh,
         channels=channels,
+        language=cfg.language,
     )
 
     dest = day_dir / "out" / f"{video.stem}_{suffix}.mp4"

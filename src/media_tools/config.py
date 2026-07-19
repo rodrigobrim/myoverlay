@@ -144,8 +144,9 @@ class RenderConfig(BaseModel):
 
 class YouTubeConfig(BaseModel):
     privacy: str = "private"
-    title_template: str = "Karting {track} {date} - session {session} (best lap {best_lap})"
-    description_template: str = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
+    # None -> language-appropriate default from i18n (per top-level `language`).
+    title_template: str | None = None
+    description_template: str | None = None
     playlist_id: str | None = None
     client_secret_file: Path = Path("client_secret.json")
     token_file: Path = Path("token.json")
@@ -153,12 +154,25 @@ class YouTubeConfig(BaseModel):
 
 class Config(BaseModel):
     library_root: Path
+    # Output language for the overlay labels and YouTube title/description
+    # defaults. Everything else (config, CLI, logs) stays in English.
+    language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
     mychron: MychronConfig = Field(default_factory=MychronConfig)
     rs3: Rs3Config = Field(default_factory=Rs3Config)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
+
+    @field_validator("language")
+    @classmethod
+    def _valid_language(cls, v: str) -> str:
+        from .i18n import LANGUAGES
+
+        key = v.strip().lower()
+        if key not in LANGUAGES:
+            raise ValueError(f"language must be one of {LANGUAGES} (got {v!r})")
+        return key
 
 
 def find_config_file(explicit: Path | None = None) -> Path | None:
