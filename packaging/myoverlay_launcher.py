@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_REPO_URL = "https://github.com/rodrigobrim/media-tools.git"
+DEFAULT_REPO_URL = "https://github.com/rodrigobrim/myoverlay.git"
 
 
 def bundle_dir() -> Path:
