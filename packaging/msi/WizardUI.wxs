@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Custom setup wizard chain:
+    Welcome -> Language -> Shortcuts -> Google API setup (Validate / Skip
+    with warning) -> Resolution -> VerifyReady -> install.
+  Standard dialogs (Welcome, VerifyReady, Progress, Exit, errors,
+  maintenance) come from WixUIExtension via DialogRef.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <UI Id="MyOverlayWizard">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Small" FaceName="Tahoma" Size="7" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <Property Id="WixUI_Mode" Value="InstallDir" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+      <DialogRef Id="VerifyReadyDlg" />
+      <DialogRef Id="MaintenanceWelcomeDlg" />
+      <DialogRef Id="MaintenanceTypeDlg" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+
+      <!-- fresh-install chain -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LanguageDlg">NOT Installed</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">Installed AND PATCH</Publish>
+
+      <Publish Dialog="LanguageDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+      <Publish Dialog="LanguageDlg" Control="Next" Event="NewDialog" Value="GCloudDlg">1</Publish>
+
+      <!-- Google Cloud SDK page: the bundled installer must be run (or the
+           SDK declared already present) before the wizard moves on. -->
+      <Publish Dialog="GCloudDlg" Control="Back" Event="NewDialog" Value="LanguageDlg">1</Publish>
+      <Publish Dialog="GCloudDlg" Control="InstallSdkBtn" Event="DoAction" Value="RunGCloudInstaller" Order="1">1</Publish>
+      <Publish Dialog="GCloudDlg" Control="InstallSdkBtn" Property="GCLOUD_DONE" Value="1" Order="2">1</Publish>
+      <Publish Dialog="GCloudDlg" Control="InstallSdkBtn" Event="SpawnDialog" Value="GCloudDoneDlg" Order="3">1</Publish>
+      <Publish Dialog="GCloudDlg" Control="Next" Event="NewDialog" Value="ShortcutsDlg" Order="1">GCLOUD_DONE = "1" OR GCLOUD_EXISTS = "1"</Publish>
+      <Publish Dialog="GCloudDlg" Control="Next" Event="SpawnDialog" Value="MustInstallGCloudDlg" Order="2">GCLOUD_DONE &lt;&gt; "1" AND GCLOUD_EXISTS &lt;&gt; "1"</Publish>
+
+      <Publish Dialog="ShortcutsDlg" Control="Back" Event="NewDialog" Value="GCloudDlg">1</Publish>
+      <Publish Dialog="ShortcutsDlg" Control="Next" Event="NewDialog" Value="GoogleDlg">1</Publish>
+
+      <!-- Google page: Validate runs the CA then shows its message; Next only
+           proceeds once validated (or explicitly skipped via the warning page). -->
+      <Publish Dialog="GoogleDlg" Control="Back" Event="NewDialog" Value="ShortcutsDlg">1</Publish>
+      <Publish Dialog="GoogleDlg" Control="ValidateBtn" Event="DoAction" Value="ValidateGoogle" Order="1">1</Publish>
+      <Publish Dialog="GoogleDlg" Control="ValidateBtn" Event="SpawnDialog" Value="ValidateResultDlg" Order="2">1</Publish>
+      <Publish Dialog="GoogleDlg" Control="SkipBtn" Event="NewDialog" Value="GoogleSkipWarnDlg">1</Publish>
+      <Publish Dialog="GoogleDlg" Control="Next" Property="GOOGLE_SKIPPED" Value="0" Order="1">GOOGLE_VALID = "1"</Publish>
+      <Publish Dialog="GoogleDlg" Control="Next" Event="NewDialog" Value="ResolutionDlg" Order="2">GOOGLE_VALID = "1"</Publish>
+      <Publish Dialog="GoogleDlg" Control="Next" Event="SpawnDialog" Value="MustValidateDlg" Order="3">GOOGLE_VALID &lt;&gt; "1"</Publish>
+
+      <Publish Dialog="GoogleSkipWarnDlg" Control="Back" Event="NewDialog" Value="GoogleDlg">1</Publish>
+      <Publish Dialog="GoogleSkipWarnDlg" Control="SkipAnywayBtn" Property="GOOGLE_SKIPPED" Value="1" Order="1">1</Publish>
+      <Publish Dialog="GoogleSkipWarnDlg" Control="SkipAnywayBtn" Event="NewDialog" Value="ResolutionDlg" Order="2">1</Publish>
+
+      <Publish Dialog="ResolutionDlg" Control="Back" Event="NewDialog" Value="GoogleSkipWarnDlg">GOOGLE_SKIPPED = "1"</Publish>
+      <Publish Dialog="ResolutionDlg" Control="Back" Event="NewDialog" Value="GoogleDlg">GOOGLE_SKIPPED &lt;&gt; "1"</Publish>
+      <Publish Dialog="ResolutionDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ResolutionDlg" Order="1">NOT Installed</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed AND NOT PATCH</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3">Installed AND PATCH</Publish>
+
+      <!-- maintenance (repair / remove) -->
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="RemoveOptionsDlg">1</Publish>
+      <Publish Dialog="RemoveOptionsDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
+      <Publish Dialog="RemoveOptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
+
+      <!-- ______________ Language ______________ -->
+      <Dialog Id="LanguageDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Video language" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose the language of the video output." />
+        <Control Id="Explain" Type="Text" X="25" Y="60" Width="320" Height="30" NoPrefix="yes"
+                 Text="The selected language applies to the delta overlay labels and to the YouTube video title and description. The configuration files and everything else stay in English." />
+        <Control Id="LangLabel" Type="Text" X="25" Y="100" Width="100" Height="12" NoPrefix="yes" Text="Language:" />
+        <Control Id="LangCombo" Type="ComboBox" X="25" Y="114" Width="180" Height="16" Property="OUTPUT_LANGUAGE" ComboList="yes" Sorted="no">
+          <ComboBox Property="OUTPUT_LANGUAGE">
+            <ListItem Text="English (default)" Value="en" />
+            <ListItem Text="Portuguese (Português)" Value="pt" />
+            <ListItem Text="Spanish (Español)" Value="es" />
+            <ListItem Text="Japanese" Value="ja" />
+            <ListItem Text="Arabic" Value="ar" />
+            <ListItem Text="French (Français)" Value="fr" />
+            <ListItem Text="Italian (Italiano)" Value="it" />
+            <ListItem Text="Russian" Value="ru" />
+          </ComboBox>
+        </Control>
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Google Cloud SDK ______________ -->
+      <Dialog Id="GCloudDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Google Cloud SDK" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="The Google Cloud SDK is installed first." />
+        <Control Id="Explain" Type="Text" X="25" Y="56" Width="320" Height="50" NoPrefix="yes"
+                 Text="Setup will now run the bundled Google Cloud SDK installer for Windows. Follow its wizard and return here when it finishes - the Google API configuration in the next steps relies on it.
+
+Click the button below to start it." />
+        <Control Id="InstallSdkBtn" Type="PushButton" X="25" Y="112" Width="150" Height="20" Text="&amp;Install Google Cloud SDK" />
+        <Control Id="ExistsCheck" Type="CheckBox" X="25" Y="142" Width="320" Height="17" Property="GCLOUD_EXISTS" CheckBoxValue="1"
+                 Text="The Google Cloud SDK is already installed on this computer" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- Modal: shown after the SDK installer exits. -->
+      <Dialog Id="GCloudDoneDlg" Width="300" Height="105" Title="Google Cloud SDK">
+        <Control Id="Msg" Type="Text" X="15" Y="15" Width="270" Height="55" NoPrefix="yes"
+                 Text="The Google Cloud SDK installer has finished. If it completed successfully, click Next to continue; otherwise run it again." />
+        <Control Id="OK" Type="PushButton" X="122" Y="78" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIOK)">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- Modal: Next pressed before the SDK was installed. -->
+      <Dialog Id="MustInstallGCloudDlg" Width="300" Height="105" Title="Google Cloud SDK required">
+        <Control Id="Msg" Type="Text" X="15" Y="15" Width="270" Height="55" NoPrefix="yes"
+                 Text="Install the Google Cloud SDK first (button above), or tick 'already installed' if it is present on this computer." />
+        <Control Id="OK" Type="PushButton" X="122" Y="78" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIOK)">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Shortcuts ______________ -->
+      <Dialog Id="ShortcutsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Shortcuts" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose which shortcuts to create." />
+        <Control Id="StartMenuCheck" Type="CheckBox" X="25" Y="70" Width="290" Height="17" Property="STARTMENU_SHORTCUT" CheckBoxValue="1" Text="Create a Start Menu shortcut" />
+        <Control Id="DesktopCheck" Type="CheckBox" X="25" Y="92" Width="290" Height="17" Property="DESKTOP_SHORTCUT" CheckBoxValue="1" Text="Create a Desktop icon" />
+        <Control Id="Note" Type="Text" X="25" Y="120" Width="320" Height="20" NoPrefix="yes"
+                 Text="The shortcuts start the zero-touch pipeline (myoverlay run)." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Google API setup ______________ -->
+      <Dialog Id="GoogleDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Google API configuration (YouTube upload)" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="One-time setup so rendered videos can be published to YouTube." />
+        <Control Id="Steps" Type="Text" X="25" Y="52" Width="330" Height="98" NoPrefix="yes" Text="{\WixUI_Font_Small}1. Open https://console.cloud.google.com and sign in with your Google account.
+2. Create a project (any name, e.g. myoverlay).
+3. APIs &amp; Services > Library: search 'YouTube Data API v3' and click Enable.
+4. APIs &amp; Services > OAuth consent screen: choose External, fill in the app name and your e-mail, add yourself as a test user, then Publish the app (otherwise access expires every 7 days).
+5. APIs &amp; Services > Credentials > Create credentials > OAuth client ID > Application type: Desktop app.
+6. Click the download icon and save the client_secret_....json file.
+7. Enter the full path of the downloaded file below and click Validate." />
+        <Control Id="PathLabel" Type="Text" X="25" Y="156" Width="320" Height="12" NoPrefix="yes" Text="Path to the downloaded client_secret JSON file:" />
+        <Control Id="PathEdit" Type="Edit" X="25" Y="170" Width="250" Height="16" Property="GOOGLE_CLIENT_SECRET" Text="{260}" />
+        <Control Id="ValidateBtn" Type="PushButton" X="282" Y="169" Width="60" Height="18" Text="&amp;Validate" />
+        <Control Id="SkipBtn" Type="PushButton" X="25" Y="196" Width="120" Height="18" Text="S&amp;kip this step" />
+        <Control Id="SkipNote" Type="Text" X="152" Y="199" Width="205" Height="20" NoPrefix="yes" Text="{\WixUI_Font_Small}You can configure it later (see the README)." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- Modal: result of the Validate button (message set by the CA). -->
+      <Dialog Id="ValidateResultDlg" Width="300" Height="105" Title="Google configuration check">
+        <Control Id="Msg" Type="Text" X="15" Y="15" Width="270" Height="55" NoPrefix="yes" Text="[GOOGLE_VALID_MSG]" />
+        <Control Id="OK" Type="PushButton" X="122" Y="78" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIOK)">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- Modal: Next pressed without a valid (or skipped) Google config. -->
+      <Dialog Id="MustValidateDlg" Width="300" Height="105" Title="Google configuration required">
+        <Control Id="Msg" Type="Text" X="15" Y="15" Width="270" Height="55" NoPrefix="yes"
+                 Text="Validate the Google configuration to continue, or use 'Skip this step' if you do not want YouTube publishing." />
+        <Control Id="OK" Type="PushButton" X="122" Y="78" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIOK)">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Skip warning ______________ -->
+      <Dialog Id="GoogleSkipWarnDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Warning: YouTube publishing will be disabled" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="You chose to skip the Google API configuration." />
+        <Control Id="WarnText" Type="Text" X="25" Y="60" Width="320" Height="60" NoPrefix="yes"
+                 Text="Without a validated Google API configuration, video publication to YouTube will NOT be available. The rest of the pipeline (ingest, telemetry sync, overlay render) works normally.
+
+You can enable publishing later: follow the 'YouTube setup' section of the README, then place the client_secret.json where the app tells you." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="SkipAnywayBtn" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="&amp;Skip anyway" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Remove options (uninstall) ______________ -->
+      <Dialog Id="RemoveOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Uninstall options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose what to remove." />
+        <Control Id="Explain" Type="Text" X="25" Y="56" Width="320" Height="50" NoPrefix="yes"
+                 Text="Uninstalling removes everything the software installed: the application, its shortcuts, and its working data (the pipeline copy, config.toml and Google credentials under %LOCALAPPDATA%\myoverlay)." />
+        <Control Id="GCloudCheck" Type="CheckBox" X="25" Y="112" Width="320" Height="17" Property="REMOVE_GCLOUD" CheckBoxValue="1"
+                 Text="Also uninstall the Google Cloud SDK" />
+        <Control Id="GCloudNote" Type="Text" X="37" Y="130" Width="308" Height="20" NoPrefix="yes"
+                 Text="{\WixUI_Font_Small}Leave unchecked if other tools on this computer use it." />
+        <Control Id="DataNote" Type="Text" X="25" Y="158" Width="320" Height="30" NoPrefix="yes"
+                 Text="Your videos and telemetry are NOT touched: the media library folder (library_root) and the Race Studio 3 data stay exactly as they are." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Resolution ______________ -->
+      <Dialog Id="ResolutionDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Default output resolution" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose the default resolution of rendered videos." />
+        <Control Id="Explain" Type="Text" X="25" Y="60" Width="320" Height="30" NoPrefix="yes"
+                 Text="Footage is scaled to this height when rendering the overlay. It can be changed later in config.toml or per render with --resolution." />
+        <Control Id="ResLabel" Type="Text" X="25" Y="100" Width="100" Height="12" NoPrefix="yes" Text="Resolution:" />
+        <Control Id="ResCombo" Type="ComboBox" X="25" Y="114" Width="180" Height="16" Property="RESOLUTION" ComboList="yes" Sorted="no">
+          <ComboBox Property="RESOLUTION">
+            <ListItem Text="hd (720p)" Value="hd" />
+            <ListItem Text="fhd (1080p)" Value="fhd" />
+            <ListItem Text="2k (1440p) - default" Value="2k" />
+            <ListItem Text="4k (2160p)" Value="4k" />
+          </ComboBox>
+        </Control>
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>

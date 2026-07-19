@@ -19,7 +19,7 @@ import pandas as pd
 from .encoding import encoder_args
 from .library import DayManifest, Library, RenderOutput, TrackSession, VideoClip, utcnow
 from .overlay import FrameValues, OverlayRenderer, TrackProjection
-from .telemetry import DayFrame, complete_laps, load_day_frame, opened_laps
+from .telemetry import DayFrame, load_day_frame, opened_laps, valid_laps
 
 
 @dataclass
@@ -122,14 +122,11 @@ def sample_timeline(
     # never counted as best or delta reference.
     # Only laps the MyChron opened AND closed with a beacon crossing count as
     # best / delta reference (drops the out-lap and the in-lap fragment).
-    valid_complete = complete_laps(laps)
-    durations = sorted(e - st for _, st, e in valid_complete)
-    median_dur = durations[len(durations) // 2] if durations else 0.0
-    full_laps = [
-        (n, st, e)
-        for n, st, e in valid_complete
-        if median_dur == 0.0 or (e - st) >= 0.6 * median_dur
-    ]
+    # Eligible laps (complete + >= 0.6x median). The min_lap_s floor is applied
+    # separately by lap_valid() below, so a sub-minimum lap still shows (flagged
+    # invalid) in the recent-laps list yet never wins best/delta. valid_laps()
+    # is the single source of truth shared with the title and the review UI.
+    full_laps = valid_laps(laps)
 
     def lap_valid(st: float, e: float) -> bool:
         return min_lap_s <= 0.0 or (e - st) >= min_lap_s
@@ -404,6 +401,9 @@ def render_clip(
     force: bool = False,
     window_start_s: float = 0.0,
     window_end_s: float = 0.0,
+    title: str | None = None,
+    description: str | None = None,
+    append_best_lap: bool = True,
 ) -> Path:
     assert clip.sync is not None
     video = day_dir / clip.file
@@ -518,6 +518,7 @@ def render_clip(
         font_path=cfg.render.font_path,
         max_speed_kmh=max_speed_kmh,
         channels=channels,
+        language=cfg.language,
     )
 
     dest = day_dir / "out" / f"{video.stem}_{suffix}.mp4"
@@ -555,6 +556,9 @@ def render_clip(
             ),
             rendered_at=utcnow(),
             source_videos=[clip.file],
+            title=title,
+            description=description,
+            append_best_lap=append_best_lap,
         )
     )
     return dest
@@ -577,8 +581,11 @@ class RaceAlreadyRunning(Exception):
 
 
 def _valid_laps_before(laps, cutoff_s: float, min_lap_s: float) -> list:
-    """Session laps that fully completed before cutoff_s (video start),
-    excluding out/in-lap fragments (same validity as the overlay)."""
+    """Laps that ended before cutoff_s (video start), used only by the
+    mis-sync guard. This is deliberately NOT best-lap eligibility (valid_laps /
+    complete_laps): the guard must fire on ANY real lap progress before the
+    clip starts - even a single beacon crossing means the race was underway -
+    so it filters by a plausible duration floor, not by beacon open+close."""
     durs = sorted(e - st for _, st, e in laps)
     median = durs[len(durs) // 2] if durs else 0.0
     floor = max(min_lap_s, 0.6 * median if median else 0.0)

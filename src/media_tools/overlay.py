@@ -21,6 +21,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from . import i18n
+
 WHITE = (255, 255, 255, 255)
 DIM = (255, 255, 255, 140)
 PANEL = (0, 0, 0, 110)
@@ -139,6 +141,7 @@ class OverlayRenderer:
         font_path: Path | None = None,
         max_speed_kmh: float = 80.0,
         channels: set[str] | None = None,
+        language: str = "en",
     ):
         # channels: which telemetry channels exist for this DAY ("speed",
         # "g", "steering"). When given, those widgets' chrome is drawn from
@@ -146,13 +149,15 @@ class OverlayRenderer:
         # appear the instant coverage begins. When None (legacy/tests), each
         # widget shows only on frames that carry its value.
         self.channels = channels
+        self.language = language
+        self._t = i18n.strings(language)
         self.w = width
         self.h = height
         self.s = height / 1080.0
         self.max_rpm = max_rpm
         self.max_speed_kmh = max_speed_kmh
         self._fonts: dict[int, ImageFont.FreeTypeFont] = {}
-        self._font_path = self._resolve_font(font_path)
+        self._font_path = self._resolve_font(font_path, language)
         self._map_size = int(240 * self.s)
         self._map_base = self._build_map(track_frac) if track_frac is not None else None
         self._static_cache: dict[tuple, Image.Image] = {}
@@ -175,12 +180,21 @@ class OverlayRenderer:
         self.g_cy = height - self.pad - int(44 * s) - g_size // 2
 
     @staticmethod
-    def _resolve_font(font_path: Path | None) -> str | None:
-        candidates = ([str(font_path)] if font_path else []) + _FONT_CANDIDATES
+    def _resolve_font(font_path: Path | None, language: str = "en") -> str | None:
+        # An explicit font_path always wins; otherwise languages Arial cannot
+        # render (CJK) get their capable fonts tried first.
+        candidates = (
+            ([str(font_path)] if font_path else [])
+            + i18n.FONT_CANDIDATES.get(language, [])
+            + _FONT_CANDIDATES
+        )
         for cand in candidates:
             if Path(cand).is_file():
                 return cand
         return None
+
+    def _tr(self, key: str) -> str:
+        return i18n.shape_text(self._t[key], self.language)
 
     def _font(self, size: int) -> ImageFont.ImageFont:
         size = max(10, int(size * self.s))
@@ -309,9 +323,9 @@ class OverlayRenderer:
         if self._map_base is not None:
             img.alpha_composite(self._map_base, (self.pad, self.pad))
         if has_sd:
-            self._ruler_static(draw, self.speed_ruler_x, self.pad, "Speed delta")
+            self._ruler_static(draw, self.speed_ruler_x, self.pad, self._tr("speed_delta"))
         if has_td:
-            self._ruler_static(draw, self.time_ruler_x, self.pad, "Time delta")
+            self._ruler_static(draw, self.time_ruler_x, self.pad, self._tr("time_delta"))
         if has_g:
             self._g_static(draw)
         if has_speed:
@@ -368,7 +382,7 @@ class OverlayRenderer:
             self._shadow_text(
                 draw,
                 (pad + self._map_size / 2, pad + self._map_size + int(14 * s)),
-                "sem telemetria",
+                self._tr("no_telemetry"),
                 self._font(26),
                 DIM,
                 anchor="ma",
@@ -410,13 +424,13 @@ class OverlayRenderer:
         if v.lap_num is not None:
             right = self.w - pad
             y = pad
-            rows = [("Atual", v.lap_num, v.lap_time_s, 56, WHITE)]
+            rows = [(self._tr("current"), v.lap_num, v.lap_time_s, 56, WHITE)]
             if v.prev_lap is not None:
                 p_num, p_dur, p_valid = v.prev_lap
                 color = WHITE if p_valid else (255, 110, 110, 255)
-                rows.append(("Anterior", p_num, p_dur, 44, color))
+                rows.append((self._tr("previous"), p_num, p_dur, 44, color))
             if v.best_lap_s is not None:
-                rows.append(("Melhor", v.best_lap_num, v.best_lap_s, 44, WHITE))
+                rows.append((self._tr("best"), v.best_lap_num, v.best_lap_s, 44, WHITE))
             label_x = right - int(300 * s)
             for label, num, seconds, size, color in rows:
                 self._shadow_text(draw, (label_x, y), label, self._font(28), WHITE)

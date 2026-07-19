@@ -102,6 +102,13 @@ class RenderOutput(BaseModel):
     label: str | None = None
     rendered_at: datetime
     source_videos: list[str] = Field(default_factory=list)
+    # Per-item overrides chosen in the review GUI. When title is set, publish
+    # uses it verbatim as the base title instead of the template; description
+    # likewise overrides the templated body; append_best_lap adds the best lap
+    # to the title. None/default preserves the legacy templated behaviour.
+    title: str | None = None
+    description: str | None = None
+    append_best_lap: bool = True
 
 
 class PublishRecord(BaseModel):
