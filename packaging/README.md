@@ -46,3 +46,43 @@ Downloads MinGit + ffmpeg into `packaging\vendor\` (cached), then produces
 launcher imports the pulled source against the bundled packages, so pure
 code changes reach friends via git pull, but new packages must be added to
 `PIPELINE_PACKAGES` in `myoverlay.spec` and reshipped.
+
+## MSI installer (maintainer)
+
+```
+powershell -File packaging\build_exe.ps1      # payload (if not already built)
+powershell -File packaging\msi\build_msi.ps1  # -> dist\myoverlay-setup.msi
+```
+
+`build_msi.ps1` downloads the WiX 3.14 binaries into `packaging\vendor\wix`
+(cached), harvests `dist\myoverlay\` and links `dist\myoverlay-setup.msi`.
+
+The setup wizard asks for:
+
+1. **Video language** (en default, pt/es/ja/ar/fr/it/ru) — applies to the
+   delta overlay labels and the YouTube title/description defaults only;
+   config and CLI stay English.
+2. **Google Cloud SDK** — the official Windows installer
+   (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
+   launched and must complete before the wizard continues (an
+   "already installed" checkbox skips it).
+3. **Start Menu / Desktop shortcuts** (they launch `myoverlay run`).
+4. **Google API configuration** — step-by-step Cloud Console instructions,
+   a Validate button that checks the client_secret JSON is a Desktop-app
+   OAuth client, and a Skip button that warns YouTube publishing will be
+   unavailable.
+5. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
+
+The choices are written to `install_settings.json` next to the installed
+exe; the launcher applies them when it creates `config.toml` on first run
+(language, resolution, and it copies the validated client secret to the
+repo as `client_secret.json`).
+
+**Uninstall** (Programs and Features > Change > Remove — the Uninstall
+button is hidden so the options page is always shown) removes everything
+the software installed: app files, shortcuts, `install_settings.json`, and
+`%LOCALAPPDATA%\myoverlay` (pipeline clone, config.toml, Google
+credentials). A checkbox on the remove-options page additionally
+uninstalls the Google Cloud SDK (unchecked by default). The media library
+(`library_root` — videos/telemetry) and Race Studio 3 data are never
+touched.

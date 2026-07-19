@@ -18,7 +18,12 @@ dependencies = [
     "numpy>=1.26",
     "google-api-python-client>=2.150",
     "google-auth-oauthlib>=1.2",
+    # Arabic overlay text shaping (language = "ar")
+    "arabic-reshaper>=3.0",
+    "python-bidi>=0.6",
     "pywinauto>=0.6.9; sys_platform == 'win32'",
+    # `mt google-setup` Console automation (post-install: playwright install chromium)
+    "playwright>=1.49",
 ]
 
 [project.scripts]
