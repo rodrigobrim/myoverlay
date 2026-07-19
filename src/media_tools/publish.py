@@ -21,7 +21,7 @@ from .config import Config
 from .i18n import strings as i18n_strings
 from .library import DayManifest, PublishRecord, utcnow
 from .overlay import fmt_laptime
-from .telemetry import complete_laps, session_laps
+from .telemetry import best_lap, session_laps_derived
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
@@ -38,26 +38,23 @@ class TitleContext:
 
 
 def _title_context(
-    manifest: DayManifest, session_id: int | None, min_lap_s: float = 0.0
+    day_dir: Path, manifest: DayManifest, session_id: int | None, min_lap_s: float = 0.0
 ) -> TitleContext:
-    durations = []
+    # Best lap via the single source of truth (telemetry.best_lap) over the
+    # S/F-relap-corrected laps (session_laps_derived), so the title's best lap
+    # is exactly the one the overlay shows - never the raw early-beacon lap.
+    best_s: float | None = None
     for session in manifest.sessions:
         if session_id is None or session.id == session_id:
-            laps = complete_laps(session_laps(manifest, session))
-            durations += [e - st for _, st, e in laps]
-    # Same validity rules as the overlay: only complete (beacon opened+closed)
-    # laps, and among those drop fragments / sub-minimum laps (cut track) so
-    # neither the out-lap nor an in-lap fragment becomes the title's best lap.
-    if durations:
-        median = sorted(durations)[len(durations) // 2]
-        durations = [
-            d for d in durations if d >= 0.6 * median and (min_lap_s <= 0 or d >= min_lap_s)
-        ]
+            lap = best_lap(session_laps_derived(day_dir, manifest, session), min_lap_s)
+            if lap is not None:
+                dur = lap[2] - lap[1]
+                best_s = dur if best_s is None else min(best_s, dur)
     return TitleContext(
         track=manifest.track or "karting",
         date=manifest.date.isoformat(),
         session=session_id if session_id is not None else 0,
-        best_lap=fmt_laptime(min(durations) if durations else None),
+        best_lap=fmt_laptime(best_s),
     )
 
 
@@ -128,11 +125,14 @@ def publish_day(
     uploader: Uploader | None = None,
     dry_run: bool = False,
     clip_filter: str | None = None,
+    force: bool = False,
     save: Callable[[], None] | None = None,
 ) -> list[str]:
     report: list[str] = []
     published_files = {p.file for p in manifest.publishes}
-    pending = [r for r in manifest.renders if r.file not in published_files]
+    # force re-uploads renders already on YouTube (e.g. a re-rendered clip):
+    # the prior publish record is kept and a new video is created alongside it.
+    pending = [r for r in manifest.renders if force or r.file not in published_files]
     if clip_filter:
         pending = [r for r in pending if clip_filter.lower() in r.file.lower()]
     if not pending:
@@ -154,7 +154,7 @@ def publish_day(
                 f"! {render.file}: source clip has no telemetry sync, refusing to upload"
             )
             continue
-        ctx = _title_context(manifest, render.session_id, cfg.render.min_lap_s)
+        ctx = _title_context(day_dir, manifest, render.session_id, cfg.render.min_lap_s)
         values = {
             "track": ctx.track,
             "date": ctx.date,
@@ -167,8 +167,17 @@ def publish_day(
         t = i18n_strings(cfg.language)
         title_template = cfg.youtube.title_template or t["title_template"]
         description_template = cfg.youtube.description_template or t["description_template"]
-        title = title_template.format(**values)
-        description = description_template.format(**values)
+        # A review-GUI item title (render.title) is used verbatim as the base
+        # title; the best lap is appended only when the item asks for it. A
+        # template title already carries the best lap inside it, so it is not
+        # re-appended. render.description likewise overrides the templated body.
+        if render.title:
+            title = render.title
+            if render.append_best_lap and ctx.best_lap != "-:--.--":
+                title = f"{title} - {ctx.best_lap}"
+        else:
+            title = title_template.format(**values)
+        description = render.description or description_template.format(**values)
         if render.lap_num is not None:
             title = f"{title} - {t['lap_word']} {render.lap_num}"
         if render.label:

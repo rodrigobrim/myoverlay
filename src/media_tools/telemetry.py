@@ -150,6 +150,35 @@ class DayFrame:
 ENGINE_LIKE_COLUMNS = ("speed_ms", "rpm", "jackshaft")
 
 
+def _derived_laps(
+    xrk_path: Path, base: float
+) -> list[tuple[int, float, float]] | None:
+    """Corrected overlay laps from a sibling S/F-relapped export, if present.
+
+    A standalone step re-derives the lap boundaries at the real start/finish
+    (the .xrk pins the S/F deliberately early) and writes
+    `<stem>.sf-relapped.parquet` next to the .xrk, carrying the corrected lap
+    table in the file metadata (lap times in ms since log start). When that
+    file exists the overlay consumes these laps instead of the early .xrk
+    beacon laps; otherwise returns None and the caller falls back to the .xrk.
+    """
+    derived = xrk_path.with_name(xrk_path.stem + ".sf-relapped.parquet")
+    if not derived.is_file():
+        return None
+    import json
+
+    import pyarrow.parquet as pq
+
+    meta = pq.read_schema(derived).metadata or {}
+    raw = meta.get(b"laps")
+    if not raw:
+        return None
+    return [
+        (lp["num"], base + lp["start_time"] / 1000.0, base + lp["end_time"] / 1000.0)
+        for lp in json.loads(raw)
+    ]
+
+
 def load_day_frame(day_dir: Path, manifest) -> DayFrame:
     import numpy as np
 
@@ -177,8 +206,12 @@ def load_day_frame(day_dir: Path, manifest) -> DayFrame:
             parts.append(gap)
         parts.append(df)
         prev_end_s = float(df["t_s"].iloc[-1])
-        for lap in log.laps:
-            laps.append((lap.num, base + lap.start_s, base + lap.end_s))
+        derived = _derived_laps(day_dir / log.file, base)
+        if derived is not None:
+            laps.extend(derived)
+        else:
+            for lap in log.laps:
+                laps.append((lap.num, base + lap.start_s, base + lap.end_s))
 
     merged = pd.concat(parts, ignore_index=True).sort_values("t_s").reset_index(drop=True)
     laps.sort(key=lambda x: x[1])
@@ -214,6 +247,31 @@ def session_laps(manifest, session) -> list[tuple[int, float, float]]:
         base = (log.start_utc - session.start_utc).total_seconds()
         for lap in log.laps:
             laps.append((lap.num, base + lap.start_s, base + lap.end_s))
+    laps.sort(key=lambda x: x[1])
+    return laps
+
+
+def session_laps_derived(
+    day_dir: Path, manifest, session
+) -> list[tuple[int, float, float]]:
+    """session_laps, but S/F-relap-corrected.
+
+    If a `<stem>.sf-relapped.parquet` sits next to a log's .xrk, its corrected
+    lap table is used (the same laps the overlay renders via load_day_frame),
+    otherwise the raw .xrk beacon laps. Use this - not session_laps - anywhere
+    a best lap is derived, so the title and the video never disagree.
+    """
+    laps: list[tuple[int, float, float]] = []
+    for log in manifest.telemetry:
+        if log.session_id != session.id or not log.start_utc:
+            continue
+        base = (log.start_utc - session.start_utc).total_seconds()
+        derived = _derived_laps(day_dir / log.file, base)
+        if derived is not None:
+            laps.extend(derived)
+        else:
+            for lap in log.laps:
+                laps.append((lap.num, base + lap.start_s, base + lap.end_s))
     laps.sort(key=lambda x: x[1])
     return laps
 
@@ -255,6 +313,44 @@ def opened_laps(
     return [
         (n, st, e) for n, st, e in laps if any(abs(en - st) <= eps for en in ends)
     ]
+
+
+def valid_laps(
+    laps: list[tuple[int, float, float]], min_lap_s: float = 0.0
+) -> list[tuple[int, float, float]]:
+    """Laps eligible to be the best lap or a delta reference - the single rule
+    shared by the overlay, the YouTube title and the race-start guard.
+
+    A lap qualifies when it is complete (opened AND closed by a beacon
+    crossing, see complete_laps), is at least 0.6x the median complete-lap
+    duration (drops a truncated fragment), and is not faster than min_lap_s (a
+    cut-track / timing glitch is physically impossible for the circuit).
+    min_lap_s <= 0 disables that floor.
+    """
+    complete = complete_laps(laps)
+    if not complete:
+        return []
+    durations = sorted(e - st for _, st, e in complete)
+    median = durations[len(durations) // 2]
+    return [
+        (n, st, e)
+        for n, st, e in complete
+        if (median == 0.0 or (e - st) >= 0.6 * median)
+        and (min_lap_s <= 0.0 or (e - st) >= min_lap_s)
+    ]
+
+
+def best_lap(
+    laps: list[tuple[int, float, float]], min_lap_s: float = 0.0
+) -> tuple[int, float, float] | None:
+    """The fastest valid lap (see valid_laps), or None.
+
+    THE single source of truth for "best lap" - the overlay, the YouTube
+    title and the review UI all resolve the best lap through this function so
+    they can never disagree.
+    """
+    valid = valid_laps(laps, min_lap_s)
+    return min(valid, key=lambda lap: lap[2] - lap[1]) if valid else None
 
 
 def export_gpx(df: pd.DataFrame, start_utc: datetime, dest: Path) -> Path:
