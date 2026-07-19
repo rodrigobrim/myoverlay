@@ -95,6 +95,143 @@ def ingest(
         _print_ingest_report("mychron", ingest_mychron(cfg))
 
 
+@app.command()
+def scan(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List NEW camera + telemetry content (read-only), correlated by video.
+
+    Nothing is copied or written - this is the pre-download review gate.
+    Telemetry with no matching video is flagged 'orphan': it is still committed
+    on ingest, it just yields no render item."""
+    from .scan import scan_new
+
+    cfg = get_config()
+    result = scan_new(cfg)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    from rich.tree import Tree
+
+    if not result.video_groups and not result.orphan_telemetry:
+        console.print("[dim]nothing new to ingest[/dim]")
+        return
+    tree = Tree(f"[bold]new content[/bold] ({result.date_guess or '?'})")
+    for g in result.video_groups:
+        dur = f"{g.video.duration_s:.0f}s" if g.video.duration_s else "?"
+        node = tree.add(f"[cyan]{g.video.source_name}[/cyan] ({dur})")
+        if not g.telemetry:
+            node.add("[yellow]no telemetry[/yellow]")
+        for t in g.telemetry:
+            node.add(f"{t.source_name} - {t.lap_count} laps, best {t.best_lap}")
+    if result.orphan_telemetry:
+        orphan = tree.add("[yellow]orphan telemetry[/yellow] (committed on ingest, no video)")
+        for t in result.orphan_telemetry:
+            orphan.add(f"{t.source_name} - {t.lap_count} laps, best {t.best_lap}")
+    console.print(tree)
+
+
+@app.command()
+def plan(
+    day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
+    json_out: Annotated[bool, typer.Option("--json", help="Machine-readable JSON (for the GUI)")] = False,
+    emit: Annotated[
+        Optional[Path],
+        typer.Option("--emit", help="Write the plan to this file (default work/render_plan.json)"),
+    ] = None,
+):
+    """Build the render-plan queue (review Gate 2) - one item per synced clip."""
+    from .reviewplan import build_plan, save_plan
+
+    cfg = get_config()
+    lib = Library(cfg.library_root)
+    d = date.fromisoformat(day)
+    manifest = lib.load_day(d)
+    day_dir = lib.day_dir(d)
+    plan_obj = build_plan(cfg, day_dir, manifest)
+    if json_out:
+        typer.echo(plan_obj.model_dump_json())
+        return
+    if emit is not None:
+        emit.write_text(plan_obj.model_dump_json(indent=2), encoding="utf-8")
+        dest = emit
+    else:
+        dest = save_plan(day_dir, plan_obj)
+    console.print(f"[bold]{d}[/bold]: {len(plan_obj.items)} item(s) -> {dest}")
+    for it in plan_obj.items:
+        console.print(f"  {it.item_id}  [dim]{it.quality}, best {it.best_lap}[/dim]")
+
+
+@app.command(name="best-lap")
+def best_lap_cmd(
+    day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
+    session: Annotated[Optional[int], typer.Option("--session", help="Session id; default all")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+):
+    """Best lap (the single source of truth) per session, S/F-relap-aware."""
+    import json as _json
+
+    from .overlay import fmt_laptime
+    from .telemetry import best_lap, session_laps_derived
+
+    cfg = get_config()
+    lib = Library(cfg.library_root)
+    d = date.fromisoformat(day)
+    manifest = lib.load_day(d)
+    day_dir = lib.day_dir(d)
+    out: dict[int, str] = {}
+    for s in manifest.sessions:
+        if session is not None and s.id != session:
+            continue
+        bl = best_lap(session_laps_derived(day_dir, manifest, s), cfg.render.min_lap_s)
+        out[s.id] = fmt_laptime((bl[2] - bl[1]) if bl else None)
+    if json_out:
+        typer.echo(_json.dumps(out))
+        return
+    for sid, bl in out.items():
+        console.print(f"session {sid}: best lap {bl}")
+
+
+@app.command()
+def gui():
+    """Launch the desktop review GUI (Gate 1 content review + Gate 2 render plan)."""
+    try:
+        from .gui import main
+    except ImportError as exc:
+        console.print(f"[red]GUI unavailable: {exc}[/red]")
+        console.print(
+            "[dim]The frozen exe must be built with tkinter "
+            "(remove it from excludes in packaging/myoverlay.spec and rebuild).[/dim]"
+        )
+        raise typer.Exit(1)
+    main()
+
+
+@app.command(name="google-setup")
+def google_setup(
+    troubleshoot: Annotated[
+        bool,
+        typer.Option(
+            "--troubleshoot",
+            help="Snapshot every Console step into <library>/gcp_troubleshoot/ "
+            "to understand/refine the procedure when Google shifts the UI",
+        ),
+    ] = False,
+):
+    """Configure the Google side of `mt publish` by driving the Cloud Console
+    (consent screen + Desktop OAuth client + client_secret.json download).
+    Sign-in is the one manual step: do it in the window that opens."""
+    from .gcp_console import setup_google_api
+
+    cfg = get_config()
+    console.print("[bold]google-setup[/bold]:")
+    for line in setup_google_api(cfg, troubleshoot=troubleshoot):
+        console.print(f"  {line}", markup=False)
+
+
 @app.command(name="join")
 def join_cmd(
     day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
@@ -283,12 +420,37 @@ def render(
         Optional[int],
         typer.Option("--crf", help="Override quality (lower = higher quality; libx264 CRF / nvenc CQ)"),
     ] = None,
+    plan_file: Annotated[
+        Optional[Path],
+        typer.Option("--plan", help="Execute an edited render plan (work/render_plan.json)"),
+    ] = None,
 ):
-    """Render telemetry overlays onto synced clips."""
+    """Render telemetry overlays onto synced clips (or an edited --plan)."""
     from .render import render_day
     from .slice import parse_timestamp
 
     cfg = get_config()
+    if plan_file is not None:
+        from .reviewplan import execute_item, load_plan
+        from .telemetry import load_day_frame
+
+        if not day:
+            console.print("[red]--plan requires a DAY[/red]")
+            raise typer.Exit(2)
+        lib = Library(cfg.library_root)
+        d = date.fromisoformat(day)
+        manifest = lib.load_day(d)
+        day_dir = lib.day_dir(d)
+        plan_obj = load_plan(plan_file)
+        dayframe = load_day_frame(day_dir, manifest)
+        console.print(f"[bold]{d}[/bold] (plan {plan_file.name}):")
+        for item in plan_obj.items:
+            line = execute_item(
+                cfg, manifest, day_dir, dayframe, item,
+                save=lambda m=manifest: lib.save_day(m),
+            )
+            console.print(f"  {line}")
+        return
     window_start_s = parse_timestamp(sample_from) if sample_from else 0.0
     window_end_s = parse_timestamp(sample_to) if sample_to else 0.0
     if scan_race_end is not None:
@@ -392,6 +554,10 @@ def slice_cmd(
 def publish(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
     dry_run: Annotated[bool, typer.Option(help="Show what would be uploaded")] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Re-upload renders even if already published (a fresh video)"),
+    ] = False,
     clip: Annotated[
         Optional[str],
         typer.Option("--clip", help="Only publish renders whose file name contains this substring"),
@@ -407,7 +573,7 @@ def publish(
         manifest = lib.load_day(d)
         lines = publish_day(
             cfg, manifest, lib.day_dir(d), dry_run=dry_run, clip_filter=clip,
-            save=lambda m=manifest: lib.save_day(m),
+            force=force, save=lambda m=manifest: lib.save_day(m),
         )
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")

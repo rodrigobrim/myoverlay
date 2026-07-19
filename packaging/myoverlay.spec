@@ -44,6 +44,12 @@ for pkg in PIPELINE_PACKAGES:
     binaries += b
     hiddenimports += h
 
+# The review GUI (media_tools.gui) is pulled from the repo at runtime, so
+# PyInstaller cannot see its tkinter import statically. Force tkinter + tcl/tk
+# into the bundle (the _tkinter hook pulls the tcl/tk data dirs) so
+# `myoverlay gui` works in the frozen exe.
+hiddenimports += ["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "_tkinter"]
+
 a = Analysis(
     ["myoverlay_launcher.py"],
     pathex=[],
@@ -52,7 +58,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "IPython", "pytest"],
+    excludes=["matplotlib", "IPython", "pytest"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
