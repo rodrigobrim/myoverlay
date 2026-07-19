@@ -19,7 +19,7 @@ import pandas as pd
 from .encoding import encoder_args
 from .library import DayManifest, Library, RenderOutput, TrackSession, VideoClip, utcnow
 from .overlay import FrameValues, OverlayRenderer, TrackProjection
-from .telemetry import DayFrame, load_day_frame
+from .telemetry import DayFrame, complete_laps, load_day_frame, opened_laps
 
 
 @dataclass
@@ -120,10 +120,15 @@ def sample_timeline(
     # all; laps faster than min_lap_s are physically impossible for the
     # circuit (cut track / timing glitch) - shown, but flagged invalid and
     # never counted as best or delta reference.
-    durations = sorted(e - st for _, st, e in laps)
+    # Only laps the MyChron opened AND closed with a beacon crossing count as
+    # best / delta reference (drops the out-lap and the in-lap fragment).
+    valid_complete = complete_laps(laps)
+    durations = sorted(e - st for _, st, e in valid_complete)
     median_dur = durations[len(durations) // 2] if durations else 0.0
     full_laps = [
-        (n, st, e) for n, st, e in laps if median_dur == 0.0 or (e - st) >= 0.6 * median_dur
+        (n, st, e)
+        for n, st, e in valid_complete
+        if median_dur == 0.0 or (e - st) >= 0.6 * median_dur
     ]
 
     def lap_valid(st: float, e: float) -> bool:
@@ -148,7 +153,13 @@ def sample_timeline(
             return None
         return float(arr[i])
 
+    # The current-lap timer counts only laps the MyChron opened with a crossing
+    # (a real lap in progress, incl. the in-lap); the out-lap is never timed.
+    display_laps = opened_laps(laps)
+
     frames: list[FrameValues] = []
+    started = False  # has the lap overlay begun (first active lap seen)?
+    last_lap_num: int | None = None
     for i, tv in enumerate(t_video):
         ts = t_sess[i]
         lap_num = lap_time = None
@@ -165,10 +176,12 @@ def sample_timeline(
             best_num, best = min(valid_completed, key=lambda x: x[1])
         recent = completed[-5:]
         prev_lap = completed[-1] if completed else None
-        for n, st, e in laps:
+        for n, st, e in display_laps:
             if st <= ts < e:
                 lap_num = n
                 lap_time = ts - st
+                started = True
+                last_lap_num = n
                 # Live deltas vs the reference lap at equal distance.
                 ref = reference_lap(st)
                 if ref is not None and st in profiles:
@@ -181,6 +194,17 @@ def sample_timeline(
                         ref_speed = float(np.interp(ref[1] + ref_elapsed, t, v_arr))
                         speed_delta = (float(speed[i]) - ref_speed) * 3.6
                 break
+        # Persistence: once the lap overlay has started, never hide it again.
+        # Between laps / after the stint / during a telemetry gap, hold the
+        # lap number and best/previous, and ZERO the deltas rather than
+        # dropping the widgets.
+        if started:
+            if lap_num is None:
+                lap_num = last_lap_num
+            if delta is None:
+                delta = 0.0
+            if speed_delta is None:
+                speed_delta = 0.0
         speed_v = val(speed, i)
         pos_ok = (
             pos is not None and covered[i] and np.isfinite(pos[i]).all()
@@ -208,13 +232,17 @@ def sample_timeline(
     return Timeline(frames=frames, track_frac=track_frac)
 
 
-def output_size(src_w: int, src_h: int, output_height: int | None) -> tuple[int, int]:
-    """Target frame size: capped at output_height, aspect kept, even dims,
-    never upscaled."""
-    if not output_height or output_height >= src_h:
+def output_size(src_w: int, src_h: int, target_height: int | None) -> tuple[int, int]:
+    """Frame size for a target output height. Aspect kept, even dims.
+
+    The source is scaled (up or down) to target_height, because choosing a
+    resolution preset is the explicit intent to output at that height.
+    target_height None (or equal to the source) keeps the source size.
+    """
+    if not target_height or target_height == src_h:
         return src_w, src_h
-    w = int(round(src_w * output_height / src_h / 2) * 2)
-    return w, output_height
+    w = int(round(src_w * target_height / src_h / 2) * 2)
+    return w, target_height
 
 
 def composite_stream(
@@ -229,6 +257,7 @@ def composite_stream(
     preset: str,
     codec: str = "libx264",
     scale_to: tuple[int, int] | None = None,
+    scale_flags: str = "lanczos",
 ) -> None:
     """Composite overlay frames onto the video, streaming raw RGBA frames
     into ffmpeg over stdin (no intermediate PNGs - at 60 fps the disk round
@@ -254,8 +283,9 @@ def composite_stream(
         "-i", "pipe:0",
     ]
     if scale_to:
+        flags = f":flags={scale_flags}" if scale_flags else ""
         graph = (
-            f"[0:v]scale={scale_to[0]}:{scale_to[1]}[base];"
+            f"[0:v]scale={scale_to[0]}:{scale_to[1]}{flags}[base];"
             "[base][1:v]overlay=eof_action=repeat[v]"
         )
     else:
@@ -359,6 +389,11 @@ def composite(
     tmp.replace(dest)
 
 
+# Keep this many seconds of lead-in before the first lap (the launch / race
+# start), dropping the pre-race grid staging.
+RACE_START_BUFFER_S = 15.0
+
+
 def render_clip(
     cfg,
     day_dir: Path,
@@ -366,16 +401,69 @@ def render_clip(
     clip: VideoClip,
     day: DayFrame,
     lap_num: int | None = None,
+    force: bool = False,
+    window_start_s: float = 0.0,
+    window_end_s: float = 0.0,
 ) -> Path:
     assert clip.sync is not None
     video = day_dir / clip.file
-    laps = day.laps
     df = day.df
     video_offset_s = (clip.sync.video_start_utc - day.start_utc).total_seconds()
 
-    start_s = 0.0
+    # Scope lap-based overlays (lap counter, best, previous, delta reference)
+    # to THIS clip's session. A day frame concatenates every stint of the day
+    # - often across different track layouts - so a day-wide best lap or delta
+    # reference belongs to a different heat and is meaningless here.
+    laps = day.laps
+    sess = next((s for s in manifest.sessions if s.id == clip.session_id), None)
+    if sess is not None:
+        s0 = (sess.start_utc - day.start_utc).total_seconds()
+        s1 = (sess.end_utc - day.start_utc).total_seconds()
+        laps = [(n, st, e) for (n, st, e) in day.laps if s0 - 1.0 <= st <= s1 + 1.0]
+
+    # Guard: a video whose start lands after the race is already underway
+    # (>=1 completed lap) means the auto-sync mislocated it - a race starts
+    # at zero laps. Refuse (require a manual anchor). Manual syncs are
+    # trusted and bypass the guard.
+    if lap_num is None and clip.sync.method != "manual":
+        done = _valid_laps_before(laps, video_offset_s, cfg.render.min_lap_s)
+        if done:
+            raise RaceAlreadyRunning(len(done))
+
+    start_s = float(window_start_s)
     duration_s = clip.duration_s or 0.0
     suffix = "overlay"
+    race_end_cut = False
+    if lap_num is None and cfg.render.scan_video_for_race_end:
+        # scan-video-for-race-end: listen for the engine shutdown and trim
+        # to the last finish-line crossing + buffer. Cached in the manifest
+        # (clip.race_end) so each clip is scanned once.
+        if clip.race_end is None or force:
+            from .raceend import detect_race_end
+
+            clip.race_end = detect_race_end(
+                video, laps, video_offset_s, duration_s
+            )
+        cut = clip.race_end.cut_at_s
+        if cut is not None and 0.0 < cut < duration_s:
+            duration_s = cut
+            race_end_cut = True
+
+    # Race-start trim: begin RACE_START_BUFFER_S before the first lap (the
+    # launch), dropping the pre-race grid staging. Only for a full clip render
+    # (not a lap render or an explicit --from sample). `duration_s` here holds
+    # the END time (the race-end cut, or the full clip length since start was
+    # 0); convert it to a render length once start_s moves.
+    race_start_trim = False
+    if lap_num is None and window_start_s == 0.0 and window_end_s == 0.0 and laps:
+        first_lap_video = min(st for _, st, _ in laps) - video_offset_s
+        rs = first_lap_video - RACE_START_BUFFER_S
+        if rs > start_s + 0.5:
+            end_time = duration_s
+            start_s = rs
+            duration_s = end_time - start_s
+            race_start_trim = True
+
     if lap_num is not None:
         match = [l for l in laps if l[0] == lap_num]
         if not match:
@@ -387,13 +475,27 @@ def render_clip(
             raise ValueError(f"lap {lap_num} is not covered by clip {clip.file}")
         suffix = f"lap{lap_num}"
 
+    # Windowed sample render (validation): render only [window_start_s, end],
+    # where end is the race-end cut (or the clip's end). `duration_s` above
+    # holds the END time; convert it to a length for the sub-range render.
+    windowed = (window_start_s > 0.0 or window_end_s > 0.0) and lap_num is None
+    if windowed:
+        if window_end_s > 0.0:
+            end_time = window_end_s
+        else:
+            end_time = duration_s if race_end_cut else (clip.duration_s or 0.0)
+        duration_s = end_time - start_s
+        if duration_s <= 0:
+            raise ValueError("--from starts after --to / the clip's end/cut")
+        suffix = f"overlay_sample_{int(start_s)}-{int(end_time)}"
+
     fps = cfg.render.overlay_fps
     timeline = sample_timeline(
         df, laps, video_offset_s, start_s, duration_s, fps, cfg.render.min_lap_s
     )
 
     src_w, src_h = probe_video_size(video)
-    width, height = output_size(src_w, src_h, cfg.render.output_height)
+    width, height = output_size(src_w, src_h, cfg.render.target_height())
     # Speedometer scale: day's top speed rounded up to the next 10 km/h.
     max_speed_kmh = 80.0
     if "speed_ms" in df.columns:
@@ -427,11 +529,15 @@ def render_clip(
         dest,
         fps,
         start_s,
-        duration_s if lap_num is not None else None,
+        # ffmpeg needs a real -t whenever the window is a sub-range of the
+        # clip (lap render or race-end trim); only a full-length render may
+        # pass None (read to EOF).
+        duration_s if (lap_num is not None or race_end_cut or race_start_trim or windowed) else None,
         cfg.render.crf,
         cfg.render.preset,
         cfg.render.codec,
         scale_to=(width, height) if (width, height) != (src_w, src_h) else None,
+        scale_flags=cfg.render.scale_flags,
     )
 
     manifest.renders = [r for r in manifest.renders if r.file != _rel(dest, day_dir)]
@@ -439,8 +545,14 @@ def render_clip(
         RenderOutput(
             file=_rel(dest, day_dir),
             session_id=clip.session_id,
-            kind="lap" if lap_num is not None else "session",
+            kind="slice" if windowed else ("lap" if lap_num is not None else "session"),
             lap_num=lap_num,
+            label=(
+                f"sample {int(start_s // 60)}:{int(start_s % 60):02d}"
+                f"-{int((start_s + duration_s) // 60)}:{int((start_s + duration_s) % 60):02d}"
+                if windowed
+                else None
+            ),
             rendered_at=utcnow(),
             source_videos=[clip.file],
         )
@@ -452,12 +564,45 @@ def _rel(path: Path, day_dir: Path) -> str:
     return str(path.relative_to(day_dir)).replace("\\", "/")
 
 
-def render_day(cfg, manifest: DayManifest, day_dir: Path, force: bool = False) -> list[str]:
+class RaceAlreadyRunning(Exception):
+    """The clip's sync places its start after the session's race is already
+    underway (>= 1 completed lap). A race starts at zero laps, so this means
+    the automatic sync mislocated the video (or the clip is a mid-race
+    continuation). Rendering it would show a false lap count / reference lap,
+    so we stop and require a manual sync anchor instead."""
+
+    def __init__(self, laps_done: int):
+        self.laps_done = laps_done
+        super().__init__(f"{laps_done} lap(s) already completed at video start")
+
+
+def _valid_laps_before(laps, cutoff_s: float, min_lap_s: float) -> list:
+    """Session laps that fully completed before cutoff_s (video start),
+    excluding out/in-lap fragments (same validity as the overlay)."""
+    durs = sorted(e - st for _, st, e in laps)
+    median = durs[len(durs) // 2] if durs else 0.0
+    floor = max(min_lap_s, 0.6 * median if median else 0.0)
+    return [(n, st, e) for (n, st, e) in laps if e <= cutoff_s and (e - st) >= floor]
+
+
+def render_day(
+    cfg,
+    manifest: DayManifest,
+    day_dir: Path,
+    force: bool = False,
+    clip_filter: str | None = None,
+    window_start_s: float = 0.0,
+    window_end_s: float = 0.0,
+) -> list[str]:
     report: list[str] = []
     already = {src for r in manifest.renders for src in r.source_videos}
     day: DayFrame | None = None
 
     for clip in manifest.videos:
+        # Targeting a clip by name re-renders just it (implies force).
+        if clip_filter and clip_filter not in clip.source_name and clip_filter not in clip.file:
+            continue
+        clip_force = force or bool(clip_filter)
         if clip.sync is None:
             continue
         if clip.sync.confidence < cfg.render.min_sync_confidence:
@@ -466,11 +611,29 @@ def render_day(cfg, manifest: DayManifest, day_dir: Path, force: bool = False) -
                 f"{cfg.render.min_sync_confidence}, skipped"
             )
             continue
-        if clip.file in already and not force:
+        if clip.file in already and not clip_force:
             report.append(f"= {clip.file}: already rendered")
             continue
         if day is None:
             day = load_day_frame(day_dir, manifest)
-        dest = render_clip(cfg, day_dir, manifest, clip, day)
+        try:
+            dest = render_clip(
+                cfg, day_dir, manifest, clip, day, force=clip_force,
+                window_start_s=window_start_s, window_end_s=window_end_s,
+            )
+        except RaceAlreadyRunning as exc:
+            report.append(
+                f"! {clip.file}: starts mid-race ({exc.laps_done} lap(s) already "
+                f"completed) - a race starts at 0 laps, so the auto-sync is wrong. "
+                f"Set it manually: mt sync {manifest.date} --clip {clip.source_name} "
+                f"--lap N --at MM:SS  (N = the telemetry lap you are starting at "
+                f"video time MM:SS)"
+            )
+            continue
+        except RuntimeError as exc:
+            # A locked output (open in a player), an ffmpeg error, etc. must
+            # not abort the whole day's batch - report and move on.
+            report.append(f"! {clip.file}: {exc}")
+            continue
         report.append(f"+ {clip.file} -> {_rel(dest, day_dir)}")
     return report
