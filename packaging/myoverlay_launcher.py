@@ -26,7 +26,9 @@ Environment overrides:
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -135,12 +137,60 @@ def ensure_repo(git: Path, repo: Path, url: str, skip_update: bool) -> None:
         say("warning: could not reach the remote (offline?); using the current version")
 
 
+def installer_settings() -> dict:
+    """Choices made in the MSI setup wizard, if this exe was installed by it.
+
+    The installer writes install_settings.json next to myoverlay.exe:
+      {"language": "pt", "resolution": "fhd",
+       "client_secret": "C:\\...\\client_secret.json", "google_skipped": false}
+    A zip/dev deployment has no such file; everything keeps its default.
+    """
+    exe_dir = (
+        Path(sys.executable).resolve().parent
+        if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent
+    )
+    f = exe_dir / "install_settings.json"
+    if not f.is_file():
+        return {}
+    try:
+        return json.loads(f.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        say(f"warning: could not read {f}; using default settings")
+        return {}
+
+
+def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
+    """Seed a just-created config.toml with the setup wizard's choices."""
+    text = cfg.read_text(encoding="utf-8-sig")
+    lang = settings.get("language")
+    if lang:
+        text = re.sub(r'(?m)^language = ".*"$', f'language = "{lang}"', text, count=1)
+        say(f"video output language: {lang}")
+    res = settings.get("resolution")
+    if res:
+        text = re.sub(
+            r'(?m)^resolution = ".*?"', f'resolution = "{res}"', text, count=1
+        )
+        say(f"default output resolution: {res}")
+    cfg.write_text(text, encoding="utf-8")
+
+    secret = settings.get("client_secret")
+    if secret and Path(secret).is_file() and not (repo / "client_secret.json").is_file():
+        shutil.copy2(secret, repo / "client_secret.json")
+        say("Google API client secret installed (from the setup wizard)")
+    elif settings.get("google_skipped"):
+        say("note: Google API setup was skipped during install -")
+        say("YouTube publishing is disabled until you configure it (README).")
+
+
 def ensure_config(repo: Path) -> None:
     cfg = repo / "config.toml"
     example = repo / "config.example.toml"
     if cfg.is_file() or not example.is_file():
         return
     shutil.copy2(example, cfg)
+    _apply_installer_settings(repo, cfg, installer_settings())
     say("=" * 62)
     say("Created your configuration file:")
     say(f"    {cfg}")

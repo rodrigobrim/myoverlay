@@ -3,6 +3,10 @@
 # Root folder where ingested/processed media lives (one subfolder per track day).
 library_root = "D:/karting/library"
 
+# Language of the video output (overlay labels + default YouTube title and
+# description): en | pt | es | ja | ar | fr | it | ru. Config stays English.
+language = "en"
+
 [camera]
 # Removable volumes with a DCIM folder are detected automatically; add fixed
 # paths here if needed (e.g. a folder you copy files into manually).
@@ -47,8 +51,10 @@ scan-video-for-race-end = true
 
 [youtube]
 privacy = "private"  # API uploads from unaudited projects are locked private anyway
-title_template = "Karting {track} {date} - session {session} (best lap {best_lap})"
-description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
+# Omit the templates to get defaults in the configured `language`; set them
+# to override. Placeholders: {track} {date} {session} {best_lap} {lap}
+# title_template = "Karting {track} {date} - session {session} (best lap {best_lap})"
+# description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
 # playlist_id = "PL..."
 client_secret_file = "client_secret.json"
 token_file = "token.json"
