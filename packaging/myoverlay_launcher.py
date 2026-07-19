@@ -22,6 +22,10 @@ Environment overrides:
   MYOVERLAY_REPO       working copy location (default %LOCALAPPDATA%\\myoverlay\\repo)
   MYOVERLAY_REPO_URL   git remote to clone/pull (default the official repo)
   MYOVERLAY_NO_UPDATE  set to 1 to skip the git pull (same as --no-update)
+  MYOVERLAY_BRANCH     run this branch instead of the default (same as
+                       --branch NAME). A branch that exists only locally is
+                       checked out and run as-is (no pull, never reset) - the
+                       way to test unmerged work through the exe.
 """
 
 from __future__ import annotations
@@ -97,7 +101,32 @@ def _resync(git: Path, repo: Path) -> bool:
     return reset.returncode == 0
 
 
-def ensure_repo(git: Path, repo: Path, url: str, skip_update: bool) -> None:
+def _current_branch(git: Path, repo: Path) -> str | None:
+    proc = run_git(git, ["branch", "--show-current"], cwd=repo)
+    return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+
+def _has_upstream(git: Path, repo: Path) -> bool:
+    proc = run_git(
+        git, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cwd=repo
+    )
+    return proc.returncode == 0
+
+
+def _checkout_branch(git: Path, repo: Path, branch: str) -> None:
+    if _current_branch(git, repo) == branch:
+        return
+    proc = run_git(git, ["checkout", branch], cwd=repo, timeout=120)
+    if proc.returncode != 0:
+        say(f"ERROR: branch {branch!r} not found in {repo}")
+        say(proc.stderr.strip()[:400])
+        sys.exit(2)
+    say(f"switched to branch {branch}")
+
+
+def ensure_repo(
+    git: Path, repo: Path, url: str, skip_update: bool, branch: str | None = None
+) -> None:
     if not (repo / ".git").is_dir():
         say(f"first run: downloading the pipeline from {url}")
         repo.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +137,27 @@ def ensure_repo(git: Path, repo: Path, url: str, skip_update: bool) -> None:
             sys.exit(2)
         _managed_marker(repo).write_text("created by myoverlay\n", encoding="ascii")
         say("download complete")
+        if branch:
+            _checkout_branch(git, repo, branch)
+        return
+
+    if branch:
+        # An explicitly chosen branch is developer intent: check it out and
+        # ff-pull only if it tracks a remote. A local-only branch runs as-is,
+        # and a chosen branch is NEVER hard-reset - it may hold unmerged work.
+        _checkout_branch(git, repo, branch)
+        if skip_update:
+            return
+        if not _has_upstream(git, repo):
+            say(f"running local branch {branch} (no remote tracking; skipping update)")
+            return
+        proc = run_git(git, ["pull", "--ff-only"], cwd=repo, timeout=120)
+        if proc.returncode == 0:
+            head = run_git(git, ["rev-parse", "--short", "HEAD"], cwd=repo)
+            say(f"branch {branch} at {head.stdout.strip()}")
+        else:
+            say(f"warning: could not update branch {branch} (offline, or it diverged")
+            say("from its remote); continuing with the current version")
         return
     if skip_update:
         return
@@ -222,10 +272,23 @@ def main() -> None:
         argv.remove("--no-update")
         skip_update = True
 
+    # --branch NAME / --branch=NAME (or MYOVERLAY_BRANCH): run that branch of
+    # the repo - incl. a local-only branch with unmerged work - via the exe.
+    branch = os.environ.get("MYOVERLAY_BRANCH") or None
+    for i, arg in enumerate(argv):
+        if arg == "--branch" and i + 1 < len(argv):
+            branch = argv[i + 1]
+            del argv[i : i + 2]
+            break
+        if arg.startswith("--branch="):
+            branch = arg.split("=", 1)[1]
+            del argv[i]
+            break
+
     repo = Path(os.environ.get("MYOVERLAY_REPO") or default_repo_path())
     url = os.environ.get("MYOVERLAY_REPO_URL", DEFAULT_REPO_URL)
 
-    ensure_repo(git, repo, url, skip_update)
+    ensure_repo(git, repo, url, skip_update, branch)
     ensure_config(repo)
 
     src = repo / "src"
