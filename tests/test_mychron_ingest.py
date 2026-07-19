@@ -33,6 +33,29 @@ def test_parse_log_datetime_formats():
     assert _parse_log_datetime({}, tz) is None
 
 
+def test_clock_offset_skips_sane_dates(cfg, tmp_path, monkeypatch):
+    """After the user fixes the device clock, new sessions carry real dates
+    and must NOT be shifted by the legacy correction anchor."""
+    from datetime import date, timedelta
+
+    cfg.mychron.clock_reads = datetime(2047, 10, 27)
+    cfg.mychron.clock_actual = datetime(2026, 7, 13)
+    rs3 = tmp_path / "rs3"
+    rs3.mkdir()
+    (rs3 / "sane.xrk").write_bytes(b"x")
+
+    sane_start = datetime.now(timezone.utc) - timedelta(days=2)
+    monkeypatch.setattr(
+        mychron, "parse_xrk", lambda p, tz: fake_info(start_utc=sane_start, laps=[])
+    )
+    ingest_mychron(cfg, extra_sources=[rs3])
+
+    lib = Library(cfg.library_root)
+    day = lib.load_day(sane_start.astimezone(cfg.mychron.tzinfo()).date())
+    assert len(day.telemetry) == 1
+    assert day.telemetry[0].start_utc == sane_start  # untouched
+
+
 def test_clock_offset_corrects_session_times(cfg, tmp_path, monkeypatch):
     from datetime import date, timedelta
 

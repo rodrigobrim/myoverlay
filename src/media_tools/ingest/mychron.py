@@ -128,8 +128,13 @@ def ingest_mychron(cfg: Config, extra_sources: list[Path] | None = None) -> Inge
             info = parse_xrk(path, logger_tz)
             if info.start_utc is not None:
                 # Correct a wrongly-set device clock (mychron.clock_reads/
-                # clock_actual). The mtime fallback below is real time already.
-                start_utc = info.start_utc + cfg.mychron.clock_offset()
+                # clock_actual) - but only for timestamps that are actually
+                # implausible (far in the future). Once the user fixes the
+                # device clock, newer sessions carry sane dates and must NOT
+                # be shifted. The mtime fallback below is real time already.
+                start_utc = info.start_utc
+                if start_utc > datetime.now(timezone.utc) + timedelta(days=90):
+                    start_utc = start_utc + cfg.mychron.clock_offset()
             else:
                 start_utc = datetime.fromtimestamp(
                     path.stat().st_mtime, tz=timezone.utc

@@ -96,6 +96,16 @@ def unified_frame(log) -> pd.DataFrame:
         scale = _SPEED_SCALES.get(unit, 1 / 3.6)  # AiM defaults to km/h
         df["speed_ms"] = df["speed_ms"] * scale
 
+    # AiM's GPS_LateralAcc and the MyChron steering sensor both read POSITIVE in
+    # a LEFT turn (driver frame), but the overlay's convention is positive =
+    # right. Flip them once here so the wheel graphic and the lateral G dot draw
+    # the real direction. Verified against footage: two clear left-hand corners
+    # logged +g_lat and +steering while the kart turned left. (Longitudinal
+    # g_lon is already correct: braking-down / accel-up.)
+    for col in ("g_lat", "steering_deg"):
+        if col in df.columns:
+            df[col] = -df[col]
+
     # Drop rows before GPS fix (lat/lon exactly 0 is the no-fix filler).
     if {"lat", "lon"} <= set(df.columns):
         no_fix = (df["lat"] == 0.0) & (df["lon"] == 0.0)
@@ -206,6 +216,45 @@ def session_laps(manifest, session) -> list[tuple[int, float, float]]:
             laps.append((lap.num, base + lap.start_s, base + lap.end_s))
     laps.sort(key=lambda x: x[1])
     return laps
+
+
+def complete_laps(
+    laps: list[tuple[int, float, float]], eps: float = 0.05
+) -> list[tuple[int, float, float]]:
+    """Laps the MyChron opened AND closed with a beacon crossing.
+
+    A crossing simultaneously ends one lap and starts the next, so a boundary
+    time that appears as BOTH some lap's end and some lap's start is a real
+    crossing. The out-lap's start (recording power-on) matches no lap's end,
+    and the in-lap's end (power-off) matches no lap's start - both are dropped.
+    Only complete laps are eligible as a best lap or a delta reference.
+    """
+    starts = [s for _, s, _ in laps]
+    ends = [e for _, _, e in laps]
+    out = []
+    for n, st, e in laps:
+        opened = any(abs(en - st) <= eps for en in ends)
+        closed = any(abs(s - e) <= eps for s in starts)
+        if opened and closed:
+            out.append((n, st, e))
+    return out
+
+
+def opened_laps(
+    laps: list[tuple[int, float, float]], eps: float = 0.05
+) -> list[tuple[int, float, float]]:
+    """Laps the MyChron opened with a beacon crossing (their start is a
+    crossing - i.e. some other lap ends there).
+
+    Includes a lap still in progress and the in-lap (opened but truncated by
+    power-off); excludes the out-lap, whose start is the recording power-on,
+    not a crossing. Used for the *current* lap timer, which must count only a
+    real lap in progress - never the out-lap.
+    """
+    ends = [e for _, _, e in laps]
+    return [
+        (n, st, e) for n, st, e in laps if any(abs(en - st) <= eps for en in ends)
+    ]
 
 
 def export_gpx(df: pd.DataFrame, start_utc: datetime, dest: Path) -> Path:

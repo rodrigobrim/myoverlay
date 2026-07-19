@@ -40,6 +40,21 @@ FINE_SEGMENT_S = 120.0
 MIN_SUSTAINED_S = 3.0
 
 
+def _mask_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """(start, end) index pairs of contiguous True runs in a boolean mask."""
+    mask = np.asarray(mask, dtype=bool)
+    if len(mask) == 0:
+        return []
+    edges = np.diff(mask.astype(np.int8))
+    starts = list(np.where(edges == 1)[0] + 1)
+    ends = list(np.where(edges == -1)[0] + 1)
+    if mask[0]:
+        starts.insert(0, 0)
+    if mask[-1]:
+        ends.append(len(mask))
+    return list(zip(starts, ends))
+
+
 def _activity_threshold(sig: np.ndarray) -> float:
     """Midpoint between the quiet floor and the active level."""
     lo, hi = np.percentile(sig, [10, 90])
@@ -226,6 +241,66 @@ def engine_column(df: pd.DataFrame) -> str:
     raise ValueError(
         "telemetry has no usable engine channel (rpm/jackshaft/speed); cannot audio-sync"
     )
+
+
+def detect_engine_shutdown(
+    pcm: np.ndarray,
+    feature_hz: float = FEATURE_HZ,
+    min_off_s: float = 20.0,
+    end_slack_s: float = 5.0,
+) -> float | None:
+    """Video time (s from clip start) where the engine shut down, or None.
+
+    Audio only - telemetry is never consulted. Looks for the FINAL sustained
+    quiet run of the clip: loudness staying below the activity threshold for
+    >= min_off_s and reaching (within end_slack_s of) the end of the
+    recording. Its start is the shutdown moment. If the engine is still
+    running at the end (recording was stopped promptly), or the quiet tail
+    is too short to be a real shutdown, returns None.
+
+    Uses smoothed RMS loudness only - the dominant-frequency term of the
+    sync feature is random noise in silence and would make the off-mask
+    flicker. Brief loud blips inside the quiet tail (voices, other karts
+    passing the parked kart) are closed over: only sustained sound counts
+    as the engine being on.
+    """
+    hop = int(AUDIO_RATE / feature_hz)
+    rms, _ = _frame_features(pcm, AUDIO_RATE, hop, 2048)
+    feature = _smooth(rms, feature_hz, 1.0)
+    # A shutdown claim needs a real on/off loudness contrast in the clip.
+    # Without it (engine running the whole time, or never running), the
+    # percentile threshold is just noise - never trim on noise.
+    lo, hi = np.percentile(feature, [10, 90])
+    if hi < 2.0 * lo + 1e-3:
+        return None
+    off = feature < _activity_threshold(feature)
+    n = len(off)
+
+    # Close brief ON-flickers: an "on" burst shorter than min_blip_s is not
+    # an engine (a passing kart, a voice) - treat it as off.
+    min_blip = max(1, int(3.0 * feature_hz))
+    on_runs = _mask_runs(~off)
+    sustained_on = np.zeros(n, dtype=bool)
+    for s0, e0 in on_runs:
+        if e0 - s0 >= min_blip:
+            sustained_on[s0:e0] = True
+    off = ~sustained_on
+
+    # Runs of engine-off, via the same edge idiom as _sustained_mask.
+    starts_ends = _mask_runs(off)
+    if not starts_ends:
+        return None
+    starts = [s for s, _ in starts_ends]
+    ends = [e for _, e in starts_ends]
+
+    last_start, last_end = starts[-1], ends[-1]
+    if last_end < n - int(end_slack_s * feature_hz):
+        return None  # engine came back after the quiet spell
+    if last_end - last_start < int(min_off_s * feature_hz):
+        return None  # tail too short to be a shutdown (could be a lift/coast)
+    # Frame timestamps are window centers (win/(2*rate) after the index);
+    # ~0.1 s bias is irrelevant against a +15 s cut buffer.
+    return float(last_start / feature_hz)
 
 
 def rpm_feature(df: pd.DataFrame, feature_hz: float = FEATURE_HZ) -> np.ndarray:
@@ -538,7 +613,21 @@ def sync_day(
         if clip.sync is not None and not force:
             continue
         try:
-            result = estimate_offset(day.df, extract_audio_pcm(day_dir / clip.file))
+            # Bound the search around the camera's own estimate: with many
+            # similar stints in a day, an unconstrained envelope search can
+            # alias onto the wrong stint (observed: night session with 11
+            # short heats, clips locking 30-50 min off). Camera clocks have
+            # proven good to seconds; clock_tolerance_s covers real drift,
+            # and a truly broken camera clock still has the manual sync.
+            est_lag = (
+                clip.start_utc_estimate - day.start_utc
+            ).total_seconds()
+            result = estimate_offset(
+                day.df,
+                extract_audio_pcm(day_dir / clip.file),
+                est_lag_s=est_lag,
+                clock_tolerance_s=cfg.camera.clock_tolerance_s,
+            )
         except (RuntimeError, ValueError) as exc:
             report.append(f"! {clip.file}: {exc}")
             continue
@@ -555,6 +644,9 @@ def sync_day(
                 f"(confidence {result.confidence:.2f}, video starts {video_start.isoformat()})"
             )
         else:
+            # A stale previous sync must not survive a failed re-sync
+            # (observed: an aliased lock persisting after --force).
+            clip.sync = None
             report.append(
                 f"? {clip.file}: low confidence {result.confidence:.2f}, left unsynced"
             )

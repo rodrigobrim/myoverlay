@@ -20,21 +20,28 @@ import numpy as np
 from media_tools.config import load_config
 from media_tools.library import Library
 from media_tools.overlay import OverlayRenderer
-from media_tools.render import sample_timeline
+from media_tools.render import output_size, probe_video_size, sample_timeline
 from media_tools.telemetry import load_day_frame
 
 SLICE_S = 15.0
 FPS = 30.0
 
 args = sys.argv[1:]
-if "--len" in args:
-    i = args.index("--len")
-    SLICE_S = float(args[i + 1])
-    del args[i : i + 2]
+res = "hd"  # test slices default to HD (fast/cheap); override with --res 2k
+for opt, setter in (("--len", "len"), ("--res", "res"), ("--resolution", "res")):
+    if opt in args:
+        i = args.index(opt)
+        val = args[i + 1]
+        if setter == "len":
+            SLICE_S = float(val)
+        else:
+            res = val
+        del args[i : i + 2]
 day_arg = args[0] if args else "2026-07-13"
 starts = [float(a) for a in args[1:]] or [0.0]
 
 cfg = load_config()
+cfg.render.resolution = res
 lib = Library(cfg.library_root)
 d = date.fromisoformat(day_arg)
 manifest = lib.load_day(d)
@@ -56,10 +63,20 @@ if "g_lat" in day.df.columns or "g_lon" in day.df.columns:
 if "steering_deg" in day.df.columns:
     channels.add("steering")
 
+src_w, src_h = probe_video_size(video)
+out_w, out_h = output_size(src_w, src_h, cfg.render.target_height())
+scale = (out_w, out_h) != (src_w, src_h)
+graph = (
+    f"[0:v]scale={out_w}:{out_h}[base];[base][1:v]overlay=eof_action=repeat[v]"
+    if scale
+    else "[0:v][1:v]overlay=eof_action=repeat[v]"
+)
+print(f"source {src_w}x{src_h} -> output {out_w}x{out_h}")
+
 for start in starts:
     tl = sample_timeline(day.df, day.laps, off, start, SLICE_S, FPS, cfg.render.min_lap_s)
     renderer = OverlayRenderer(
-        1920, 1080, track_frac=tl.track_frac, font_path=cfg.render.font_path,
+        out_w, out_h, track_frac=tl.track_frac, font_path=cfg.render.font_path,
         max_speed_kmh=max_speed, channels=channels,
     )
     out = out_dir / f"test_{int(start):04d}s.mp4"
@@ -69,8 +86,8 @@ for start in starts:
             "-ss", f"{start:.3f}", "-t", str(SLICE_S),
             "-i", str(video),
             "-f", "rawvideo", "-pixel_format", "rgba",
-            "-video_size", "1920x1080", "-framerate", str(FPS), "-i", "pipe:0",
-            "-filter_complex", "[0:v][1:v]overlay=eof_action=repeat[v]",
+            "-video_size", f"{out_w}x{out_h}", "-framerate", str(FPS), "-i", "pipe:0",
+            "-filter_complex", graph,
             "-map", "[v]", "-map", "0:a?",
             "-c:v", "h264_nvenc", "-rc", "vbr", "-cq", "22", "-b:v", "0",
             "-c:a", "copy", str(out),

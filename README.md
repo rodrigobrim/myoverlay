@@ -26,27 +26,37 @@ skips anything already done, so all commands are safe to re-run.
 5. For YouTube uploads: create a project in Google Cloud Console, enable the
    *YouTube Data API v3*, create a **Desktop** OAuth client, save the JSON as
    `client_secret.json` in the repo, **publish** the OAuth consent screen
-   (otherwise the token expires weekly), then run `uv run mt publish --dry-run`
+   (otherwise the token expires weekly), then run `myoverlay publish --dry-run`
    once and complete the browser authorization.
 
 ## Usage
 
+All commands run through the `myoverlay` executable (`dist/myoverlay/myoverlay.exe`):
+
 ```
-uv run mt run                # full chain: ingest -> correlate -> sync -> render
-uv run mt run --publish      # ... and upload to YouTube
-uv run mt status             # pipeline state of every track day
-uv run mt ingest             # individual stages...
-uv run mt correlate 2026-07-12
-uv run mt sync 2026-07-12
-uv run mt render 2026-07-12
-uv run mt publish 2026-07-12 --dry-run
+myoverlay run                # full chain: ingest -> correlate -> sync -> render
+myoverlay run --publish      # ... and upload to YouTube
+myoverlay run --res hd       # override output resolution (hd|fhd|2k|4k; default 2k)
+myoverlay status             # pipeline state of every track day
+myoverlay ingest             # individual stages...
+myoverlay correlate 2026-07-12
+myoverlay sync 2026-07-12
+myoverlay render 2026-07-12
+myoverlay publish 2026-07-12 --dry-run
 ```
+
+The exe self-updates from this repo and bundles git + ffmpeg, so friends need
+nothing installed. To run it against a **local checkout** instead of its own
+managed clone (e.g. your dev repo), set `MYOVERLAY_REPO=<path to this repo>`
+and `MYOVERLAY_NO_UPDATE=1` — then it uses that checkout's code + `config.toml`.
+(For development in this checkout, `uv run mt <command>` is the equivalent
+entry point; see [Development](#development).)
 
 ### Zero-touch mode
 
 ```
-uv run mt watch              # poll for new camera/telemetry material, run pipeline
-uv run mt watch --install    # install as a Windows Scheduled Task (at logon)
+myoverlay watch              # poll for new material and run the pipeline (renders too)
+myoverlay watch --install    # auto-start the watcher at logon (launches via the exe)
 ```
 
 With the watcher running the only human actions per track day are physical:
@@ -63,7 +73,7 @@ sync gets a confidence score; clips below `render.min_sync_confidence` are
 not rendered. Escape hatch:
 
 ```
-uv run mt sync 2026-07-12 --clip DJI_0042.MP4 --video-start "2026-07-12T13:05:02.30+00:00"
+myoverlay sync 2026-07-12 --clip DJI_0042.MP4 --video-start "2026-07-12T13:05:02.30+00:00"
 ```
 
 Solved clips seed the rest of the day (camera clock drift is stable within a
@@ -83,10 +93,15 @@ track day).
 
 ## Development
 
+For development in this checkout, `uv run mt <command>` is the direct entry
+point (same CLI the exe forwards to), and `uv run python tools/proof_slices.py`
+renders quick HD test slices instead of full re-renders.
+
 ```
 uv run pytest
 ```
 
 Tests cover each stage including an end-to-end render against a generated
 test clip (requires ffmpeg). Sync correlation is tested against synthesized
-engine audio with a known offset.
+engine audio with a known offset. To rebuild the shareable exe after adding a
+new dependency: `powershell -File packaging/build_exe.ps1`.

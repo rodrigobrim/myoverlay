@@ -4,8 +4,7 @@ Reference-style layout (shadow-cast text/lines, no backing panels):
   top-left      : track map with position dot
   top-center    : speed delta + time delta tick scales with big values
   top-right     : Atual / Anterior / Melhor lap times
-  bottom-left   : steering wheel + angle (and RPM bar when a sensor exists)
-  bottom-center : G-force circle (dashed crosshair, 1G/2G rings)
+  bottom-left   : G-force circle (dashed crosshair, 1G/2G rings)
   bottom-right  : analog speedometer with digital readout
 
 Static artwork (map, tick scales, gauge face, G rings) is rendered once and
@@ -168,10 +167,12 @@ class OverlayRenderer:
         self.gauge_cx = width - self.pad - gauge_r
         self.gauge_cy = height - self.pad - gauge_r + int(30 * s)
         self.gauge_r = gauge_r
+        # G-force circle now sits in the bottom-left corner (it replaced the
+        # old steering-wheel widget).
         g_size = int(190 * s)
-        self.g_cx = int(0.36 * width)
-        self.g_cy = height - self.pad - int(44 * s) - g_size // 2
         self.g_r = g_size // 2
+        self.g_cx = self.pad + self.g_r
+        self.g_cy = height - self.pad - int(44 * s) - g_size // 2
 
     @staticmethod
     def _resolve_font(font_path: Path | None) -> str | None:
@@ -346,11 +347,9 @@ class OverlayRenderer:
         if self.channels is not None:
             chrome_speed = "speed" in self.channels
             chrome_g = "g" in self.channels
-            chrome_steer = "steering" in self.channels
         else:
             chrome_speed = v.speed_kmh is not None
             chrome_g = v.g_lat is not None or v.g_lon is not None
-            chrome_steer = v.steering_deg is not None
         key = (
             chrome_speed,
             chrome_g,
@@ -450,52 +449,7 @@ class OverlayRenderer:
                 anchor="ra",
             )
 
-        # --- bottom-left: steering wheel (kept from our layout) ---
-        if chrome_steer:
-            have = v.steering_deg is not None
-            size = int(170 * s)
-            sx = pad
-            sy = self.h - pad - size - int(40 * s)
-            cx, cy = sx + size / 2, sy + size / 2
-            rw = size / 2 - int(6 * s)
-            spoke_fill = (255, 255, 255, 220) if have else (255, 255, 255, 110)
-            draw.ellipse(
-                [cx - rw + 2, cy - rw + 2, cx + rw + 2, cy + rw + 2],
-                outline=SHADOW,
-                width=max(2, int(4 * s)),
-            )
-            draw.ellipse(
-                [cx - rw, cy - rw, cx + rw, cy + rw],
-                outline=spoke_fill,
-                width=max(2, int(4 * s)),
-            )
-            angle = math.radians(v.steering_deg if have else 0.0)
-            for spoke in (0.0, 2 * math.pi / 3, -2 * math.pi / 3):
-                a = angle + spoke + math.pi / 2
-                draw.line(
-                    [cx, cy, cx - rw * 0.85 * math.cos(a), cy - rw * 0.85 * math.sin(a)],
-                    fill=spoke_fill,
-                    width=max(2, int(5 * s)),
-                )
-            hub = max(3, int(7 * s))
-            draw.ellipse([cx - hub, cy - hub, cx + hub, cy + hub], fill=ACCENT)
-            self._shadow_text(
-                draw,
-                (cx, sy + size + int(34 * s)),
-                f"{v.steering_deg:+.0f}\N{DEGREE SIGN}" if have else "--\N{DEGREE SIGN}",
-                self._font(28),
-                WHITE,
-                anchor="ms",
-            )
-            # rpm bar above the wheel when a sensor is fitted
-            if v.rpm is not None and v.rpm > 0:
-                bar_w, bar_h = int(320 * s), int(20 * s)
-                by = sy - int(40 * s)
-                draw.rectangle([pad, by, pad + bar_w, by + bar_h], fill=(255, 255, 255, 60))
-                frac = min(1.0, v.rpm / self.max_rpm)
-                draw.rectangle([pad, by, pad + int(bar_w * frac), by + bar_h], fill=ACCENT)
-
-        # --- G-force dot + value ---
+        # --- G-force dot + value (bottom-left; replaced the steering wheel) ---
         if chrome_g:
             cx, cy, r2g = self.g_cx, self.g_cy, self.g_r
             have = v.g_lat is not None or v.g_lon is not None

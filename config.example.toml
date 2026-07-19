@@ -39,6 +39,11 @@ preset = "medium"
 max_rpm = 16000
 # font_path = "C:/Windows/Fonts/arialbd.ttf"
 min_sync_confidence = 0.5
+resolution = "2k"  # output resolution: hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p)
+# When you forget to stop recording, this listens to the engine sound to find
+# where you switched the kart off at the end, then trims the video to just
+# after your last lap. Set false to keep the full recording (renders faster).
+scan-video-for-race-end = true
 
 [youtube]
 privacy = "private"  # API uploads from unaudited projects are locked private anyway
