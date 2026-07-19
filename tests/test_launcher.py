@@ -150,6 +150,62 @@ def test_ignored_files_survive_resync(tmp_path, origin):
     assert (repo / "file.txt").read_text() == "v2\n"
 
 
+def test_branch_option_checks_out_remote_branch(tmp_path, origin):
+    """--branch NAME switches the clone to that branch and ff-pulls it."""
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    git(["checkout", "-qb", "feature"], origin)
+    (origin / "file.txt").write_text("feature v1\n")
+    git(["commit", "-qam", "feature v1"], origin)
+    git(["checkout", "-q", "main"], origin)
+
+    repo = tmp_path / "clone"
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="feature")
+    assert (repo / "file.txt").read_text() == "feature v1\n"
+
+    # branch moves upstream -> next run ff-pulls it
+    git(["checkout", "-q", "feature"], origin)
+    (origin / "file.txt").write_text("feature v2\n")
+    git(["commit", "-qam", "feature v2"], origin)
+    git(["checkout", "-q", "main"], origin)
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="feature")
+    assert (repo / "file.txt").read_text() == "feature v2\n"
+
+
+def test_branch_option_runs_local_only_branch_untouched(tmp_path, origin):
+    """A branch that exists only locally runs as-is: no pull, never reset -
+    the way to test unmerged work through the exe."""
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    repo = tmp_path / "clone"
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False)
+
+    git(["config", "user.email", "t@t"], repo)
+    git(["config", "user.name", "t"], repo)
+    git(["checkout", "-qb", "wip"], repo)
+    (repo / "file.txt").write_text("unmerged work\n")
+    git(["commit", "-qam", "wip"], repo)
+    git(["checkout", "-q", "main"], repo)
+    # upstream moves on meanwhile
+    (origin / "file.txt").write_text("v2\n")
+    git(["commit", "-qam", "v2"], origin)
+
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="wip")
+    assert (repo / "file.txt").read_text() == "unmerged work\n"
+    # and it stays on the branch on a repeat run
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="wip")
+    assert (repo / "file.txt").read_text() == "unmerged work\n"
+
+
+def test_branch_option_unknown_branch_exits(tmp_path, origin):
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    repo = tmp_path / "clone"
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False)
+    with pytest.raises(SystemExit):
+        mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="nope")
+
+
 def test_ensure_config_seeds_from_example(tmp_path):
     mod = load_launcher()
     repo = tmp_path / "repo"
