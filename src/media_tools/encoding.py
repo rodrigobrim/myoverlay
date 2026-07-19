@@ -22,7 +22,11 @@ def encoder_available(codec: str) -> bool:
             proc = subprocess.run(
                 [
                     "ffmpeg", "-v", "error",
-                    "-f", "lavfi", "-i", "color=black:size=128x128:rate=30",
+                    # 320x240: NVENC rejects frames below its minimum dimensions
+                    # (h264 ~145px wide). A tiny probe frame would fail to open
+                    # the encoder and falsely report nvenc unusable on machines
+                    # where it works fine at real resolutions.
+                    "-f", "lavfi", "-i", "color=black:size=320x240:rate=30",
                     "-frames:v", "1",
                     "-c:v", codec,
                     "-f", "null", "-",

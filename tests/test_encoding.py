@@ -79,6 +79,22 @@ def test_probe_uses_a_real_test_encode(monkeypatch):
     assert "-f" in cmd and "null" in cmd  # encodes, discards output
 
 
+def test_probe_frame_is_above_nvenc_minimum(monkeypatch):
+    """The probe frame must exceed NVENC's minimum dimensions (~145px),
+    otherwise nvenc fails to open on the probe alone and is falsely reported
+    unusable even where it works at real resolutions."""
+    import re
+
+    calls: list = []
+    monkeypatch.setattr(enc.subprocess, "run", fake_run(0, calls))
+    enc.encoder_available("h264_nvenc")
+    joined = " ".join(calls[0])
+    m = re.search(r"size=(\d+)x(\d+)", joined)
+    assert m, f"probe has no size= source: {joined}"
+    w, h = int(m.group(1)), int(m.group(2))
+    assert w >= 256 and h >= 240, f"probe frame {w}x{h} too small for NVENC"
+
+
 @pytest.mark.skipif(
     subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode != 0,
     reason="ffmpeg not available",

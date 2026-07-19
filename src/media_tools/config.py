@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _local_tzinfo() -> tzinfo:
@@ -91,16 +91,29 @@ class WatchConfig(BaseModel):
     settle_s: float = 5.0
 
 
+# Named output-resolution presets -> frame height. The source is scaled
+# (up or down) to the chosen height; picking a preset is the explicit intent
+# to output at that resolution.
+RESOLUTIONS: dict[str, int] = {"hd": 720, "fhd": 1080, "2k": 1440, "4k": 2160}
+
+
 class RenderConfig(BaseModel):
+    # Re-validate on assignment so a CLI --resolution override is checked;
+    # populate_by_name lets the hyphenated TOML alias and the Python name
+    # both work (scan-video-for-race-end).
+    model_config = ConfigDict(validate_assignment=True, populate_by_name=True)
+
     overlay_fps: float = 10.0
     # h264_nvenc/hevc_nvenc render 4K many times faster on NVIDIA GPUs;
     # crf maps to -cq for nvenc encoders.
     codec: str = "libx264"
     crf: int = 20
     preset: str = "medium"
-    # Downscale output to this height (e.g. 1440 for 2K, 1080 for full HD);
-    # null keeps the source resolution. Never upscales.
-    output_height: int | None = None
+    # ffmpeg scaler for resizing the footage (mainly the 1080p->2K upscale):
+    # lanczos is sharper than the default bilinear at a negligible cost.
+    scale_flags: str = "lanczos"
+    # Output resolution preset: hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p).
+    resolution: str = "2k"
     # Laps faster than this are physically impossible for the circuit
     # (cut track / timing glitch): flagged invalid, never best/delta ref.
     min_lap_s: float = 0.0
@@ -109,6 +122,24 @@ class RenderConfig(BaseModel):
     # Clips synced below this confidence are not rendered (use `mt sync
     # --clip ... --video-start ...` to pin them manually).
     min_sync_confidence: float = 0.5
+    # When you forget to stop recording after the race, this listens to the
+    # video's engine sound to find where the kart was switched off, then
+    # trims the video to just after your last lap. Disable to skip the scan
+    # and keep the full recording (renders a bit faster).
+    scan_video_for_race_end: bool = Field(default=True, alias="scan-video-for-race-end")
+
+    @field_validator("resolution")
+    @classmethod
+    def _valid_resolution(cls, v: str) -> str:
+        key = v.strip().lower()
+        if key not in RESOLUTIONS:
+            raise ValueError(
+                f"resolution must be one of {list(RESOLUTIONS)} (got {v!r})"
+            )
+        return key
+
+    def target_height(self) -> int:
+        return RESOLUTIONS[self.resolution]
 
 
 class YouTubeConfig(BaseModel):

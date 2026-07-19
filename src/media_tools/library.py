@@ -37,6 +37,16 @@ class SyncInfo(BaseModel):
     method: str  # "audio-rpm" | "manual" | "seeded"
 
 
+class RaceEnd(BaseModel):
+    """Result of scanning the clip's audio for the end-of-race engine
+    shutdown (scan-video-for-race-end). Present = scanned; cut_at_s None
+    means the engine was still running when the recording stopped (no trim).
+    Times are video seconds from clip start."""
+
+    engine_stop_s: float | None = None
+    cut_at_s: float | None = None
+
+
 class VideoClip(BaseModel):
     file: str  # path relative to the day dir, e.g. raw/video/DJI_...MP4
     source_name: str
@@ -46,6 +56,12 @@ class VideoClip(BaseModel):
     start_utc_estimate: datetime
     sync: SyncInfo | None = None
     session_id: int | None = None
+    # None = not scanned yet (see RaceEnd).
+    race_end: RaceEnd | None = None
+    # When this clip is a join of camera-split segments (GoPro/DJI roll a long
+    # recording into ~4 GB files), the ordered segment paths it was built from,
+    # relative to the day dir. Empty for an ordinary single-file clip.
+    segments: list[str] = Field(default_factory=list)
 
 
 class Lap(BaseModel):
@@ -96,6 +112,15 @@ class PublishRecord(BaseModel):
     published_at: datetime
 
 
+class ConsumedSegment(BaseModel):
+    """A camera-split segment that has been joined into a single clip and so is
+    no longer an active video in its own right. Kept only so re-ingesting the
+    same card does not re-add it (its raw file stays on disk, never deleted)."""
+
+    source_name: str
+    size_bytes: int
+
+
 class DayManifest(BaseModel):
     date: date
     track: str | None = None
@@ -104,10 +129,15 @@ class DayManifest(BaseModel):
     sessions: list[TrackSession] = Field(default_factory=list)
     renders: list[RenderOutput] = Field(default_factory=list)
     publishes: list[PublishRecord] = Field(default_factory=list)
+    # Split segments already joined into a single clip (see ConsumedSegment).
+    consumed_segments: list[ConsumedSegment] = Field(default_factory=list)
 
     def has_video(self, source_name: str, size_bytes: int) -> bool:
         return any(
             v.source_name == source_name and v.size_bytes == size_bytes for v in self.videos
+        ) or any(
+            c.source_name == source_name and c.size_bytes == size_bytes
+            for c in self.consumed_segments
         )
 
     def has_telemetry(self, source_name: str, size_bytes: int) -> bool:
@@ -155,11 +185,18 @@ class Library:
         return path
 
     def known_videos(self) -> set[tuple[str, int]]:
-        """(source_name, size) of every clip already ingested, across all days."""
+        """(source_name, size) of every clip already ingested, across all days.
+
+        Includes segments already joined into a clip (consumed_segments), so a
+        re-ingest of the same card does not resurrect them as separate clips.
+        """
         seen: set[tuple[str, int]] = set()
         for d in self.day_dates():
-            for v in self.load_day(d).videos:
+            m = self.load_day(d)
+            for v in m.videos:
                 seen.add((v.source_name, v.size_bytes))
+            for c in m.consumed_segments:
+                seen.add((c.source_name, c.size_bytes))
         return seen
 
     def known_telemetry(self) -> set[tuple[str, int]]:
