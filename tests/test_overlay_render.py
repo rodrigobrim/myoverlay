@@ -40,13 +40,33 @@ def test_track_projection_nan_passthrough():
 def test_output_size():
     from media_tools.render import output_size
 
-    assert output_size(3840, 2160, 1440) == (2560, 1440)
-    assert output_size(3840, 2160, 1080) == (1920, 1080)
-    assert output_size(3840, 2160, None) == (3840, 2160)
-    # never upscale
-    assert output_size(1920, 1080, 1440) == (1920, 1080)
+    # scale to the target height, up or down
+    assert output_size(3840, 2160, 1440) == (2560, 1440)  # 4K -> 2K
+    assert output_size(1920, 1080, 1440) == (2560, 1440)  # 1080p -> 2K (upscale)
+    assert output_size(1920, 1080, 720) == (1280, 720)    # 1080p -> HD
+    assert output_size(1920, 1080, 1080) == (1920, 1080)  # same height, no-op
+    assert output_size(1920, 1080, None) == (1920, 1080)  # no target
     # odd aspect stays even-dimensioned
     assert output_size(3834, 2160, 1440)[0] % 2 == 0
+
+
+def test_resolution_presets_and_validation():
+    import pytest as _pytest
+
+    from media_tools.config import RESOLUTIONS, RenderConfig
+
+    assert RESOLUTIONS == {"hd": 720, "fhd": 1080, "2k": 1440, "4k": 2160}
+    assert RenderConfig().resolution == "2k"  # default
+    assert RenderConfig(resolution="HD").target_height() == 720  # case-insensitive
+    assert RenderConfig(resolution="4k").target_height() == 2160
+    with _pytest.raises(ValueError, match="resolution must be one of"):
+        RenderConfig(resolution="8k")
+    # assignment is validated too (CLI --res path)
+    cfg = RenderConfig()
+    cfg.resolution = "fhd"
+    assert cfg.target_height() == 1080
+    with _pytest.raises(ValueError):
+        cfg.resolution = "nope"
 
 
 def test_recent_laps_last_five():
@@ -100,8 +120,9 @@ def test_delta_vs_rolling_best():
     )
     tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=130.0, fps=1.0)
 
-    # During lap 1 there is no completed reference -> no delta.
-    assert tl.frames[20].delta_s is None
+    # During lap 1 there is no completed reference: the overlay has started,
+    # so the delta is ZEROED (shown as 0), not hidden.
+    assert tl.frames[20].delta_s == 0.0
     # During lap 2 the ref is lap 1 (45 s @20 m/s = 900 m). Lap 2 runs 10%
     # faster, so 20 s in it has covered 440 m, where lap 1 needed 22 s:
     f_lap2 = tl.frames[65]  # t=65 -> 20 s into lap 2
@@ -157,6 +178,192 @@ def test_render_frame_produces_content():
     assert img.size == (1280, 720) and img.mode == "RGBA"
     alpha = np.asarray(img)[:, :, 3]
     assert (alpha > 0).sum() > 5000  # widgets actually drawn
+
+
+def test_overlay_persists_once_started():
+    """Once the lap overlay begins it stays: held lap number and ZEROED
+    deltas between/after laps, never disappearing. Before the first lap it
+    is still absent (awaiting)."""
+    df = make_session_df(200.0)
+    laps = [(0, 10.0, 55.0), (1, 55.0, 100.0)]
+    tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=150.0, fps=1.0)
+
+    before = tl.frames[5]  # t=5, before lap 0 -> nothing shown yet
+    assert before.lap_num is None and before.delta_s is None
+
+    during = tl.frames[30]  # t=30, inside lap 0
+    assert during.lap_num == 0
+
+    after = tl.frames[130]  # t=130, stint ended at 100
+    assert after.lap_num == 1          # held last lap, not None
+    assert after.delta_s == 0.0        # zeroed, not None
+    assert after.speed_delta_kmh == 0.0
+
+
+def test_render_clip_scopes_laps_to_session(cfg, tmp_path, monkeypatch):
+    """Delta/best/lap overlays must use only the clip's session laps, not the
+    whole day's (which spans other stints / track layouts)."""
+    import media_tools.render as render_mod
+    from media_tools.library import TrackSession
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc)
+    # Two stints: session A (10-100 s) and session B (210-300 s).
+    all_laps = [(0, 10.0, 55.0), (1, 55.0, 100.0), (0, 210.0, 255.0), (1, 255.0, 300.0)]
+    day = DayFrame(df=make_session_df(400.0), start_utc=start, laps=all_laps)
+    sess_a = TrackSession(id=1, start_utc=start, end_utc=start + timedelta(seconds=100))
+    sess_b = TrackSession(
+        id=2, start_utc=start + timedelta(seconds=200), end_utc=start + timedelta(seconds=300)
+    )
+    clip = VideoClip(
+        file="raw/video/b.MP4", source_name="b.MP4", size_bytes=1, duration_s=100.0,
+        start_utc_estimate=start + timedelta(seconds=200),
+        sync=SyncInfo(
+            video_start_utc=start + timedelta(seconds=200), confidence=0.9, method="manual"
+        ),
+        session_id=2,
+    )
+    manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess_a, sess_b])
+    (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
+
+    captured = {}
+    real_sample = render_mod.sample_timeline
+
+    def spy(df, laps, *a, **k):
+        captured["laps"] = laps
+        return real_sample(df, laps, *a, **k)
+
+    monkeypatch.setattr(render_mod, "sample_timeline", spy)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+
+    def fake_composite(video, frames, size, dest, *a, **k):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+
+    monkeypatch.setattr(render_mod, "composite_stream", fake_composite)
+
+    render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
+    starts = sorted(st for _, st, _ in captured["laps"])
+    assert starts == [210.0, 255.0]  # only session B's laps, not session A's
+
+
+def test_render_stops_when_video_starts_mid_race(cfg, tmp_path, monkeypatch):
+    """A sync that lands after the race is underway (>=1 completed lap) must
+    stop rendering and demand a manual anchor - a race starts at 0 laps."""
+    import media_tools.render as render_mod
+    from media_tools.library import TrackSession
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc)
+    # Session with laps at 10-55, 55-100; the clip is synced to start at
+    # telemetry t=120 (both laps already done).
+    laps = [(0, 10.0, 55.0), (1, 55.0, 100.0)]
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=laps)
+    sess = TrackSession(id=1, start_utc=start, end_utc=start + timedelta(seconds=100))
+    clip = VideoClip(
+        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1, duration_s=60.0,
+        start_utc_estimate=start + timedelta(seconds=120),
+        sync=SyncInfo(
+            video_start_utc=start + timedelta(seconds=120), confidence=0.8, method="audio-envelope"
+        ),
+        session_id=1,
+    )
+    manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
+    (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+    monkeypatch.setattr(render_mod, "composite_stream", lambda *a, **k: None)
+
+    lines = render_mod.render_day(cfg, manifest, tmp_path / "day")
+    assert any("starts mid-race" in l and "2 lap" in l for l in lines)
+    assert not manifest.renders  # nothing rendered
+
+    # A MANUAL sync bypasses the guard (user knows what they're doing).
+    clip.sync.method = "manual"
+    captured = {}
+    monkeypatch.setattr(
+        render_mod, "composite_stream",
+        lambda video, frames, size, dest, *a, **k: (
+            dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"x"),
+            captured.setdefault("ok", True),
+        ),
+    )
+    lines2 = render_mod.render_day(cfg, manifest, tmp_path / "day")
+    assert any(l.startswith("+") for l in lines2)
+
+
+def test_render_allows_start_before_first_lap(cfg, tmp_path, monkeypatch):
+    """The common, correct case: the video starts at/just before the race
+    (0 laps done). Must NOT trigger the mid-race guard."""
+    import media_tools.render as render_mod
+    from media_tools.library import TrackSession
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 16, 23, 0, tzinfo=timezone.utc)
+    laps = [(0, 10.0, 55.0), (1, 55.0, 100.0)]
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=laps)
+    sess = TrackSession(id=1, start_utc=start, end_utc=start + timedelta(seconds=100))
+    clip = VideoClip(
+        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1, duration_s=120.0,
+        start_utc_estimate=start,
+        sync=SyncInfo(video_start_utc=start, confidence=0.8, method="audio-envelope"),
+        session_id=1,
+    )
+    manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
+    (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+    monkeypatch.setattr(
+        render_mod, "composite_stream",
+        lambda video, frames, size, dest, *a, **k: (
+            dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"x")
+        ),
+    )
+    lines = render_mod.render_day(cfg, manifest, tmp_path / "day")
+    assert any(l.startswith("+") for l in lines)  # rendered, no guard
+
+
+def test_render_clip_caps_duration_at_race_end(cfg, tmp_path, monkeypatch):
+    """A detected race end must cap BOTH the overlay window and the ffmpeg
+    duration (a real -t), and the scan must not rerun when cached."""
+    import media_tools.render as render_mod
+    from media_tools.library import RaceEnd
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 13, 11, 0, tzinfo=timezone.utc)
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=[(1, 0.0, 45.0)])
+    clip = VideoClip(
+        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1,
+        duration_s=2429.0, start_utc_estimate=start,
+        sync=SyncInfo(video_start_utc=start, confidence=0.9, method="manual"),
+        race_end=RaceEnd(engine_stop_s=2350.0, cut_at_s=705.0),
+    )
+    manifest = DayManifest(date=date(2026, 7, 13), videos=[clip])
+    (tmp_path / "day").mkdir()
+
+    captured = {}
+
+    def fake_composite(video, frames, size, dest, fps, start_s, duration_s, *a, **k):
+        captured["duration_s"] = duration_s
+        captured["start_s"] = start_s
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"out")
+
+    monkeypatch.setattr(render_mod, "composite_stream", fake_composite)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+    scanned = []
+    monkeypatch.setattr(
+        "media_tools.raceend.detect_race_end",
+        lambda *a, **k: scanned.append(1) or RaceEnd(),
+    )
+
+    render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
+    assert captured["duration_s"] == pytest.approx(705.0)  # real -t, not None
+    assert captured["start_s"] == 0.0
+    assert scanned == []  # cached result reused, no re-scan
 
 
 def test_awaiting_chrome_shows_gauges_without_data():

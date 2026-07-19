@@ -20,7 +20,7 @@ from typing import Callable
 from .config import Config
 from .library import DayManifest, PublishRecord, utcnow
 from .overlay import fmt_laptime
-from .telemetry import session_laps
+from .telemetry import complete_laps, session_laps
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
@@ -42,10 +42,11 @@ def _title_context(
     durations = []
     for session in manifest.sessions:
         if session_id is None or session.id == session_id:
-            durations += [e - st for _, st, e in session_laps(manifest, session)]
-    # Same validity rules as the overlay: truncated fragments (session cut
-    # mid-lap) and sub-minimum laps (cut track) must not become the title's
-    # best lap.
+            laps = complete_laps(session_laps(manifest, session))
+            durations += [e - st for _, st, e in laps]
+    # Same validity rules as the overlay: only complete (beacon opened+closed)
+    # laps, and among those drop fragments / sub-minimum laps (cut track) so
+    # neither the out-lap nor an in-lap fragment becomes the title's best lap.
     if durations:
         median = sorted(durations)[len(durations) // 2]
         durations = [
@@ -125,10 +126,14 @@ def publish_day(
     day_dir: Path,
     uploader: Uploader | None = None,
     dry_run: bool = False,
+    clip_filter: str | None = None,
+    save: Callable[[], None] | None = None,
 ) -> list[str]:
     report: list[str] = []
     published_files = {p.file for p in manifest.publishes}
     pending = [r for r in manifest.renders if r.file not in published_files]
+    if clip_filter:
+        pending = [r for r in pending if clip_filter.lower() in r.file.lower()]
     if not pending:
         return ["nothing to publish"]
     if uploader is None and not dry_run:
@@ -181,5 +186,9 @@ def publish_day(
                 published_at=utcnow(),
             )
         )
+        # Persist immediately: a later upload failing in this batch must never
+        # orphan a video that already went up (the record survives the crash).
+        if save is not None:
+            save()
         report.append(f"+ {render.file} -> https://youtu.be/{video_id} ({cfg.youtube.privacy})")
     return report
