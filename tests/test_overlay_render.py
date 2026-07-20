@@ -138,6 +138,33 @@ def test_delta_vs_rolling_best():
     assert f_lap3.prev_lap == (2, pytest.approx(41.0), True)
 
 
+def test_first_lap_delta_vs_out_lap_fragment():
+    """During the first timed lap there is no completed reference lap, so the
+    delta falls back to the out-lap fragment, aligned by distance-to-line
+    (the only section both laps share). The out-lap starts at the pit exit,
+    so the beginning of the lap has no reference data: deltas stay zeroed
+    until the car reaches the section the out-lap covered."""
+    hz = 10.0
+    t = np.arange(0, 140, 1 / hz)
+    # Out-lap (pit exit at t=5, line at t=45): 10 m/s -> 400 m fragment.
+    # Lap 1 and lap 2: 45 s at 20 m/s -> 900 m full laps.
+    laps = [(0, 5.0, 45.0), (1, 45.0, 90.0), (2, 90.0, 135.0)]
+    speed = np.full_like(t, 20.0)
+    speed[t < 45.0] = 10.0
+    df = pd.DataFrame({"t_s": t, "speed_ms": speed})
+    tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=135.0, fps=1.0)
+
+    # 10 s into lap 1 (t=55): 700 m to the line, beyond the out-lap's 400 m
+    # coverage -> no reference data, delta zeroed (overlay already started).
+    assert tl.frames[55].delta_s == 0.0
+    assert tl.frames[55].speed_delta_kmh == 0.0
+    # 35 s into lap 1 (t=80): 200 m to the line. The out-lap needed 20 s for
+    # those 200 m, lap 1 needs 10 s -> 10 s gained; +10 m/s = +36 km/h.
+    f = tl.frames[80]
+    assert f.delta_s == pytest.approx(-10.0, abs=0.3)
+    assert f.speed_delta_kmh == pytest.approx(36.0, abs=1.0)
+
+
 def test_best_lap_ignores_truncated_fragments():
     df = make_session_df(duration_s=200.0)
     # Real laps ~45 s plus a 17 s fragment from a session cut mid-lap.

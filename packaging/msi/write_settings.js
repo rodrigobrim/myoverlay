@@ -8,6 +8,24 @@ function jsonEscape(s) {
     return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+// Immediate custom action: preselect OUTPUT_LANGUAGE from the machine's UI
+// language when it is one of the supported nine, else leave English. The
+// low 10 bits of the LCID are the primary language id. Only overrides the
+// untouched default (a command-line OUTPUT_LANGUAGE=xx is respected).
+// Chinese primary id 4 maps to Simplified (the only Chinese we ship).
+function DetectLanguage() {
+    try {
+        if (Session.Property("OUTPUT_LANGUAGE") !== "en") return 1;
+        var primary = parseInt(Session.Property("SystemLanguageID"), 10) & 0x3FF;
+        var map = { 9: "en", 22: "pt", 10: "es", 17: "ja",
+                    1: "ar", 12: "fr", 16: "it", 25: "ru", 4: "zh" };
+        if (map[primary]) Session.Property("OUTPUT_LANGUAGE") = map[primary];
+    } catch (e) {
+        // Non-fatal: default English stands.
+    }
+    return 1;
+}
+
 function WriteSettings() {
     try {
         var parts = Session.Property("CustomActionData").split("|");
