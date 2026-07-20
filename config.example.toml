@@ -4,7 +4,7 @@
 library_root = "D:/karting/library"
 
 # Language of the video output (overlay labels + default YouTube title and
-# description): en | pt | es | ja | ar | fr | it | ru. Config stays English.
+# description): en | pt | es | ja | ar | fr | it | ru | zh. Config stays English.
 language = "en"
 
 [camera]

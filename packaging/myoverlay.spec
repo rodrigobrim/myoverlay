@@ -70,7 +70,7 @@ exe = EXE(
     exclude_binaries=True,
     name="myoverlay",
     console=True,
-    icon=None,
+    icon="../assets/branding/app.ico",
 )
 
 coll = COLLECT(
