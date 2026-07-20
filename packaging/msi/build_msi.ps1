@@ -31,12 +31,21 @@ if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
     Remove-Item $zip
 }
 
-# --- Google Cloud SDK Windows installer (bundled into the MSI) ---
-$gcloud = Join-Path $vendor "gcloud\GoogleCloudSDKInstaller.exe"
-if (-not (Test-Path $gcloud)) {
-    Write-Host "Downloading Google Cloud SDK installer..."
-    New-Item -ItemType Directory -Force (Split-Path $gcloud) | Out-Null
-    Invoke-WebRequest -Uri "https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe" -OutFile $gcloud
+# --- Google Cloud SDK, bundled OFFLINE (the full versioned archive with
+#     bundled Python, ~150 MB extracted) so the install is self-contained and
+#     truly silent via install.bat --quiet. The 267 KB online stub was NOT the
+#     SDK - it downloaded it and ran its own wizard.
+$gcloudDir = Join-Path $vendor "gcloud-sdk"          # holds google-cloud-sdk\
+$gcloudSdk = Join-Path $gcloudDir "google-cloud-sdk"
+if (-not (Test-Path (Join-Path $gcloudSdk "install.bat"))) {
+    Write-Host "Downloading the offline Google Cloud SDK archive (~150 MB)..."
+    New-Item -ItemType Directory -Force $gcloudDir | Out-Null
+    $zip = Join-Path $vendor "google-cloud-cli-windows.zip"
+    Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+        -Uri "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+    Write-Host "Extracting..."
+    Expand-Archive -Path $zip -DestinationPath $gcloudDir -Force
+    Remove-Item $zip
 }
 
 New-Item -ItemType Directory -Force $build | Out-Null
@@ -47,22 +56,30 @@ New-Item -ItemType Directory -Force $build | Out-Null
     -var var.PayloadDir -out (Join-Path $build "HarvestedFiles.wxs")
 if ($LASTEXITCODE -ne 0) { throw "heat failed" }
 
+# --- harvest the offline SDK into its own component group / feature ---
+& (Join-Path $wix "heat.exe") dir $gcloudSdk `
+    -cg GCloudFiles -dr GCLOUDDIR -srd -sreg -scom -gg `
+    -var var.GCloudDir -out (Join-Path $build "GCloudFiles.wxs")
+if ($LASTEXITCODE -ne 0) { throw "heat (gcloud) failed" }
+
 # --- compile ---
-& (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudInstaller=$gcloud" `
+& (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudDir=$gcloudSdk" `
     -ext WixUIExtension -out "$build\" `
     (Join-Path $msiDir "Product.wxs") `
     (Join-Path $msiDir "WizardUI.wxs") `
-    (Join-Path $build "HarvestedFiles.wxs")
+    (Join-Path $build "HarvestedFiles.wxs") `
+    (Join-Path $build "GCloudFiles.wxs")
 if ($LASTEXITCODE -ne 0) { throw "candle failed" }
 
 # --- link ---
 # ICE38/43/57/64: expected warnings for per-machine conditional shortcuts.
 & (Join-Path $wix "light.exe") -nologo -ext WixUIExtension `
-    -sice:ICE38 -sice:ICE43 -sice:ICE57 -sice:ICE64 -sice:ICE69 `
+    -sice:ICE20 -sice:ICE38 -sice:ICE43 -sice:ICE57 -sice:ICE60 -sice:ICE64 -sice:ICE69 `
     -b $msiDir -out $out `
     (Join-Path $build "Product.wixobj") `
     (Join-Path $build "WizardUI.wixobj") `
-    (Join-Path $build "HarvestedFiles.wixobj")
+    (Join-Path $build "HarvestedFiles.wixobj") `
+    (Join-Path $build "GCloudFiles.wixobj")
 if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
 Write-Host "MSI ready: $out"

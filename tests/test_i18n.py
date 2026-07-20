@@ -34,7 +34,8 @@ def test_config_language_defaults_to_english():
 
 
 @pytest.mark.parametrize(
-    "lang,current", [("en", "Current"), ("pt", "Atual"), ("it", "Attuale")]
+    "lang,current",
+    [("en", "Current"), ("pt", "Atual"), ("it", "Attuale"), ("zh", "当前")],
 )
 def test_overlay_labels_follow_language(lang, current):
     r = OverlayRenderer(320, 180, language=lang)

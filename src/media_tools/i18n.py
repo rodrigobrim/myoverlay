@@ -9,7 +9,7 @@ Language is set by top-level `language` in config.toml (default "en").
 
 from __future__ import annotations
 
-LANGUAGES = ["en", "pt", "es", "ja", "ar", "fr", "it", "ru"]
+LANGUAGES = ["en", "pt", "es", "ja", "ar", "fr", "it", "ru", "zh"]
 
 # Keys:
 #   current/previous/best : lap-time panel labels
@@ -106,6 +106,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "title_template": "Картинг {track} {date} - сессия {session} (лучший круг {best_lap})",
         "description_template": "Записано {date}, трасса {track}.\nЛучший круг: {best_lap}\n\nЗагружено media-tools.",
     },
+    "zh": {
+        "current": "当前",
+        "previous": "上一圈",
+        "best": "最佳",
+        "no_telemetry": "无遥测数据",
+        "speed_delta": "速度差",
+        "time_delta": "时间差",
+        "lap_word": "圈",
+        "title_template": "卡丁车 {track} {date} - 第 {session}节 (最佳单圈 {best_lap})",
+        "description_template": "录制于 {date}，赛道 {track}。\n最佳单圈：{best_lap}\n\n由 media-tools 上传。",
+    },
 }
 
 # Arial (the default overlay font) has no CJK glyphs; prepend fonts that do
@@ -116,6 +127,12 @@ FONT_CANDIDATES: dict[str, list[str]] = {
         "C:/Windows/Fonts/meiryob.ttc",
         "C:/Windows/Fonts/meiryo.ttc",
         "C:/Windows/Fonts/msgothic.ttc",
+    ],
+    "zh": [
+        "C:/Windows/Fonts/msyhbd.ttc",  # Microsoft YaHei Bold
+        "C:/Windows/Fonts/msyh.ttc",    # Microsoft YaHei
+        "C:/Windows/Fonts/simhei.ttf",  # SimHei
+        "C:/Windows/Fonts/simsun.ttc",  # SimSun
     ],
 }
 
