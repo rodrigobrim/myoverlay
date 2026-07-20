@@ -263,34 +263,39 @@ def sample_timeline(
                         ref_t, ref_d = profiles[frag[1]]
                         d_now = float(np.interp(lap_time, cur_t, cur_d))
                         d_to_line = float(cur_d[-1]) - d_now
-                        if d_to_line <= float(ref_d[-1]):
+                        # Usable reference data starts once the fragment
+                        # reached racing pace - a standing start / pit-exit
+                        # crawl is not comparable data.
+                        ready = _frag_ready_elapsed(frag)
+                        ref_d_ready = float(np.interp(ready, ref_t, ref_d))
+                        usable_span = float(ref_d[-1]) - ref_d_ready
+                        if d_to_line <= usable_span:
                             ref_elapsed = float(
                                 np.interp(float(ref_d[-1]) - d_to_line, ref_d, ref_t)
                             )
-                            ref_speed = (
-                                float(np.interp(frag[1] + ref_elapsed, t, v_arr))
-                                if v_arr is not None
-                                else None
-                            )
-                            # The matched fragment point only counts as a
-                            # reference when the fragment actually drove
-                            # there AND was at racing speed - a standing
-                            # start / pit-exit crawl is not comparable data.
-                            usable = ref_elapsed >= _frag_ready_elapsed(
-                                frag
-                            ) and _ref_position_matches(
+                            if _ref_position_matches(
                                 frag[1] + ref_elapsed,
                                 lat[i] if lat is not None else np.nan,
                                 lon[i] if lon is not None else np.nan,
-                            )
-                            if usable:
-                                # Gap at equal distance-to-line: time each lap
-                                # still needs to reach the line (positive = the
-                                # current lap is slower over the shared section).
-                                delta = (float(cur_t[-1]) - lap_time) - (
-                                    float(ref_t[-1]) - ref_elapsed
+                            ):
+                                # CAUSAL gap, anchored where usable coverage
+                                # begins: time gained/lost since both laps
+                                # entered the shared section, from data up to
+                                # NOW only. It does NOT converge to zero at
+                                # the line - the final value is the true gap
+                                # over the shared section. (Never compare
+                                # against the current lap's own finish time:
+                                # that leaks the outcome into the display.)
+                                t_anchor = float(
+                                    np.interp(
+                                        float(cur_d[-1]) - usable_span, cur_d, cur_t
+                                    )
                                 )
-                                if speed is not None and ref_speed is not None:
+                                delta = (lap_time - t_anchor) - (ref_elapsed - ready)
+                                if speed is not None and v_arr is not None:
+                                    ref_speed = float(
+                                        np.interp(frag[1] + ref_elapsed, t, v_arr)
+                                    )
                                     speed_delta = (float(speed[i]) - ref_speed) * 3.6
                 break
         # Persistence: once the lap overlay has started, never hide it again.

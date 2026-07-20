@@ -158,11 +158,16 @@ def test_first_lap_delta_vs_out_lap_fragment():
     # coverage -> no reference data, delta zeroed (overlay already started).
     assert tl.frames[55].delta_s == 0.0
     assert tl.frames[55].speed_delta_kmh == 0.0
-    # 35 s into lap 1 (t=80): 200 m to the line. The out-lap needed 20 s for
-    # those 200 m, lap 1 needs 10 s -> 10 s gained; +10 m/s = +36 km/h.
+    # 35 s into lap 1 (t=80): 200 m to the line. Anchored where the out-lap's
+    # coverage begins (500 m into lap 1, at 25 s): lap 1 covered the next
+    # 200 m in 10 s where the out-lap needed 20 s -> 10 s gained; +36 km/h.
     f = tl.frames[80]
     assert f.delta_s == pytest.approx(-10.0, abs=0.3)
     assert f.speed_delta_kmh == pytest.approx(36.0, abs=1.0)
+    # The delta is CAUSAL - it must NOT be forced back to zero at the line.
+    # Just before the crossing (44 s in, 20 m to go) the accumulated gap over
+    # the shared 400 m section is ~19 s, and that is what shows.
+    assert tl.frames[89].delta_s == pytest.approx(-19.0, abs=0.5)
 
 
 def test_best_lap_ignores_truncated_fragments():
