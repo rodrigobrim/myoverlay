@@ -1,0 +1,33 @@
+<svg viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Emblem + wordmark lockup — for dark backgrounds (app welcome, README dark) -->
+  <defs>
+    <linearGradient id="sil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#8d949e"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-45 -55) scale(0.95)">
+    <g transform="matrix(1 -0.1 -0.2 0.82 55 62)">
+      <rect x="234" y="52" width="12" height="34" rx="6" fill="#ff9f1c" transform="rotate(52 240 330)"/>
+      <rect x="234" y="52" width="12" height="34" rx="6" fill="#ff9f1c" transform="rotate(67 240 330)"/>
+      <rect x="234" y="52" width="12" height="34" rx="6" fill="#ff9f1c" transform="rotate(82 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(-80 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(-64 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(-48 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(-32 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(-16 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(0 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(16 240 330)"/>
+      <rect x="227" y="100" width="26" height="58" rx="5" fill="url(#sil)" transform="rotate(32 240 330)"/>
+      <rect x="225" y="92" width="30" height="70" rx="5" fill="#ff3b30" transform="rotate(48 240 330)"/>
+      <rect x="225" y="92" width="30" height="70" rx="5" fill="#ff3b30" transform="rotate(64 240 330)"/>
+      <rect x="225" y="92" width="30" height="70" rx="5" fill="#ff3b30" transform="rotate(80 240 330)"/>
+      <path d="M92 330 A148 148 0 0 1 344 225" fill="none" stroke="#ff3b30" stroke-width="13" stroke-linecap="round"/>
+      <g transform="rotate(60 240 330)">
+        <path d="M240 118 L256 330 L240 368 Z" fill="#ffd60a"/>
+        <path d="M240 118 L224 330 L240 368 Z" fill="#f2f0ea"/>
+      </g>
+    </g>
+  </g>
+  <text x="480" y="235" font-family="Impact, Arial Black, sans-serif" font-size="120" fill="#f2f0ea" letter-spacing="4">MyOverlay</text>
+  <text x="485" y="290" font-family="Arial, sans-serif" font-size="28" fill="#9aa0ac" letter-spacing="5">RACING TELEMETRY OVERLAY</text>
+</svg>
