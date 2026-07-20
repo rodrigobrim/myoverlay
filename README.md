@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/png/logo-horizontal.png">
+    <img src="assets/branding/png/logo-horizontal-light.png" alt="MyOverlay — racing telemetry overlay" width="600">
+  </picture>
+</p>
+
 # media-tools
 
 Zero-touch karting video pipeline: DJI Osmo Action footage + AiM MyChron

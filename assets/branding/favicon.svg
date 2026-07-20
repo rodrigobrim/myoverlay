@@ -1,0 +1,13 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simplified bold mark for tiny sizes (favicon / taskbar). Dark plate so it reads on any background. -->
+  <rect width="512" height="512" rx="100" fill="#16181d"/>
+  <rect x="222" y="60" width="68" height="130" rx="20" fill="#e6e9ee" transform="rotate(-70 256 400)"/>
+  <rect x="222" y="60" width="68" height="130" rx="20" fill="#e6e9ee" transform="rotate(-35 256 400)"/>
+  <rect x="222" y="60" width="68" height="130" rx="20" fill="#e6e9ee" transform="rotate(0 256 400)"/>
+  <rect x="216" y="48" width="80" height="150" rx="20" fill="#ff3b30" transform="rotate(35 256 400)"/>
+  <rect x="216" y="48" width="80" height="150" rx="20" fill="#ff3b30" transform="rotate(70 256 400)"/>
+  <g transform="rotate(44 256 400)">
+    <path d="M256 96 L292 400 L256 464 Z" fill="#ffd60a"/>
+    <path d="M256 96 L220 400 L256 464 Z" fill="#f2f0ea"/>
+  </g>
+</svg>
