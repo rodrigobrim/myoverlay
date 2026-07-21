@@ -166,7 +166,11 @@ def _persist_project_id(project: str, report: list[str]) -> None:
             text = re.sub(r"(?m)^(\[youtube\][^\n]*)$", rf'\1\nproject_id = "{project}"', text, count=1)
         else:
             text = text.rstrip() + f'\n\n[youtube]\nproject_id = "{project}"\n'
-        path.write_text(text, encoding="utf-8")
+        # Normalize to LF and write WITHOUT newline translation: the file was
+        # read with its CRLFs intact, and write_text would otherwise turn each
+        # \n back into \r\n, doubling the \r and breaking tomllib.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        path.write_text(text, encoding="utf-8", newline="\n")
     except OSError:
         pass
 
