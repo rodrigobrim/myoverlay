@@ -174,34 +174,149 @@ def sample_timeline(
         if not m.any():
             return float("inf")
         ft, fv = t[m] - frag[1], v_arr[m]
-        thr = REF_PACE_FRACTION * float(np.median(fv))
+        # Pace threshold from MOVING samples only: a grid-start fragment is
+        # mostly idle sitting, which would drag the median down to walking
+        # pace and let grid data through as a "racing" reference.
+        moving = fv[fv > 3.0]
+        if len(moving) == 0:
+            return float("inf")
+        thr = REF_PACE_FRACTION * float(np.median(moving))
         idx = np.nonzero(fv >= thr)[0]
         return float(ft[idx[0]]) if len(idx) else float("inf")
 
-    # GPS gate for the fragment fallback: a fragment point only counts as a
-    # reference when the fragment actually drove within this radius of the
-    # current position - the section it never visited yields no delta.
-    gps_gate = False
+    # GPS trace for the fragment fallback (NB: local names must not shadow the
+    # g_lat/g_lon g-force arrays above).
+    gps_ref = None
     if "lat" in df.columns and "lon" in df.columns:
         _g = df[["t_s", "lat", "lon"]].dropna()
         if len(_g) >= 2:
-            gps_gate = True
-            g_t = _g["t_s"].to_numpy(dtype=float)
-            g_lat = _g["lat"].to_numpy(dtype=float)
-            g_lon = _g["lon"].to_numpy(dtype=float)
+            gps_ref = (
+                _g["t_s"].to_numpy(dtype=float),
+                _g["lat"].to_numpy(dtype=float),
+                _g["lon"].to_numpy(dtype=float),
+            )
 
-    def _ref_position_matches(
-        ref_time_s: float, cur_lat: float, cur_lon: float, radius_m: float = 25.0
-    ) -> bool:
-        if not gps_gate:
-            return True  # no GPS in this log: the distance gate is all we have
-        if not (np.isfinite(cur_lat) and np.isfinite(cur_lon)):
-            return False
-        rlat = float(np.interp(ref_time_s, g_t, g_lat))
-        rlon = float(np.interp(ref_time_s, g_t, g_lon))
-        dx = (rlon - cur_lon) * 111320.0 * float(np.cos(np.radians(cur_lat)))
-        dy = (rlat - cur_lat) * 111320.0
-        return float(np.hypot(dx, dy)) <= radius_m
+    frag_state: dict = {"lap": None}
+
+    def fragment_delta(
+        frag,
+        st: float,
+        lap_time: float,
+        cur_lat: float,
+        cur_lon: float,
+        cur_speed: float | None,
+    ):
+        """Causal delta vs the previous lap fragment, matched on the
+        fragment's own GPS points (same telemetry file, same session).
+
+        The current position is matched monotonically along the fragment's
+        trace, only where the fragment actually drove at racing pace within
+        25 m. The delta is anchored at the first match and accumulates the
+        real gap from data up to now - it never uses the current lap's future.
+        Returns (delta_s, ref_speed_ms) or None where no reference exists.
+        """
+        if gps_ref is None or not (np.isfinite(cur_lat) and np.isfinite(cur_lon)):
+            return None
+        gt, gla, glo = gps_ref
+        if frag_state.get("lap") != st:
+            ready = frag[1] + _frag_ready_elapsed(frag)
+            m = (gt >= ready) & (gt <= frag[2])
+            frag_state.update(
+                lap=st,
+                idx=0,
+                anchor=None,
+                prev_pos=None,
+                ema=None,
+                track=(gt[m], gla[m], glo[m]) if int(m.sum()) >= 2 else None,
+            )
+        prev_pos = frag_state.get("prev_pos")
+        frag_state["prev_pos"] = (cur_lat, cur_lon)
+        if frag_state["track"] is None:
+            return None
+        ft, fla, flo = frag_state["track"]
+        j0 = frag_state["idx"]
+        if j0 >= len(ft):
+            return None
+        dx = (flo[j0:] - cur_lon) * 111320.0 * float(np.cos(np.radians(cur_lat)))
+        dy = (fla[j0:] - cur_lat) * 111320.0
+        d = np.hypot(dx, dy)
+        close = np.nonzero(d <= 12.0)[0]
+        if frag_state["anchor"] is None:
+            # The anchor must not land in the fragment's terminal zone: on a
+            # circuit the fragment's END (the line) is also near the current
+            # lap's START, and must not steal the match - the current lap
+            # only meets the line data at the END of its own lap.
+            close = close[ft[j0 + close] <= frag[2] - 3.0]
+        if len(close) == 0:
+            return None
+        # Earliest contiguous close run, then its closest point - NOT the
+        # global minimum.
+        c0 = c1 = int(close[0])
+        while c1 + 1 < len(d) and d[c1 + 1] <= 25.0:
+            c1 += 1
+        c1 = min(c1, int(close[-1]))
+        j = j0 + c0 + int(np.argmin(d[c0 : c1 + 1]))
+        # Heading gate: the matched fragment point must be driven in the
+        # same direction as the car is moving now - a parallel or opposite
+        # track section that passes nearby must never match.
+        if prev_pos is not None and 0 < j < len(ft) - 1:
+            coslat = float(np.cos(np.radians(cur_lat)))
+            hx = (cur_lon - prev_pos[1]) * coslat
+            hy = cur_lat - prev_pos[0]
+            fx = (flo[j + 1] - flo[j - 1]) * coslat
+            fy = fla[j + 1] - fla[j - 1]
+            nh = float(np.hypot(hx, hy))
+            nf = float(np.hypot(fx, fy))
+            if nh > 0.0 and nf > 0.0 and (hx * fx + hy * fy) / (nh * nf) < 0.5:
+                return None
+        frag_state["idx"] = j
+        # Sub-sample projection: read the reference time by projecting the
+        # current position onto the fragment's local segments around the
+        # match - snapping to a discrete 10 Hz sample would make the delta
+        # advance in jerky ~0.1 s hops (visible as flickering digits).
+        coslat = float(np.cos(np.radians(cur_lat)))
+        ref_time = float(ft[j])
+        best_perp = None
+        for a in (j - 1, j):
+            if a < 0 or a + 1 >= len(ft):
+                continue
+            ax = (flo[a] - cur_lon) * 111320.0 * coslat
+            ay = (fla[a] - cur_lat) * 111320.0
+            bx = (flo[a + 1] - flo[a]) * 111320.0 * coslat
+            by = (fla[a + 1] - fla[a]) * 111320.0
+            seg2 = bx * bx + by * by
+            if seg2 <= 0.0:
+                continue
+            u = min(1.0, max(0.0, -(ax * bx + ay * by) / seg2))
+            px = ax + u * bx
+            py = ay + u * by
+            perp = px * px + py * py
+            if best_perp is None or perp < best_perp:
+                best_perp = perp
+                ref_time = float(ft[a]) + u * float(ft[a + 1] - ft[a])
+        ref_elapsed = ref_time - frag[1]
+        if frag_state["anchor"] is None:
+            # Entry correction: at the first match the car is still up to
+            # radius_m short of the matched fragment point - anchor at the
+            # moment it will actually reach it, so the gap starts at zero
+            # at the same physical spot.
+            entry_s = 0.0
+            if cur_speed is not None and cur_speed > 1.0:
+                entry_s = float(d[j - j0]) / float(cur_speed)
+            frag_state["anchor"] = (lap_time + entry_s, ref_elapsed)
+        a_cur, a_ref = frag_state["anchor"]
+        delta = (lap_time - a_cur) - (ref_elapsed - a_ref)
+        ref_speed = float(np.interp(ref_time, t, v_arr)) if v_arr is not None else None
+        # Light exponential smoothing (fragment path only - the completed-lap
+        # reference path is already smooth) to absorb lateral GPS noise.
+        ema = frag_state.get("ema")
+        if ema is not None and 0.0 < lap_time - ema[2] <= 1.0:
+            alpha = 1.0 - float(np.exp(-(lap_time - ema[2]) / 0.4))
+            delta = ema[0] + alpha * (delta - ema[0])
+            if ref_speed is not None and ema[1] is not None:
+                ref_speed = ema[1] + alpha * (ref_speed - ema[1])
+        frag_state["ema"] = (delta, ref_speed, lap_time)
+        return delta, ref_speed
 
     def val(arr: np.ndarray | None, i: int) -> float | None:
         if arr is None or not covered[i] or not np.isfinite(arr[i]):
@@ -248,55 +363,26 @@ def sample_timeline(
                     if speed is not None and v_arr is not None:
                         ref_speed = float(np.interp(ref[1] + ref_elapsed, t, v_arr))
                         speed_delta = (float(speed[i]) - ref_speed) * 3.6
-                elif st in profiles:
-                    # First timed lap: no completed lap to reference yet, so
-                    # compare against the previous fragment (the out-lap or
-                    # the grid-start lap), aligned by distance-to-line - the
-                    # only track section both laps share. The fragment does
-                    # not cover the whole track, so a match only counts when
-                    # the fragment actually PASSED the current GPS position
-                    # (distance profiles alone over-claim coverage: idle
-                    # creep on the grid inflates the fragment's distance).
+                else:
+                    # First timed lap: no completed lap to reference yet.
+                    # Compare against the previous fragment of THIS session's
+                    # telemetry (out-lap / grid-start lap), matched on its own
+                    # GPS points - the delta exists only where the fragment
+                    # actually drove, and holds at zero elsewhere.
                     frag = previous_lap_fragment(st)
                     if frag is not None:
-                        cur_t, cur_d = profiles[st]
-                        ref_t, ref_d = profiles[frag[1]]
-                        d_now = float(np.interp(lap_time, cur_t, cur_d))
-                        d_to_line = float(cur_d[-1]) - d_now
-                        # Usable reference data starts once the fragment
-                        # reached racing pace - a standing start / pit-exit
-                        # crawl is not comparable data.
-                        ready = _frag_ready_elapsed(frag)
-                        ref_d_ready = float(np.interp(ready, ref_t, ref_d))
-                        usable_span = float(ref_d[-1]) - ref_d_ready
-                        if d_to_line <= usable_span:
-                            ref_elapsed = float(
-                                np.interp(float(ref_d[-1]) - d_to_line, ref_d, ref_t)
-                            )
-                            if _ref_position_matches(
-                                frag[1] + ref_elapsed,
-                                lat[i] if lat is not None else np.nan,
-                                lon[i] if lon is not None else np.nan,
-                            ):
-                                # CAUSAL gap, anchored where usable coverage
-                                # begins: time gained/lost since both laps
-                                # entered the shared section, from data up to
-                                # NOW only. It does NOT converge to zero at
-                                # the line - the final value is the true gap
-                                # over the shared section. (Never compare
-                                # against the current lap's own finish time:
-                                # that leaks the outcome into the display.)
-                                t_anchor = float(
-                                    np.interp(
-                                        float(cur_d[-1]) - usable_span, cur_d, cur_t
-                                    )
-                                )
-                                delta = (lap_time - t_anchor) - (ref_elapsed - ready)
-                                if speed is not None and v_arr is not None:
-                                    ref_speed = float(
-                                        np.interp(frag[1] + ref_elapsed, t, v_arr)
-                                    )
-                                    speed_delta = (float(speed[i]) - ref_speed) * 3.6
+                        r = fragment_delta(
+                            frag,
+                            st,
+                            lap_time,
+                            lat[i] if lat is not None else np.nan,
+                            lon[i] if lon is not None else np.nan,
+                            float(speed[i]) if speed is not None else None,
+                        )
+                        if r is not None:
+                            delta, ref_speed = r
+                            if speed is not None and ref_speed is not None:
+                                speed_delta = (float(speed[i]) - ref_speed) * 3.6
                 break
         # Persistence: once the lap overlay has started, never hide it again.
         # Between laps / after the stint / during a telemetry gap, hold the
