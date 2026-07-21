@@ -283,6 +283,16 @@ def _automated_pass(
     # (The bundled build can fail to start on some Windows editions -
     # observed as a side-by-side configuration error on Win10 Home -
     # and the OS-installed browsers are the reliable fallback there.)
+    # Flags that suppress the browser-chrome overlays that were blocking the
+    # run: the Translate bubble, the "sign in to Chrome / Continue as ..."
+    # promo, the default-browser and first-run prompts, and sync nags.
+    launch_args = [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--disable-features=Translate,TranslateUI,SigninInterceptBubble,"
+        "AccountConsistency,ProfilePickerOnStartup",
+    ]
     browser = None
     engine_errors: list[str] = []
     for channel in (None, "chrome", "msedge"):
@@ -293,6 +303,7 @@ def _automated_pass(
                 headless=False,
                 accept_downloads=True,
                 viewport={"width": 1400, "height": 900},
+                args=launch_args,
             )
             if channel:
                 report.append(f"using installed browser: {channel}")
@@ -571,6 +582,7 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
         ts.snap(page, "client_type_fail")
         return
     _fill_first_textbox(page, re.compile("name", re.I), "media-tools desktop")
+    _dismiss_overlays(page)  # a stray banner must not eat the Create click
 
     # The Console's sandboxed frame swallows the dialog's 'Download JSON'
     # (clicks land, no download event ever fires), so the reliable capture is
@@ -676,6 +688,29 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
 # --- small defensive helpers (the rs3.py "click named control" idiom) -------
 
 
+def _dismiss_overlays(page) -> None:
+    """Close the page-level popups that intercept clicks: the 'Project
+    scheduled for deletion' notice, cookie/consent and 'Got it' banners, etc.
+    Best-effort and silent - never raise. (Browser-chrome overlays like the
+    Translate bubble are suppressed by launch flags instead.)"""
+    labels = ["Close", "Got it", "Dismiss", "No thanks", "Not now", "OK", "Fechar"]
+    for _ in range(3):  # a dialog can reveal another beneath it
+        acted = False
+        for label in labels:
+            try:
+                btn = page.get_by_role(
+                    "button", name=re.compile(rf"^{re.escape(label)}$", re.I)
+                ).first
+                if btn.is_visible():
+                    btn.click(timeout=1500)
+                    acted = True
+            except Exception:  # noqa: BLE001 - absent/stale/not-clickable is fine
+                continue
+        if not acted:
+            return
+        time.sleep(0.5)
+
+
 def _goto_signed_in(page, url: str, report: list[str], ts: _Shoot) -> None:
     """Navigate; if Google bounces to sign-in, WAIT for the human. The
     automation never types into accounts.google.com - credentials are the
@@ -691,6 +726,7 @@ def _goto_signed_in(page, url: str, report: list[str], ts: _Shoot) -> None:
         ts.snap(page, "signin_bounce")
         raise _NeedsLogin
     time.sleep(2)  # console SPAs settle slowly after load
+    _dismiss_overlays(page)  # clear any blocking dialog before the step runs
 
 
 def _visible(page, role: str, name: str) -> bool:
