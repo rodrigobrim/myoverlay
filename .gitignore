@@ -47,3 +47,7 @@ packaging/vendor/
 *.swp
 Thumbs.db
 desktop.ini
+
+# Generated wizard bitmaps (from assets/branding via gen_bitmaps.py)
+packaging/msi/banner.bmp
+packaging/msi/dialog.bmp
