@@ -24,9 +24,28 @@ def main(
     config: Annotated[
         Optional[Path], typer.Option("--config", "-c", help="Path to config.toml")
     ] = None,
+    verbosity: Annotated[
+        str,
+        typer.Option(
+            "--verbosity",
+            help="Log level: quiet | info | debug. `debug` also surfaces "
+            "low-level telemetry-decoder chatter (e.g. libxrk 'Unknown units').",
+        ),
+    ] = "info",
 ):
     global _config_path
     _config_path = config
+
+    import logging
+
+    levels = {"quiet": logging.WARNING, "info": logging.INFO, "debug": logging.DEBUG}
+    level = levels.get(verbosity.lower())
+    if level is None:
+        console.print(
+            f"[red]--verbosity must be one of {', '.join(levels)}[/red]"
+        )
+        raise typer.Exit(2)
+    logging.getLogger("media_tools").setLevel(level)
 
 
 def get_config() -> Config:
