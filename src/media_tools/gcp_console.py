@@ -330,28 +330,49 @@ def _browser_exe() -> Path | None:
     return None
 
 
+# Cookies Google only sets after a real sign-in (the pre-login page has just
+# NID/CONSENT/AEC, deliberately excluded so this never fires on the login form).
+_SESSION_COOKIES = (
+    "SID", "HSID", "SSID", "APISID", "SAPISID",
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PSIDTS", "__Secure-3PSIDTS",
+)
+
+
 def _has_google_session(profile_dir: Path) -> bool:
-    """True once the profile holds a Google *auth session* cookie. Only SID /
-    __Secure-1PSID / __Secure-3PSID appear after a successful sign-in - the
-    pre-login cookies (NID, CONSENT, AEC) are deliberately excluded so this
-    never fires on the bare login page."""
+    """True once the profile holds a Google auth-session cookie.
+
+    Chrome's cookie DB is WAL-mode and buffers writes: an `immutable=1` read of
+    the main file alone misses a just-set session cookie that still lives in the
+    -wal sidecar (that lag is exactly why the login window seemed to never
+    close). So copy the DB together with its -wal/-shm to a temp dir and read
+    the copy, which replays the WAL and sees the fresh cookie.
+    """
+    import shutil
     import sqlite3
+    import tempfile
 
     for rel in ("Default/Network/Cookies", "Network/Cookies", "Default/Cookies"):
         db = profile_dir / rel
         if not db.is_file():
             continue
         try:
-            # immutable=1: read a snapshot without taking a lock while Chrome
-            # holds the DB open.
-            con = sqlite3.connect(f"file:{db}?immutable=1", uri=True)
-            try:
-                row = con.execute(
-                    "SELECT 1 FROM cookies WHERE host_key LIKE '%.google.com' "
-                    "AND name IN ('SID','__Secure-1PSID','__Secure-3PSID') LIMIT 1"
-                ).fetchone()
-            finally:
-                con.close()
+            with tempfile.TemporaryDirectory() as td:
+                tmp = Path(td) / "c"
+                shutil.copy2(db, tmp)
+                for ext in ("-wal", "-shm"):
+                    side = db.parent / (db.name + ext)
+                    if side.is_file():
+                        shutil.copy2(side, Path(td) / ("c" + ext))
+                con = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+                try:
+                    placeholders = ",".join("?" * len(_SESSION_COOKIES))
+                    row = con.execute(
+                        "SELECT 1 FROM cookies WHERE host_key LIKE '%.google.com' "
+                        f"AND name IN ({placeholders}) LIMIT 1",
+                        _SESSION_COOKIES,
+                    ).fetchone()
+                finally:
+                    con.close()
             if row:
                 return True
         except Exception:  # noqa: BLE001 - locked/absent/mid-write is fine
@@ -404,7 +425,8 @@ def _manual_login(profile_dir: Path, report: list[str]) -> bool:
         return False
     report.append(
         "Google blocks sign-in inside automated browsers - opening a normal "
-        "browser window instead. Just sign in; this window closes on its own."
+        "browser window instead. Sign in there; it closes on its own once "
+        "detected, or just close the window yourself when done."
     )
     try:
         proc = subprocess.Popen(
