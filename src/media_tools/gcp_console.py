@@ -89,6 +89,72 @@ def _run_gcloud(args: list[str], **kw):
     return subprocess.run(["cmd", "/c", "gcloud", *args], **kw)
 
 
+def _unique_project_id() -> str:
+    """A globally-unique project id. gcloud ids must be 6-30 chars, lowercase
+    letters/digits/hyphens, start with a letter. The display name stays
+    'myoverlay'; only the id needs to be unique."""
+    import random
+    import string
+
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return f"myoverlay-{suffix}"
+
+
+def _resolve_project(cfg: Config, report: list[str]) -> str | None:
+    """Find a usable Cloud project, creating one if needed. Project IDs are
+    globally unique, so the literal id 'myoverlay' is normally taken by someone
+    else - we instead reuse OUR project (display name 'myoverlay', matched
+    across runs) or create a fresh id with that name."""
+    configured = cfg.youtube.project_id
+    # a) a previously-resolved id we actually own -> reuse it.
+    if configured and configured != "myoverlay":
+        d = _run_gcloud(["projects", "describe", configured], capture_output=True, text=True)
+        if d.returncode == 0:
+            report.append(f"reusing configured project '{configured}'")
+            return configured
+    # b) our own project whose display name is 'myoverlay' -> reuse (idempotent).
+    listed = _run_gcloud(
+        ["projects", "list", "--filter=name=myoverlay", "--format=value(projectId)"],
+        capture_output=True, text=True,
+    )
+    ids = [x.strip() for x in (listed.stdout or "").splitlines() if x.strip()]
+    if ids:
+        report.append(f"reusing existing project '{ids[0]}' (name: myoverlay)")
+        return ids[0]
+    # c) create a fresh one: unique id, display name 'myoverlay'.
+    new_id = _unique_project_id()
+    report.append(f"creating project '{new_id}' (name: myoverlay)")
+    created = _run_gcloud(
+        ["projects", "create", new_id, "--name=myoverlay"],
+        capture_output=True, text=True,
+    )
+    if created.returncode != 0:
+        report.append("! could not create project: " + (created.stderr or "").strip()[:300])
+        return None
+    return new_id
+
+
+def _persist_project_id(project: str, report: list[str]) -> None:
+    """Write the resolved id back to config.toml so later runs and `mt publish`
+    reuse the same project without re-resolving."""
+    from .config import find_config_file
+
+    path = find_config_file()
+    if path is None or not path.is_file():
+        return
+    try:
+        text = path.read_bytes().decode("utf-8-sig")
+        if re.search(r"(?m)^\s*project_id\s*=", text):
+            text = re.sub(r'(?m)^(\s*)project_id\s*=.*$', rf'\1project_id = "{project}"', text)
+        elif re.search(r"(?m)^\[youtube\]", text):
+            text = re.sub(r"(?m)^(\[youtube\][^\n]*)$", rf'\1\nproject_id = "{project}"', text, count=1)
+        else:
+            text = text.rstrip() + f'\n\n[youtube]\nproject_id = "{project}"\n'
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def ensure_project(cfg: Config, report: list[str]) -> bool:
     """gcloud side of setup: sign in (once, interactive), then create the
     project (default 'myoverlay') or reuse it if it already exists, and enable
@@ -97,7 +163,6 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     if shutil.which("gcloud") is None:
         report.append("! Google Cloud SDK (gcloud) not found on PATH")
         return False
-    project = cfg.youtube.project_id or "myoverlay"
 
     def active_account() -> str:
         who = _run_gcloud(
@@ -115,24 +180,14 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
             return False
     report.append(f"signed in as {active_account()}")
 
-    # 2. Reuse the project if it exists, else create it named 'myoverlay'.
-    describe = _run_gcloud(
-        ["projects", "describe", project], capture_output=True, text=True
-    )
-    if describe.returncode == 0:
-        report.append(f"reusing existing project '{project}'")
-    else:
-        report.append(f"creating project '{project}'")
-        created = _run_gcloud(
-            ["projects", "create", project, "--name=myoverlay"],
-            capture_output=True, text=True,
-        )
-        if created.returncode != 0:
-            report.append(
-                f"! could not create project '{project}': "
-                + (created.stderr or "").strip()[:300]
-            )
-            return False
+    # 2. Resolve/create the project (unique id, display name 'myoverlay') and
+    #    remember it in-memory + in config so the rest of setup and publish use
+    #    the same one.
+    project = _resolve_project(cfg, report)
+    if project is None:
+        return False
+    cfg.youtube.project_id = project
+    _persist_project_id(project, report)
     _run_gcloud(["config", "set", "project", project], capture_output=True, text=True)
 
     # 3. Enable the YouTube Data API (free tier, no billing account needed).
