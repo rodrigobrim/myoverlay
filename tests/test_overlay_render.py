@@ -140,33 +140,47 @@ def test_delta_vs_rolling_best():
 
 def test_first_lap_delta_vs_out_lap_fragment():
     """During the first timed lap there is no completed reference lap, so the
-    delta falls back to the out-lap fragment, aligned by distance-to-line
-    (the only section both laps share). The out-lap starts at the pit exit,
-    so the beginning of the lap has no reference data: deltas stay zeroed
-    until the car reaches the section the out-lap covered."""
+    delta falls back to the previous fragment (the out-lap), matched on the
+    fragment's own GPS points. The out-lap only covered the last 400 m of
+    the circuit, so the beginning of lap 1 has no reference (deltas zeroed);
+    once the car reaches the covered section the delta anchors at the first
+    GPS match and accumulates the real (causal) gap - it does NOT converge
+    to zero at the line."""
     hz = 10.0
     t = np.arange(0, 140, 1 / hz)
-    # Out-lap (pit exit at t=5, line at t=45): 10 m/s -> 400 m fragment.
-    # Lap 1 and lap 2: 45 s at 20 m/s -> 900 m full laps.
+    # 900 m circular track; d = distance from the line along the lap.
+    # Out-lap (pit joins at d=500, t=5; line at t=45): 10 m/s -> 400 m.
+    # Lap 1 and lap 2: 45 s at 20 m/s -> full 900 m laps.
     laps = [(0, 5.0, 45.0), (1, 45.0, 90.0), (2, 90.0, 135.0)]
     speed = np.full_like(t, 20.0)
     speed[t < 45.0] = 10.0
-    df = pd.DataFrame({"t_s": t, "speed_ms": speed})
+    d = np.zeros_like(t)
+    m0 = (t >= 5.0) & (t < 45.0)
+    d[m0] = 500.0 + 10.0 * (t[m0] - 5.0)
+    m1 = t >= 45.0
+    d[m1] = 20.0 * (t[m1] - 45.0)
+    theta = 2 * np.pi * (d % 900.0) / 900.0
+    r = 900.0 / (2 * np.pi)
+    lat0 = -23.7
+    lat = lat0 + (r / 111320.0) * np.sin(theta)
+    lon = -46.69 + (r / (111320.0 * np.cos(np.radians(lat0)))) * np.cos(theta)
+    lat[t < 5.0] = np.nan  # in the pits: no GPS
+    lon[t < 5.0] = np.nan
+    df = pd.DataFrame({"t_s": t, "speed_ms": speed, "lat": lat, "lon": lon})
     tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=135.0, fps=1.0)
 
-    # 10 s into lap 1 (t=55): 700 m to the line, beyond the out-lap's 400 m
-    # coverage -> no reference data, delta zeroed (overlay already started).
+    # 10 s into lap 1 (t=55, d=200): the out-lap never drove d<500 -> no
+    # reference data, delta zeroed (overlay already started).
     assert tl.frames[55].delta_s == 0.0
     assert tl.frames[55].speed_delta_kmh == 0.0
-    # 35 s into lap 1 (t=80): 200 m to the line. Anchored where the out-lap's
-    # coverage begins (500 m into lap 1, at 25 s): lap 1 covered the next
-    # 200 m in 10 s where the out-lap needed 20 s -> 10 s gained; +36 km/h.
+    # 35 s into lap 1 (t=80, d=700): the out-lap covered d=500..900. Since
+    # the first match at d=500 the car gained (200/10 - 200/20) = 10 s and
+    # carries +10 m/s = +36 km/h over the fragment at the same GPS point.
     f = tl.frames[80]
-    assert f.delta_s == pytest.approx(-10.0, abs=0.3)
+    assert f.delta_s == pytest.approx(-10.0, abs=0.4)
     assert f.speed_delta_kmh == pytest.approx(36.0, abs=1.0)
-    # The delta is CAUSAL - it must NOT be forced back to zero at the line.
-    # Just before the crossing (44 s in, 20 m to go) the accumulated gap over
-    # the shared 400 m section is ~19 s, and that is what shows.
+    # Just before the line (t=89, d=880) the causal gap keeps accumulating
+    # (~ -19 s) instead of converging to zero.
     assert tl.frames[89].delta_s == pytest.approx(-19.0, abs=0.5)
 
 
