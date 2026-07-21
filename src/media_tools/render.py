@@ -35,6 +35,25 @@ class Timeline:
     track_frac: np.ndarray | None
 
 
+class RenderProgress:
+    """UI hook for render progress. The default is a no-op so render.py never
+    depends on any UI library; the CLI supplies a rich-backed subclass.
+
+    Lifecycle per day: start_day(N), then for each clip start_clip / many
+    advance_frame / finish_clip, and advance_clip after each clip completes.
+    """
+
+    def start_day(self, total_clips: int) -> None: ...
+
+    def advance_clip(self) -> None: ...
+
+    def start_clip(self, name: str, total_frames: int) -> None: ...
+
+    def advance_frame(self) -> None: ...
+
+    def finish_clip(self) -> None: ...
+
+
 def probe_video_size(path: Path) -> tuple[int, int]:
     out = subprocess.run(
         [
@@ -448,12 +467,14 @@ def composite_stream(
     codec: str = "libx264",
     scale_to: tuple[int, int] | None = None,
     scale_flags: str = "lanczos",
+    on_frame=None,
 ) -> None:
     """Composite overlay frames onto the video, streaming raw RGBA frames
     into ffmpeg over stdin (no intermediate PNGs - at 60 fps the disk round
     trip would dominate the render time).
 
     `frames` is an iterator of PIL RGBA images at `frame_size`.
+    `on_frame`, if given, is called once per frame written (progress tick).
     """
     w, h = frame_size
     tmp = dest.with_name(dest.stem + ".encoding.mp4")
@@ -493,6 +514,8 @@ def composite_stream(
         try:
             for img in frames:
                 proc.stdin.write(img.tobytes())
+                if on_frame is not None:
+                    on_frame()
             proc.stdin.close()
             proc.wait(timeout=6 * 3600)
         except (BrokenPipeError, OSError):
@@ -597,6 +620,7 @@ def render_clip(
     title: str | None = None,
     description: str | None = None,
     append_best_lap: bool = True,
+    progress: RenderProgress | None = None,
 ) -> Path:
     assert clip.sync is not None
     video = day_dir / clip.file
@@ -716,23 +740,30 @@ def render_clip(
 
     dest = day_dir / "out" / f"{video.stem}_{suffix}.mp4"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    composite_stream(
-        video,
-        (renderer.render_frame(values) for values in timeline.frames),
-        (width, height),
-        dest,
-        fps,
-        start_s,
-        # ffmpeg needs a real -t whenever the window is a sub-range of the
-        # clip (lap render or race-end trim); only a full-length render may
-        # pass None (read to EOF).
-        duration_s if (lap_num is not None or race_end_cut or race_start_trim or windowed) else None,
-        cfg.render.crf,
-        cfg.render.preset,
-        cfg.render.codec,
-        scale_to=(width, height) if (width, height) != (src_w, src_h) else None,
-        scale_flags=cfg.render.scale_flags,
-    )
+    if progress is not None:
+        progress.start_clip(clip.file, len(timeline.frames))
+    try:
+        composite_stream(
+            video,
+            (renderer.render_frame(values) for values in timeline.frames),
+            (width, height),
+            dest,
+            fps,
+            start_s,
+            # ffmpeg needs a real -t whenever the window is a sub-range of the
+            # clip (lap render or race-end trim); only a full-length render may
+            # pass None (read to EOF).
+            duration_s if (lap_num is not None or race_end_cut or race_start_trim or windowed) else None,
+            cfg.render.crf,
+            cfg.render.preset,
+            cfg.render.codec,
+            scale_to=(width, height) if (width, height) != (src_w, src_h) else None,
+            scale_flags=cfg.render.scale_flags,
+            on_frame=progress.advance_frame if progress is not None else None,
+        )
+    finally:
+        if progress is not None:
+            progress.finish_clip()
 
     manifest.renders = [r for r in manifest.renders if r.file != _rel(dest, day_dir)]
     manifest.renders.append(
@@ -793,16 +824,19 @@ def render_day(
     clip_filter: str | None = None,
     window_start_s: float = 0.0,
     window_end_s: float = 0.0,
+    progress: RenderProgress | None = None,
 ) -> list[str]:
     report: list[str] = []
     already = {src for r in manifest.renders for src in r.source_videos}
     day: DayFrame | None = None
 
+    # Pre-filter with the cheap manifest-only checks so the overall progress
+    # total is exact; skip lines are emitted here, before any encode starts.
+    to_render: list[VideoClip] = []
     for clip in manifest.videos:
         # Targeting a clip by name re-renders just it (implies force).
         if clip_filter and clip_filter not in clip.source_name and clip_filter not in clip.file:
             continue
-        clip_force = force or bool(clip_filter)
         if clip.sync is None:
             continue
         if clip.sync.confidence < cfg.render.min_sync_confidence:
@@ -811,16 +845,25 @@ def render_day(
                 f"{cfg.render.min_sync_confidence}, skipped"
             )
             continue
-        if clip.file in already and not clip_force:
+        if clip.file in already and not (force or bool(clip_filter)):
             report.append(f"= {clip.file}: already rendered")
             continue
+        to_render.append(clip)
+
+    if progress is not None:
+        progress.start_day(len(to_render))
+
+    for clip in to_render:
+        clip_force = force or bool(clip_filter)
         if day is None:
             day = load_day_frame(day_dir, manifest)
         try:
             dest = render_clip(
                 cfg, day_dir, manifest, clip, day, force=clip_force,
                 window_start_s=window_start_s, window_end_s=window_end_s,
+                progress=progress,
             )
+            report.append(f"+ {clip.file} -> {_rel(dest, day_dir)}")
         except RaceAlreadyRunning as exc:
             report.append(
                 f"! {clip.file}: starts mid-race ({exc.laps_done} lap(s) already "
@@ -829,11 +872,11 @@ def render_day(
                 f"--lap N --at MM:SS  (N = the telemetry lap you are starting at "
                 f"video time MM:SS)"
             )
-            continue
         except RuntimeError as exc:
             # A locked output (open in a player), an ffmpeg error, etc. must
             # not abort the whole day's batch - report and move on.
             report.append(f"! {clip.file}: {exc}")
-            continue
-        report.append(f"+ {clip.file} -> {_rel(dest, day_dir)}")
+        finally:
+            if progress is not None:
+                progress.advance_clip()
     return report

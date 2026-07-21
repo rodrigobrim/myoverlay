@@ -426,7 +426,7 @@ def render(
     ] = None,
 ):
     """Render telemetry overlays onto synced clips (or an edited --plan)."""
-    from .render import render_day
+    from .render import RenderProgress, render_day
     from .slice import parse_timestamp
 
     cfg = get_config()
@@ -468,12 +468,75 @@ def render(
         console.print(f"[dim]output resolution: {cfg.render.resolution} ({cfg.render.target_height()}p)[/dim]")
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
+
+    import contextlib
+
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
+
+    class _RichRenderProgress(RenderProgress):
+        """Two-level live bar: an overall clips-of-day task plus a per-clip
+        frames task that is created when a clip starts and removed when it
+        finishes (only the encoding clip shows a frame bar)."""
+
+        def __init__(self, prog: Progress, day_label: str):
+            self._prog = prog
+            self._label = day_label
+            self._overall = None
+            self._clip = None
+
+        def start_day(self, total_clips):
+            self._overall = self._prog.add_task(
+                f"[bold]{self._label}[/bold] clips", total=total_clips or 1
+            )
+
+        def advance_clip(self):
+            if self._overall is not None:
+                self._prog.advance(self._overall)
+
+        def start_clip(self, name, total_frames):
+            self._clip = self._prog.add_task(f"  {name}", total=total_frames or 1)
+
+        def advance_frame(self):
+            if self._clip is not None:
+                self._prog.advance(self._clip)
+
+        def finish_clip(self):
+            if self._clip is not None:
+                self._prog.remove_task(self._clip)
+                self._clip = None
+
+    # Live bars only make sense on a real terminal; when piped, redirected, or
+    # run in the background, fall back to the plain per-clip summary lines.
+    use_bars = console.is_terminal
     for d in days:
         manifest = lib.load_day(d)
-        lines = render_day(
-            cfg, manifest, lib.day_dir(d), force=force, clip_filter=clip,
-            window_start_s=window_start_s, window_end_s=window_end_s,
+        prog_cm = (
+            Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeRemainingColumn(),
+                console=console,
+                transient=True,
+            )
+            if use_bars
+            else contextlib.nullcontext()
         )
+        with prog_cm as prog:
+            reporter = _RichRenderProgress(prog, str(d)) if use_bars else None
+            lines = render_day(
+                cfg, manifest, lib.day_dir(d), force=force, clip_filter=clip,
+                window_start_s=window_start_s, window_end_s=window_end_s,
+                progress=reporter,
+            )
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")
         for line in lines or ["  nothing to render"]:
