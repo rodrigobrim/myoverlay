@@ -262,9 +262,17 @@ def main() -> None:
         say(f"ERROR: bundled ffmpeg missing at {ffmpeg_dir} - broken build")
         sys.exit(2)
     # Bundled tools first on PATH: the pipeline invokes ffmpeg/ffprobe by name.
-    os.environ["PATH"] = os.pathsep.join(
-        [str(ffmpeg_dir), str(git.parent), os.environ.get("PATH", "")]
-    )
+    path_parts = [str(ffmpeg_dir), str(git.parent)]
+    # The MSI installs the Google Cloud SDK next to the exe (not inside the
+    # frozen bundle) and adds it to the machine PATH - but a process launched
+    # by the installer itself may not see that change yet. Add it directly so
+    # `mt google-setup` finds gcloud on the very first run after install.
+    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
+    if exe_dir is not None:
+        gcloud_bin = exe_dir / "google-cloud-sdk" / "bin"
+        if gcloud_bin.is_dir():
+            path_parts.append(str(gcloud_bin))
+    os.environ["PATH"] = os.pathsep.join(path_parts + [os.environ.get("PATH", "")])
 
     argv = list(sys.argv[1:])
     skip_update = os.environ.get("MYOVERLAY_NO_UPDATE") == "1"

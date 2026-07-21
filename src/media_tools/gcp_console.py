@@ -25,11 +25,29 @@ One-time dependency setup:  uv sync && uv run playwright install chromium
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
 from .config import Config
+
+
+def _gcp_data_dir(cfg: Config) -> Path:
+    """Where to keep the browser profile / troubleshoot snapshots. Prefer the
+    media library, but google-setup can run right after install - before
+    library_root is set (it defaults to a placeholder like D:/... that may not
+    exist) - so fall back to a stable app-data path that always exists."""
+    try:
+        lib = Path(cfg.library_root)
+        if lib.exists():
+            return lib
+    except OSError:
+        pass
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+    return Path(base) / "myoverlay"
 
 CONSOLE = "https://console.cloud.google.com"
 _STEP_TIMEOUT_MS = 15_000
@@ -48,7 +66,7 @@ class _Shoot:
 
     def __init__(self, cfg: Config, enabled: bool) -> None:
         self.enabled = enabled
-        self.dir = Path(cfg.library_root) / "gcp_troubleshoot"
+        self.dir = _gcp_data_dir(cfg) / "gcp_troubleshoot"
         self.n = 0
         if enabled:
             self.dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +100,131 @@ class _Shoot:
             pass
 
 
+def _run_gcloud(args: list[str], **kw):
+    """Run gcloud (a .cmd on Windows) via cmd /c so it resolves from PATH."""
+    return subprocess.run(["cmd", "/c", "gcloud", *args], **kw)
+
+
+def _unique_project_id() -> str:
+    """A globally-unique project id. gcloud ids must be 6-30 chars, lowercase
+    letters/digits/hyphens, start with a letter. The display name stays
+    'myoverlay'; only the id needs to be unique."""
+    import random
+    import string
+
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return f"myoverlay-{suffix}"
+
+
+def _resolve_project(cfg: Config, report: list[str]) -> str | None:
+    """Find a usable Cloud project, creating one if needed. Project IDs are
+    globally unique, so the literal id 'myoverlay' is normally taken by someone
+    else - we instead reuse OUR project (display name 'myoverlay', matched
+    across runs) or create a fresh id with that name."""
+    configured = cfg.youtube.project_id
+    # a) a previously-resolved id we actually own -> reuse it.
+    if configured and configured != "myoverlay":
+        d = _run_gcloud(["projects", "describe", configured], capture_output=True, text=True)
+        if d.returncode == 0:
+            report.append(f"reusing configured project '{configured}'")
+            return configured
+    # b) our own project whose display name is 'myoverlay' -> reuse (idempotent).
+    listed = _run_gcloud(
+        ["projects", "list", "--filter=name=myoverlay", "--format=value(projectId)"],
+        capture_output=True, text=True,
+    )
+    ids = [x.strip() for x in (listed.stdout or "").splitlines() if x.strip()]
+    if ids:
+        report.append(f"reusing existing project '{ids[0]}' (name: myoverlay)")
+        return ids[0]
+    # c) create a fresh one: unique id, display name 'myoverlay'.
+    new_id = _unique_project_id()
+    report.append(f"creating project '{new_id}' (name: myoverlay)")
+    created = _run_gcloud(
+        ["projects", "create", new_id, "--name=myoverlay"],
+        capture_output=True, text=True,
+    )
+    if created.returncode != 0:
+        report.append("! could not create project: " + (created.stderr or "").strip()[:300])
+        return None
+    return new_id
+
+
+def _persist_project_id(project: str, report: list[str]) -> None:
+    """Write the resolved id back to config.toml so later runs and `mt publish`
+    reuse the same project without re-resolving."""
+    from .config import find_config_file
+
+    path = find_config_file()
+    if path is None or not path.is_file():
+        return
+    try:
+        text = path.read_bytes().decode("utf-8-sig")
+        if re.search(r"(?m)^\s*project_id\s*=", text):
+            text = re.sub(r'(?m)^(\s*)project_id\s*=.*$', rf'\1project_id = "{project}"', text)
+        elif re.search(r"(?m)^\[youtube\]", text):
+            text = re.sub(r"(?m)^(\[youtube\][^\n]*)$", rf'\1\nproject_id = "{project}"', text, count=1)
+        else:
+            text = text.rstrip() + f'\n\n[youtube]\nproject_id = "{project}"\n'
+        # Normalize to LF and write WITHOUT newline translation: the file was
+        # read with its CRLFs intact, and write_text would otherwise turn each
+        # \n back into \r\n, doubling the \r and breaking tomllib.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        path.write_text(text, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
+def ensure_project(cfg: Config, report: list[str]) -> bool:
+    """gcloud side of setup: sign in (once, interactive), then create the
+    project (default 'myoverlay') or reuse it if it already exists, and enable
+    the YouTube Data API. Returns True when the project is ready. The browser
+    steps that follow (in setup_google_api) need this done first."""
+    if shutil.which("gcloud") is None:
+        report.append("! Google Cloud SDK (gcloud) not found on PATH")
+        return False
+
+    def active_account() -> str:
+        who = _run_gcloud(
+            ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"],
+            capture_output=True, text=True,
+        )
+        return (who.stdout or "").strip()
+
+    # 1. Sign in if there is no active account (opens a browser once).
+    if not active_account():
+        report.append("opening a browser to sign in to Google (one time)...")
+        _run_gcloud(["auth", "login", "--brief"])
+        if not active_account():
+            report.append("! sign-in did not complete; re-run `mt google-setup`")
+            return False
+    report.append(f"signed in as {active_account()}")
+
+    # 2. Resolve/create the project (unique id, display name 'myoverlay') and
+    #    remember it in-memory + in config so the rest of setup and publish use
+    #    the same one.
+    project = _resolve_project(cfg, report)
+    if project is None:
+        return False
+    cfg.youtube.project_id = project
+    _persist_project_id(project, report)
+    _run_gcloud(["config", "set", "project", project], capture_output=True, text=True)
+
+    # 3. Enable the YouTube Data API (free tier, no billing account needed).
+    report.append("enabling the YouTube Data API...")
+    enabled = _run_gcloud(
+        ["services", "enable", "youtube.googleapis.com", f"--project={project}"],
+        capture_output=True, text=True,
+    )
+    if enabled.returncode != 0:
+        report.append(
+            "! could not enable the YouTube Data API: "
+            + (enabled.stderr or "").strip()[:300]
+        )
+        return False
+    return True
+
+
 def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
     """Configure the Google side of `mt publish` end to end. Returns a report;
     never raises (the manual Console path always remains as fallback)."""
@@ -94,14 +237,18 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
         )
         return report
 
-    project = cfg.youtube.project_id
-    if not project:
-        report.append("! youtube.project_id is not set in config; cannot open the Console")
+    # gcloud preamble: sign in, create/reuse the project, enable the API.
+    if not ensure_project(cfg, report):
         return report
+    project = cfg.youtube.project_id or "myoverlay"
 
     ts = _Shoot(cfg, troubleshoot)
-    profile_dir = Path(cfg.library_root) / "gcp_browser_profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = _gcp_data_dir(cfg) / "gcp_browser_profile"
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report.append(f"! could not create the browser profile dir: {exc}")
+        return report
 
     try:
         with sync_playwright() as pw:
@@ -136,6 +283,16 @@ def _automated_pass(
     # (The bundled build can fail to start on some Windows editions -
     # observed as a side-by-side configuration error on Win10 Home -
     # and the OS-installed browsers are the reliable fallback there.)
+    # Flags that suppress the browser-chrome overlays that were blocking the
+    # run: the Translate bubble, the "sign in to Chrome / Continue as ..."
+    # promo, the default-browser and first-run prompts, and sync nags.
+    launch_args = [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--disable-features=Translate,TranslateUI,SigninInterceptBubble,"
+        "AccountConsistency,ProfilePickerOnStartup",
+    ]
     browser = None
     engine_errors: list[str] = []
     for channel in (None, "chrome", "msedge"):
@@ -146,6 +303,7 @@ def _automated_pass(
                 headless=False,
                 accept_downloads=True,
                 viewport={"width": 1400, "height": 900},
+                args=launch_args,
             )
             if channel:
                 report.append(f"using installed browser: {channel}")
@@ -183,28 +341,49 @@ def _browser_exe() -> Path | None:
     return None
 
 
+# Cookies Google only sets after a real sign-in (the pre-login page has just
+# NID/CONSENT/AEC, deliberately excluded so this never fires on the login form).
+_SESSION_COOKIES = (
+    "SID", "HSID", "SSID", "APISID", "SAPISID",
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PSIDTS", "__Secure-3PSIDTS",
+)
+
+
 def _has_google_session(profile_dir: Path) -> bool:
-    """True once the profile holds a Google *auth session* cookie. Only SID /
-    __Secure-1PSID / __Secure-3PSID appear after a successful sign-in - the
-    pre-login cookies (NID, CONSENT, AEC) are deliberately excluded so this
-    never fires on the bare login page."""
+    """True once the profile holds a Google auth-session cookie.
+
+    Chrome's cookie DB is WAL-mode and buffers writes: an `immutable=1` read of
+    the main file alone misses a just-set session cookie that still lives in the
+    -wal sidecar (that lag is exactly why the login window seemed to never
+    close). So copy the DB together with its -wal/-shm to a temp dir and read
+    the copy, which replays the WAL and sees the fresh cookie.
+    """
+    import shutil
     import sqlite3
+    import tempfile
 
     for rel in ("Default/Network/Cookies", "Network/Cookies", "Default/Cookies"):
         db = profile_dir / rel
         if not db.is_file():
             continue
         try:
-            # immutable=1: read a snapshot without taking a lock while Chrome
-            # holds the DB open.
-            con = sqlite3.connect(f"file:{db}?immutable=1", uri=True)
-            try:
-                row = con.execute(
-                    "SELECT 1 FROM cookies WHERE host_key LIKE '%.google.com' "
-                    "AND name IN ('SID','__Secure-1PSID','__Secure-3PSID') LIMIT 1"
-                ).fetchone()
-            finally:
-                con.close()
+            with tempfile.TemporaryDirectory() as td:
+                tmp = Path(td) / "c"
+                shutil.copy2(db, tmp)
+                for ext in ("-wal", "-shm"):
+                    side = db.parent / (db.name + ext)
+                    if side.is_file():
+                        shutil.copy2(side, Path(td) / ("c" + ext))
+                con = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+                try:
+                    placeholders = ",".join("?" * len(_SESSION_COOKIES))
+                    row = con.execute(
+                        "SELECT 1 FROM cookies WHERE host_key LIKE '%.google.com' "
+                        f"AND name IN ({placeholders}) LIMIT 1",
+                        _SESSION_COOKIES,
+                    ).fetchone()
+                finally:
+                    con.close()
             if row:
                 return True
         except Exception:  # noqa: BLE001 - locked/absent/mid-write is fine
@@ -257,7 +436,8 @@ def _manual_login(profile_dir: Path, report: list[str]) -> bool:
         return False
     report.append(
         "Google blocks sign-in inside automated browsers - opening a normal "
-        "browser window instead. Just sign in; this window closes on its own."
+        "browser window instead. Sign in there; it closes on its own once "
+        "detected, or just close the window yourself when done."
     )
     try:
         proc = subprocess.Popen(
@@ -402,6 +582,7 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
         ts.snap(page, "client_type_fail")
         return
     _fill_first_textbox(page, re.compile("name", re.I), "media-tools desktop")
+    _dismiss_overlays(page)  # a stray banner must not eat the Create click
 
     # The Console's sandboxed frame swallows the dialog's 'Download JSON'
     # (clicks land, no download event ever fires), so the reliable capture is
@@ -507,6 +688,29 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
 # --- small defensive helpers (the rs3.py "click named control" idiom) -------
 
 
+def _dismiss_overlays(page) -> None:
+    """Close the page-level popups that intercept clicks: the 'Project
+    scheduled for deletion' notice, cookie/consent and 'Got it' banners, etc.
+    Best-effort and silent - never raise. (Browser-chrome overlays like the
+    Translate bubble are suppressed by launch flags instead.)"""
+    labels = ["Close", "Got it", "Dismiss", "No thanks", "Not now", "OK", "Fechar"]
+    for _ in range(3):  # a dialog can reveal another beneath it
+        acted = False
+        for label in labels:
+            try:
+                btn = page.get_by_role(
+                    "button", name=re.compile(rf"^{re.escape(label)}$", re.I)
+                ).first
+                if btn.is_visible():
+                    btn.click(timeout=1500)
+                    acted = True
+            except Exception:  # noqa: BLE001 - absent/stale/not-clickable is fine
+                continue
+        if not acted:
+            return
+        time.sleep(0.5)
+
+
 def _goto_signed_in(page, url: str, report: list[str], ts: _Shoot) -> None:
     """Navigate; if Google bounces to sign-in, WAIT for the human. The
     automation never types into accounts.google.com - credentials are the
@@ -522,6 +726,7 @@ def _goto_signed_in(page, url: str, report: list[str], ts: _Shoot) -> None:
         ts.snap(page, "signin_bounce")
         raise _NeedsLogin
     time.sleep(2)  # console SPAs settle slowly after load
+    _dismiss_overlays(page)  # clear any blocking dialog before the step runs
 
 
 def _visible(page, role: str, name: str) -> bool:
