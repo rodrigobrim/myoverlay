@@ -25,6 +25,7 @@ One-time dependency setup:  uv sync && uv run playwright install chromium
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,21 @@ import time
 from pathlib import Path
 
 from .config import Config
+
+
+def _gcp_data_dir(cfg: Config) -> Path:
+    """Where to keep the browser profile / troubleshoot snapshots. Prefer the
+    media library, but google-setup can run right after install - before
+    library_root is set (it defaults to a placeholder like D:/... that may not
+    exist) - so fall back to a stable app-data path that always exists."""
+    try:
+        lib = Path(cfg.library_root)
+        if lib.exists():
+            return lib
+    except OSError:
+        pass
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+    return Path(base) / "myoverlay"
 
 CONSOLE = "https://console.cloud.google.com"
 _STEP_TIMEOUT_MS = 15_000
@@ -50,7 +66,7 @@ class _Shoot:
 
     def __init__(self, cfg: Config, enabled: bool) -> None:
         self.enabled = enabled
-        self.dir = Path(cfg.library_root) / "gcp_troubleshoot"
+        self.dir = _gcp_data_dir(cfg) / "gcp_troubleshoot"
         self.n = 0
         if enabled:
             self.dir.mkdir(parents=True, exist_ok=True)
@@ -223,8 +239,12 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
     project = cfg.youtube.project_id or "myoverlay"
 
     ts = _Shoot(cfg, troubleshoot)
-    profile_dir = Path(cfg.library_root) / "gcp_browser_profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = _gcp_data_dir(cfg) / "gcp_browser_profile"
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report.append(f"! could not create the browser profile dir: {exc}")
+        return report
 
     try:
         with sync_playwright() as pw:
