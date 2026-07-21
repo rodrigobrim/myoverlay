@@ -74,7 +74,7 @@ def ingest(
         ),
     ] = False,
 ):
-    """Copy new camera clips and MyChron sessions into the library (download only)."""
+    """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
     if rs3 or rs3_only or troubleshoot:
         from .ingest.rs3 import trigger_rs3_download
@@ -143,7 +143,7 @@ def plan(
         typer.Option("--emit", help="Write the plan to this file (default work/render_plan.json)"),
     ] = None,
 ):
-    """Build the render-plan queue (review Gate 2) - one item per synced clip."""
+    """Build the render-plan queue (review Gate 2) - one item per synced video."""
     from .reviewplan import build_plan, save_plan
 
     cfg = get_config()
@@ -238,6 +238,7 @@ def join_cmd(
     clips: Annotated[
         Optional[str],
         typer.Option(
+            "--videos",
             "--clips",
             help="Comma-separated source-name substrings to join as ONE session "
             "(e.g. 0065,0066). Omit to auto-detect all split runs.",
@@ -249,7 +250,7 @@ def join_cmd(
     ] = 8.0,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be joined")] = False,
 ):
-    """Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one clip."""
+    """Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one video."""
     from .videojoin import join_day
 
     cfg = get_config()
@@ -272,7 +273,7 @@ def join_cmd(
 def correlate(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
 ):
-    """Group ingested files into track sessions and assign clips to them."""
+    """Group ingested files into track sessions and assign videos to them."""
     from .correlate import correlate_day
 
     cfg = get_config()
@@ -284,7 +285,7 @@ def correlate(
         lib.save_day(manifest)
         console.print(
             f"[bold]{d}[/bold]: {report.sessions} session(s), "
-            f"{report.assigned_videos} clip(s) assigned"
+            f"{report.assigned_videos} video(s) assigned"
         )
         for f in report.unassigned_videos:
             console.print(f"  [yellow]unassigned:[/yellow] {f}")
@@ -297,10 +298,13 @@ def correlate(
 @app.command()
 def sync(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
-    clip: Annotated[Optional[str], typer.Option(help="Manual mode: clip source name")] = None,
+    clip: Annotated[
+        Optional[str],
+        typer.Option("--video", "--clip", help="Manual mode: video source name"),
+    ] = None,
     video_start: Annotated[
         Optional[str],
-        typer.Option(help="Manual mode: exact UTC start of the clip (ISO 8601)"),
+        typer.Option(help="Manual mode: exact UTC start of the video (ISO 8601)"),
     ] = None,
     lap: Annotated[
         Optional[int],
@@ -310,9 +314,9 @@ def sync(
         Optional[str],
         typer.Option("--at", help="Manual mode: video time (MM:SS) of the --lap start/finish crossing"),
     ] = None,
-    force: Annotated[bool, typer.Option(help="Re-sync clips that already have a sync")] = False,
+    force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
 ):
-    """Align clips with telemetry (auto, or manual --clip with --video-start or --lap/--at)."""
+    """Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at)."""
     from datetime import datetime as dt, timedelta
 
     from .library import SyncInfo
@@ -325,13 +329,13 @@ def sync(
     if clip or video_start or lap is not None:
         if not (clip and day and (video_start or lap is not None)):
             console.print(
-                "[red]manual mode needs DAY, --clip and either --video-start or --lap/--at[/red]"
+                "[red]manual mode needs DAY, --video and either --video-start or --lap/--at[/red]"
             )
             raise typer.Exit(2)
         manifest = lib.load_day(date.fromisoformat(day))
         matches = [v for v in manifest.videos if v.source_name == clip]
         if not matches:
-            console.print(f"[red]no clip named {clip} on {day}[/red]")
+            console.print(f"[red]no video named {clip} on {day}[/red]")
             raise typer.Exit(2)
         target = matches[0]
 
@@ -378,7 +382,7 @@ def sync(
 @app.command()
 def render(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
-    force: Annotated[bool, typer.Option(help="Re-render already rendered clips")] = False,
+    force: Annotated[bool, typer.Option(help="Re-render already rendered videos")] = False,
     resolution: Annotated[
         Optional[str],
         typer.Option("--resolution", "--res", help="Output resolution: hd|fhd|2k|4k (default from config)"),
@@ -393,8 +397,9 @@ def render(
     clip: Annotated[
         Optional[str],
         typer.Option(
+            "--video",
             "--clip",
-            help="Only render clips whose name contains this substring (re-renders them)",
+            help="Only render videos whose name contains this substring (re-renders them)",
         ),
     ] = None,
     sample_from: Annotated[
@@ -402,7 +407,7 @@ def render(
         typer.Option(
             "--from",
             help="Render only from this video time (MM:SS or seconds) - a short sample "
-            "to validate the trim without rendering the whole clip",
+            "to validate the trim without rendering the whole video",
         ),
     ] = None,
     sample_to: Annotated[
@@ -425,7 +430,7 @@ def render(
         typer.Option("--plan", help="Execute an edited render plan (work/render_plan.json)"),
     ] = None,
 ):
-    """Render telemetry overlays onto synced clips (or an edited --plan)."""
+    """Render telemetry overlays onto synced videos (or an edited --plan)."""
     from .render import render_day
     from .slice import parse_timestamp
 
@@ -488,7 +493,8 @@ def slice_cmd(
         typer.Argument(help="Time ranges like 12:01-14:02, 1:02:03-1:04:00 or 721-842 (seconds)"),
     ],
     clip: Annotated[
-        Optional[str], typer.Option(help="Which rendered clip (substring) when the day has several")
+        Optional[str],
+        typer.Option("--video", "--clip", help="Which rendered video (substring) when the day has several"),
     ] = None,
     copy: Annotated[
         bool, typer.Option(help="Keyframe-snapped stream copy (instant, cuts up to a few seconds early)")
@@ -560,7 +566,7 @@ def publish(
     ] = False,
     clip: Annotated[
         Optional[str],
-        typer.Option("--clip", help="Only publish renders whose file name contains this substring"),
+        typer.Option("--video", "--clip", help="Only publish renders whose file name contains this substring"),
     ] = None,
 ):
     """Upload rendered videos to YouTube (as configured, default private)."""
