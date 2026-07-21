@@ -128,9 +128,9 @@ def unified_frame(log) -> pd.DataFrame:
 
 
 def load_unified(xrk_path: Path) -> pd.DataFrame:
-    from libxrk import aim_xrk
+    from .xrk_io import load_xrk
 
-    return unified_frame(aim_xrk(str(xrk_path)))
+    return unified_frame(load_xrk(xrk_path))
 
 
 @dataclass

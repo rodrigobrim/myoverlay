@@ -66,9 +66,9 @@ def _parse_log_datetime(metadata: dict, logger_tz: tzinfo) -> datetime | None:
 
 
 def parse_xrk(path: Path, logger_tz: tzinfo) -> XrkInfo:
-    from libxrk import aim_xrk  # deferred: import builds Cython state
+    from ..xrk_io import load_xrk
 
-    log = aim_xrk(str(path))
+    log = load_xrk(path)
 
     duration_ms = 0
     for table in log.channels.values():
