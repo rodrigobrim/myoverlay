@@ -150,8 +150,9 @@ class YouTubeConfig(BaseModel):
     playlist_id: str | None = None
     client_secret_file: Path = Path("client_secret.json")
     token_file: Path = Path("token.json")
-    # Cloud project used by `mt google-setup` (Console browser automation).
-    project_id: str | None = None
+    # Cloud project used by `mt google-setup`. Default "myoverlay": the setup
+    # creates it (or reuses it if it already exists) under your Google account.
+    project_id: str = "myoverlay"
 
 
 class Config(BaseModel):

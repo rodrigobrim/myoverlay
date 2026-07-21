@@ -26,6 +26,8 @@ One-time dependency setup:  uv sync && uv run playwright install chromium
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -82,6 +84,72 @@ class _Shoot:
             pass
 
 
+def _run_gcloud(args: list[str], **kw):
+    """Run gcloud (a .cmd on Windows) via cmd /c so it resolves from PATH."""
+    return subprocess.run(["cmd", "/c", "gcloud", *args], **kw)
+
+
+def ensure_project(cfg: Config, report: list[str]) -> bool:
+    """gcloud side of setup: sign in (once, interactive), then create the
+    project (default 'myoverlay') or reuse it if it already exists, and enable
+    the YouTube Data API. Returns True when the project is ready. The browser
+    steps that follow (in setup_google_api) need this done first."""
+    if shutil.which("gcloud") is None:
+        report.append("! Google Cloud SDK (gcloud) not found on PATH")
+        return False
+    project = cfg.youtube.project_id or "myoverlay"
+
+    def active_account() -> str:
+        who = _run_gcloud(
+            ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"],
+            capture_output=True, text=True,
+        )
+        return (who.stdout or "").strip()
+
+    # 1. Sign in if there is no active account (opens a browser once).
+    if not active_account():
+        report.append("opening a browser to sign in to Google (one time)...")
+        _run_gcloud(["auth", "login", "--brief"])
+        if not active_account():
+            report.append("! sign-in did not complete; re-run `mt google-setup`")
+            return False
+    report.append(f"signed in as {active_account()}")
+
+    # 2. Reuse the project if it exists, else create it named 'myoverlay'.
+    describe = _run_gcloud(
+        ["projects", "describe", project], capture_output=True, text=True
+    )
+    if describe.returncode == 0:
+        report.append(f"reusing existing project '{project}'")
+    else:
+        report.append(f"creating project '{project}'")
+        created = _run_gcloud(
+            ["projects", "create", project, "--name=myoverlay"],
+            capture_output=True, text=True,
+        )
+        if created.returncode != 0:
+            report.append(
+                f"! could not create project '{project}': "
+                + (created.stderr or "").strip()[:300]
+            )
+            return False
+    _run_gcloud(["config", "set", "project", project], capture_output=True, text=True)
+
+    # 3. Enable the YouTube Data API (free tier, no billing account needed).
+    report.append("enabling the YouTube Data API...")
+    enabled = _run_gcloud(
+        ["services", "enable", "youtube.googleapis.com", f"--project={project}"],
+        capture_output=True, text=True,
+    )
+    if enabled.returncode != 0:
+        report.append(
+            "! could not enable the YouTube Data API: "
+            + (enabled.stderr or "").strip()[:300]
+        )
+        return False
+    return True
+
+
 def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
     """Configure the Google side of `mt publish` end to end. Returns a report;
     never raises (the manual Console path always remains as fallback)."""
@@ -94,10 +162,10 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
         )
         return report
 
-    project = cfg.youtube.project_id
-    if not project:
-        report.append("! youtube.project_id is not set in config; cannot open the Console")
+    # gcloud preamble: sign in, create/reuse the project, enable the API.
+    if not ensure_project(cfg, report):
         return report
+    project = cfg.youtube.project_id or "myoverlay"
 
     ts = _Shoot(cfg, troubleshoot)
     profile_dir = Path(cfg.library_root) / "gcp_browser_profile"

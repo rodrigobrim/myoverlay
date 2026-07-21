@@ -50,6 +50,36 @@ if (-not (Test-Path (Join-Path $gcloudSdk "install.bat"))) {
 
 New-Item -ItemType Directory -Force $build | Out-Null
 
+# --- branded wizard bitmaps (banner.bmp / dialog.bmp) from the logo assets ---
+Write-Host "Generating wizard bitmaps from the branding assets..."
+uv run --project $repo python (Join-Path $msiDir "gen_bitmaps.py")
+if ($LASTEXITCODE -ne 0) { throw "gen_bitmaps failed" }
+
+# --- bundled-component versions: SINGLE SOURCE OF TRUTH is the actual
+#     binaries that ship. Read fresh on every build, so when a vendored tool
+#     is updated the wizard shows the new version automatically. The versions
+#     are passed to candle and rendered on the component-selection page. ---
+$ffmpegExe = Get-ChildItem -Path $payload -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+$gitExe = Get-ChildItem -Path $payload -Recurse -Filter git.exe -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+
+$ffmpegVersion = "unknown"
+if ($ffmpegExe) {
+    $line = (& $ffmpegExe -version 2>$null | Select-Object -First 1)
+    if ($line -match 'ffmpeg version (\d+\.\d+(\.\d+)?)') { $ffmpegVersion = $Matches[1] }
+    elseif ($line -match 'ffmpeg version (\S+)') { $ffmpegVersion = ($Matches[1] -split '-')[0] }
+}
+$gitVersion = "unknown"
+if ($gitExe) {
+    $line = (& $gitExe --version 2>$null | Select-Object -First 1)
+    if ($line -match 'git version (\d+\.\d+\.\d+)') { $gitVersion = $Matches[1] }
+}
+$gcloudVersion = (Get-Content (Join-Path $gcloudSdk "VERSION") -ErrorAction SilentlyContinue |
+    Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($gcloudVersion)) { $gcloudVersion = "unknown" }
+Write-Host "Bundled versions -> ffmpeg $ffmpegVersion | git $gitVersion | gcloud $gcloudVersion"
+
 # --- harvest the onedir payload ---
 & (Join-Path $wix "heat.exe") dir $payload `
     -cg MyOverlayFiles -dr INSTALLFOLDER -srd -sreg -scom -gg `
@@ -64,6 +94,7 @@ if ($LASTEXITCODE -ne 0) { throw "heat (gcloud) failed" }
 
 # --- compile ---
 & (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudDir=$gcloudSdk" `
+    "-dFfmpegVersion=$ffmpegVersion" "-dGitVersion=$gitVersion" "-dGcloudVersion=$gcloudVersion" `
     -ext WixUIExtension -out "$build\" `
     (Join-Path $msiDir "Product.wxs") `
     (Join-Path $msiDir "WizardUI.wxs") `

@@ -24,7 +24,6 @@
       <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
       <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
 
-
       <DialogRef Id="ErrorDlg" />
       <DialogRef Id="FatalError" />
       <DialogRef Id="FilesInUse" />
@@ -38,36 +37,20 @@
 
       <Publish Dialog="LanguageDlg" Control="Back" Event="DoAction" Value="ApplyUiLanguage" Order="1">1</Publish>
       <Publish Dialog="LanguageDlg" Control="Back" Event="NewDialog" Value="MyWelcomeDlg" Order="2">1</Publish>
-      <!-- Re-translate everything downstream of the combo, then continue
-           (skipping the SDK page when the SDK is already on the machine). -->
+      <!-- Re-translate everything downstream of the combo, then go to the
+           component-selection page. -->
       <Publish Dialog="LanguageDlg" Control="Next" Event="DoAction" Value="ApplyUiLanguage" Order="1">1</Publish>
-      <Publish Dialog="LanguageDlg" Control="Next" Event="NewDialog" Value="ShortcutsDlg" Order="2">GCLOUD_PRESENT</Publish>
-      <Publish Dialog="LanguageDlg" Control="Next" Event="NewDialog" Value="GCloudDlg" Order="3">NOT GCLOUD_PRESENT</Publish>
+      <Publish Dialog="LanguageDlg" Control="Next" Event="NewDialog" Value="ComponentsDlg" Order="2">1</Publish>
 
-      <!-- Google Cloud SDK page (only shown when the SDK is missing): the
-           bundled SDK is set up silently during the install phase, behind the
-           progress bar. Informational - just continue. -->
-      <Publish Dialog="GCloudDlg" Control="Back" Event="NewDialog" Value="LanguageDlg">1</Publish>
-      <Publish Dialog="GCloudDlg" Control="Next" Event="NewDialog" Value="ShortcutsDlg">1</Publish>
+      <!-- Component selection: FFmpeg + Git are mandatory (ticked, disabled);
+           the Google Cloud SDK is optional (INSTALL_GCLOUD). -->
+      <Publish Dialog="ComponentsDlg" Control="Back" Event="NewDialog" Value="LanguageDlg">1</Publish>
+      <Publish Dialog="ComponentsDlg" Control="Next" Event="NewDialog" Value="ShortcutsDlg">1</Publish>
 
-      <Publish Dialog="ShortcutsDlg" Control="Back" Event="NewDialog" Value="LanguageDlg" Order="1">GCLOUD_PRESENT</Publish>
-      <Publish Dialog="ShortcutsDlg" Control="Back" Event="NewDialog" Value="GCloudDlg" Order="2">NOT GCLOUD_PRESENT</Publish>
-      <Publish Dialog="ShortcutsDlg" Control="Next" Event="NewDialog" Value="GoogleDlg">1</Publish>
+      <Publish Dialog="ShortcutsDlg" Control="Back" Event="NewDialog" Value="ComponentsDlg">1</Publish>
+      <Publish Dialog="ShortcutsDlg" Control="Next" Event="NewDialog" Value="ResolutionDlg">1</Publish>
 
-      <!-- Google page is informational: the configuration runs automatically
-           on first launch (one browser sign-in). Next just records the opt-in
-           (GOOGLE_SKIPPED=0); Skip routes through the warning page. -->
-      <Publish Dialog="GoogleDlg" Control="Back" Event="NewDialog" Value="ShortcutsDlg">1</Publish>
-      <Publish Dialog="GoogleDlg" Control="SkipBtn" Event="NewDialog" Value="GoogleSkipWarnDlg">1</Publish>
-      <Publish Dialog="GoogleDlg" Control="Next" Property="GOOGLE_SKIPPED" Value="0" Order="1">1</Publish>
-      <Publish Dialog="GoogleDlg" Control="Next" Event="NewDialog" Value="ResolutionDlg" Order="2">1</Publish>
-
-      <Publish Dialog="GoogleSkipWarnDlg" Control="Back" Event="NewDialog" Value="GoogleDlg">1</Publish>
-      <Publish Dialog="GoogleSkipWarnDlg" Control="SkipAnywayBtn" Property="GOOGLE_SKIPPED" Value="1" Order="1">1</Publish>
-      <Publish Dialog="GoogleSkipWarnDlg" Control="SkipAnywayBtn" Event="NewDialog" Value="ResolutionDlg" Order="2">1</Publish>
-
-      <Publish Dialog="ResolutionDlg" Control="Back" Event="NewDialog" Value="GoogleSkipWarnDlg">GOOGLE_SKIPPED = "1"</Publish>
-      <Publish Dialog="ResolutionDlg" Control="Back" Event="NewDialog" Value="GoogleDlg">GOOGLE_SKIPPED &lt;&gt; "1"</Publish>
+      <Publish Dialog="ResolutionDlg" Control="Back" Event="NewDialog" Value="ShortcutsDlg">1</Publish>
       <Publish Dialog="ResolutionDlg" Control="Next" Event="NewDialog" Value="MyVerifyReadyDlg">1</Publish>
 
       <Publish Dialog="MyVerifyReadyDlg" Control="Back" Event="NewDialog" Value="ResolutionDlg">1</Publish>
@@ -135,13 +118,24 @@
         </Control>
       </Dialog>
 
-      <!-- ______________ Google Cloud SDK ______________ -->
-      <Dialog Id="GCloudDlg" Width="370" Height="270" Title="[ProductName]">
+      <!-- ______________ Component selection ______________ -->
+      <!-- Bundled-software list. FFmpeg + Git are ticked and disabled (they
+           ship inside the app and are always installed). The Google Cloud SDK
+           is optional. Versions come from candle vars set at build time from
+           the actual binaries (single source of truth). -->
+      <Dialog Id="ComponentsDlg" Width="370" Height="270" Title="[ProductName]">
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_GC_TITLE]" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_GC_DESC]" />
-        <Control Id="Explain" Type="Text" X="25" Y="56" Width="320" Height="96" NoPrefix="yes" Text="[P_GC_EXPLAIN]" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_COMP_TITLE]" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_COMP_DESC]" />
+        <Control Id="ListBox" Type="GroupBox" X="20" Y="52" Width="330" Height="118" Text="[P_COMP_GROUP]" />
+        <Control Id="FfmpegCheck" Type="CheckBox" X="32" Y="70" Width="160" Height="17" Disabled="yes" Property="FFMPEG_INSTALL" CheckBoxValue="1" Text="FFmpeg $(var.FfmpegVersion)" />
+        <Control Id="FfmpegReq" Type="Text" X="200" Y="72" Width="142" Height="12" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_COMP_REQUIRED]" />
+        <Control Id="GitCheck" Type="CheckBox" X="32" Y="90" Width="160" Height="17" Disabled="yes" Property="GIT_INSTALL" CheckBoxValue="1" Text="Git $(var.GitVersion)" />
+        <Control Id="GitReq" Type="Text" X="200" Y="92" Width="142" Height="12" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_COMP_REQUIRED]" />
+        <Control Id="GcloudCheck" Type="CheckBox" X="32" Y="110" Width="160" Height="17" Property="INSTALL_GCLOUD" CheckBoxValue="1" Text="Google Cloud SDK $(var.GcloudVersion)" />
+        <Control Id="GcloudOpt" Type="Text" X="200" Y="112" Width="142" Height="12" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_COMP_OPTIONAL]" />
+        <Control Id="GcloudNote" Type="Text" X="32" Y="130" Width="308" Height="34" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_COMP_GCLOUD_NOTE]" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]" />
@@ -162,43 +156,6 @@
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]" />
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">
-          <Publish Event="SpawnDialog" Value="MyCancelDlg">1</Publish>
-        </Control>
-      </Dialog>
-
-      <!-- ______________ Google API setup ______________ -->
-      <Dialog Id="GoogleDlg" Width="370" Height="270" Title="[ProductName]">
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
-        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="290" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_GA_TITLE]" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_GA_DESC]" />
-        <Control Id="WhatHdr" Type="Text" X="25" Y="48" Width="330" Height="12" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_GA_WHAT_H]" />
-        <Control Id="WhatText" Type="Text" X="25" Y="61" Width="330" Height="52" NoPrefix="yes" Text="[P_GA_WHAT]" />
-        <Control Id="WhyHdr" Type="Text" X="25" Y="116" Width="330" Height="12" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_GA_WHY_H]" />
-        <Control Id="WhyText" Type="Text" X="25" Y="129" Width="330" Height="24" NoPrefix="yes" Text="[P_GA_WHY]" />
-        <Control Id="NextHdr" Type="Text" X="25" Y="156" Width="330" Height="12" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_GA_NEXT_H]" />
-        <Control Id="NextText" Type="Text" X="25" Y="169" Width="330" Height="28" NoPrefix="yes" Text="[P_GA_NEXT]" />
-        <Control Id="SkipBtn" Type="PushButton" X="25" Y="202" Width="130" Height="18" Text="[P_SKIPBTN]" />
-        <Control Id="SkipNote" Type="Text" X="162" Y="205" Width="196" Height="20" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_GA_SKIPNOTE]" />
-        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]" />
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">
-          <Publish Event="SpawnDialog" Value="MyCancelDlg">1</Publish>
-        </Control>
-      </Dialog>
-
-      <!-- ______________ Skip warning ______________ -->
-      <Dialog Id="GoogleSkipWarnDlg" Width="370" Height="270" Title="[ProductName]">
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
-        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="290" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_SW_TITLE]" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_SW_DESC]" />
-        <Control Id="WarnText" Type="Text" X="25" Y="60" Width="320" Height="110" NoPrefix="yes" Text="[P_SW_TEXT]" />
-        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-        <Control Id="Back" Type="PushButton" X="156" Y="243" Width="80" Height="17" Text="[P_BACK]" />
-        <Control Id="SkipAnywayBtn" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_SKIPANYWAY]" />
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">
           <Publish Event="SpawnDialog" Value="MyCancelDlg">1</Publish>
         </Control>
