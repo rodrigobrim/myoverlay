@@ -349,18 +349,47 @@ _SESSION_COOKIES = (
 )
 
 
-def _has_google_session(profile_dir: Path) -> bool:
-    """True once the profile holds a Google auth-session cookie.
+def _signed_in_prefs(profile_dir: Path) -> bool:
+    """Lock-free sign-in signal: after a web sign-in Chrome mirrors the Google
+    account into the profile's Preferences JSON (account_info / gaia_cookie).
+    Preferences is replaced atomically and stays readable, unlike the Cookies
+    DB, which current Chrome holds under an exclusive lock while running - any
+    outside read fails with a sharing violation, so the cookie probe below can
+    never fire until the browser exits (observed as a login window that never
+    closes)."""
+    import json
 
-    Chrome's cookie DB is WAL-mode and buffers writes: an `immutable=1` read of
-    the main file alone misses a just-set session cookie that still lives in the
-    -wal sidecar (that lag is exactly why the login window seemed to never
-    close). So copy the DB together with its -wal/-shm to a temp dir and read
-    the copy, which replays the WAL and sees the fresh cookie.
+    for rel in ("Default/Preferences", "Preferences"):
+        f = profile_dir / rel
+        if not f.is_file():
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+        except ValueError:
+            continue
+        if d.get("account_info"):
+            return True
+        if "@" in (d.get("gaia_cookie", {}).get("last_list_accounts_data") or ""):
+            return True
+    return False
+
+
+def _has_google_session(profile_dir: Path) -> bool:
+    """True once the profile holds a signed-in Google session.
+
+    Preferences (never locked) is checked first; the cookie DB is the fallback
+    for engines that still allow shared reads (e.g. Edge). The cookie DB is
+    WAL-mode and buffers writes: an `immutable=1` read of the main file alone
+    misses a just-set session cookie that still lives in the -wal sidecar, so
+    copy the DB together with its -wal/-shm to a temp dir and read the copy,
+    which replays the WAL and sees the fresh cookie.
     """
     import shutil
     import sqlite3
     import tempfile
+
+    if _signed_in_prefs(profile_dir):
+        return True
 
     for rel in ("Default/Network/Cookies", "Network/Cookies", "Default/Cookies"):
         db = profile_dir / rel
