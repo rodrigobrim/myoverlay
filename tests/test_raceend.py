@@ -60,49 +60,38 @@ def test_mid_clip_quiet_spell_is_ignored():
     assert detect_engine_shutdown(pcm) is None
 
 
-def test_detect_race_end_cut_math(monkeypatch, tmp_path):
-    """Cut = last finish-line crossing before shutdown (+15 s), video time."""
-    import media_tools.raceend as re_mod
-
-    monkeypatch.setattr(re_mod, "extract_audio_pcm", lambda p: "pcm")
-    monkeypatch.setattr(re_mod, "detect_engine_shutdown", lambda pcm, min_off_s: 700.0)
-
-    # Day laps (telemetry time). video_offset_s=100 -> shutdown at tel 800.
-    laps = [(1, 100.0, 145.0), (2, 145.0, 190.0), (3, 700.0, 745.0), (4, 745.0, 790.0)]
+def test_detect_race_end_cut_math(tmp_path):
+    """Cut = last finish-line crossing (telemetry) -> video time, + buffer."""
+    # Day laps (telemetry time), deliberately out of order: the anchor is the
+    # MAX lap end, not the last list element. video_offset_s=100 ->
+    # last crossing tel 790 -> video 690 -> +15 = 705.
+    laps = [(3, 700.0, 745.0), (1, 100.0, 145.0), (4, 745.0, 790.0), (2, 145.0, 190.0)]
     result = detect_race_end(tmp_path / "v.mp4", laps, 100.0, 2000.0)
-    # Last crossing <= 800 is end_s=790 -> video 690 -> +15 = 705.
-    assert result.engine_stop_s == 700.0
     assert result.cut_at_s == pytest.approx(790.0 - 100.0 + RACE_END_BUFFER_S)
+    assert result.engine_stop_s is None  # audio scan removed: never set
 
 
-def test_detect_race_end_no_shutdown(monkeypatch, tmp_path):
-    import media_tools.raceend as re_mod
-
-    monkeypatch.setattr(re_mod, "extract_audio_pcm", lambda p: "pcm")
-    monkeypatch.setattr(re_mod, "detect_engine_shutdown", lambda pcm, min_off_s: None)
-    result = detect_race_end(tmp_path / "v.mp4", [(1, 0.0, 45.0)], 0.0, 2000.0)
-    assert result == RaceEnd()  # scanned, nothing to trim
+def test_detect_race_end_no_laps(tmp_path):
+    result = detect_race_end(tmp_path / "v.mp4", [], 0.0, 2000.0)
+    assert result == RaceEnd()  # no laps: nothing to anchor a cut to
     assert result.cut_at_s is None and result.engine_stop_s is None
 
 
-def test_detect_race_end_no_crossing_before_shutdown(monkeypatch, tmp_path):
-    import media_tools.raceend as re_mod
-
-    monkeypatch.setattr(re_mod, "extract_audio_pcm", lambda p: "pcm")
-    monkeypatch.setattr(re_mod, "detect_engine_shutdown", lambda pcm, min_off_s: 30.0)
-    # Only lap ends at tel 145 > shutdown tel 30: no crossing before it.
-    result = detect_race_end(tmp_path / "v.mp4", [(1, 100.0, 145.0)], 0.0, 2000.0)
-    assert result.engine_stop_s == 30.0 and result.cut_at_s is None
-
-
-def test_detect_race_end_cut_beyond_clip_is_dropped(monkeypatch, tmp_path):
-    import media_tools.raceend as re_mod
-
-    monkeypatch.setattr(re_mod, "extract_audio_pcm", lambda p: "pcm")
-    monkeypatch.setattr(re_mod, "detect_engine_shutdown", lambda pcm, min_off_s: 100.0)
+def test_detect_race_end_cut_beyond_clip_is_dropped(tmp_path):
     # Crossing at tel 95 -> video 95 -> +15 = 110 > clip 105: no-op trim.
-    result = detect_race_end(tmp_path / "v.mp4", [(1, 50.0, 95.0)], 0.0, 105.0)
-    assert result.cut_at_s is None
+    assert detect_race_end(tmp_path / "v.mp4", [(1, 50.0, 95.0)], 0.0, 105.0).cut_at_s is None
+    # Boundary: cut exactly at clip duration is also a no-op (strict <).
+    assert detect_race_end(tmp_path / "v.mp4", [(1, 50.0, 90.0)], 0.0, 105.0).cut_at_s is None
+
+
+def test_detect_race_end_lap_before_clip_start_is_dropped(tmp_path):
+    # Last crossing at tel 90 but the video starts at tel 200: cut <= 0.
+    assert detect_race_end(tmp_path / "v.mp4", [(1, 45.0, 90.0)], 200.0, 2000.0).cut_at_s is None
+
+
+def test_detect_race_end_custom_buffer(tmp_path):
+    result = detect_race_end(tmp_path / "v.mp4", [(1, 0.0, 45.0)], 0.0, 100.0, buffer_s=5.0)
+    assert result.cut_at_s == pytest.approx(50.0)
 
 
 def test_config_flag_hyphenated_alias(tmp_path, monkeypatch):

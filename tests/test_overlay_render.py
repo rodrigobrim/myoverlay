@@ -71,23 +71,36 @@ def test_resolution_presets_and_validation():
 
 def test_recent_laps_last_five():
     df = make_session_df(duration_s=500.0)
-    laps = [(n, n * 45.0, (n + 1) * 45.0) for n in range(8)]  # 8 x 45 s laps
+    laps = (
+        [(0, -15.0, 0.0)]  # out-lap fragment: opens lap 1
+        + [(n, (n - 1) * 45.0, n * 45.0) for n in range(1, 9)]  # 8 x 45 s laps
+        + [(9, 360.0, 375.0)]  # in-lap fragment: closes lap 8
+    )
     tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=420.0, fps=1.0)
-    f = tl.frames[-1]  # t=419: laps 0..8*45? -> laps ending <= 419: laps 0..7 end at 360
+    f = tl.frames[-1]  # t=419: laps 1..8 all complete (end at 360)
     nums = [n for n, _, _ in f.recent_laps]
     assert len(nums) == 5
     assert nums == sorted(nums)  # oldest first
     assert nums[-1] == max(nums)  # newest is the latest completed lap
+    # The 15 s fragments are never complete, so they cannot leak in here.
     assert all(d == pytest.approx(45.0) and ok for _, d, ok in f.recent_laps)
 
-    early = tl.frames[100]  # t=100 -> only laps 0 and 1 completed
-    assert [n for n, _, _ in early.recent_laps] == [0, 1]
+    early = tl.frames[100]  # t=100 -> only laps 1 and 2 completed
+    assert [n for n, _, _ in early.recent_laps] == [1, 2]
 
 
 def test_min_lap_invalidates_too_fast_laps():
     df = make_session_df(duration_s=300.0)
-    # Lap 2 is a 38 s "lap" (cut track); circuit minimum is 42 s.
-    laps = [(1, 0.0, 45.8), (2, 45.8, 83.8), (3, 83.8, 129.1), (4, 129.1, 173.5)]
+    # Lap 2 is a 38 s "lap" (cut track); circuit minimum is 42 s. The out-/
+    # in-lap fragments make laps 1..4 complete (lap 4 must be, to win best).
+    laps = [
+        (0, -12.0, 0.0),
+        (1, 0.0, 45.8),
+        (2, 45.8, 83.8),
+        (3, 83.8, 129.1),
+        (4, 129.1, 173.5),
+        (5, 173.5, 190.0),
+    ]
     tl = sample_timeline(
         df, laps, video_offset_s=0.0, start_s=0.0, duration_s=250.0, fps=1.0, min_lap_s=42.0
     )
@@ -107,7 +120,9 @@ def test_delta_vs_rolling_best():
     hz = 10.0
     t = np.arange(0, 300, 1 / hz)
     # Constant 20 m/s except lap 2 runs 22 m/s (faster -> becomes the ref).
-    laps = [(1, 0.0, 45.0), (2, 45.0, 86.0), (3, 86.0, 131.0)]
+    # Lap 0 is the out-lap fragment that opens lap 1 (no telemetry samples of
+    # its own, so it never contributes a fragment delta).
+    laps = [(0, -30.0, 0.0), (1, 0.0, 45.0), (2, 45.0, 86.0), (3, 86.0, 131.0)]
     speed = np.full_like(t, 20.0)
     speed[(t >= 45.0) & (t < 86.0)] = 22.0
     df = pd.DataFrame(
@@ -228,20 +243,20 @@ def test_render_frame_produces_content():
 
 def test_overlay_persists_once_started():
     """Once the lap overlay begins it stays: held lap number and ZEROED
-    deltas between/after laps, never disappearing. Before the first lap it
-    is still absent (awaiting)."""
+    deltas between/after laps, never disappearing. During the out-lap it is
+    still absent (awaiting the first timed lap)."""
     df = make_session_df(200.0)
-    laps = [(0, 10.0, 55.0), (1, 55.0, 100.0)]
+    laps = [(0, 0.0, 10.0), (1, 10.0, 55.0), (2, 55.0, 100.0)]
     tl = sample_timeline(df, laps, video_offset_s=0.0, start_s=0.0, duration_s=150.0, fps=1.0)
 
-    before = tl.frames[5]  # t=5, before lap 0 -> nothing shown yet
+    before = tl.frames[5]  # t=5, inside the out-lap -> never shown
     assert before.lap_num is None and before.delta_s is None
 
-    during = tl.frames[30]  # t=30, inside lap 0
-    assert during.lap_num == 0
+    during = tl.frames[30]  # t=30, inside lap 1
+    assert during.lap_num == 1
 
     after = tl.frames[130]  # t=130, stint ended at 100
-    assert after.lap_num == 1          # held last lap, not None
+    assert after.lap_num == 2          # held last lap, not None
     assert after.delta_s == 0.0        # zeroed, not None
     assert after.speed_delta_kmh == 0.0
 
@@ -500,14 +515,18 @@ def test_replace_with_retry_survives_transient_lock(tmp_path, monkeypatch):
     assert src2.exists()
 
 
-def test_g_and_steering_widgets_optional():
+def test_g_widget_optional_and_steering_ignored():
+    """The G dot + value draws only when g data exists; steering_deg is still
+    accepted but no longer rendered (the wheel widget was replaced by the dot)."""
     r = OverlayRenderer(1280, 720)
     with_g = r.render_frame(FrameValues(t_video_s=0.0, g_lat=1.0, g_lon=0.5, steering_deg=20.0))
     without = r.render_frame(FrameValues(t_video_s=0.0))
-    # The G-ball and steering wheel add visible pixels somewhere on frame.
+    steer_only = r.render_frame(FrameValues(t_video_s=0.0, steering_deg=20.0))
     a_with = (np.asarray(with_g)[:, :, 3] > 0).sum()
     a_without = (np.asarray(without)[:, :, 3] > 0).sum()
-    assert a_with > a_without + 3000
+    a_steer = (np.asarray(steer_only)[:, :, 3] > 0).sum()
+    assert a_with > a_without + 1500  # G chrome + dot + value
+    assert a_steer == a_without  # steering wheel removed: draws nothing
 
 
 def make_session_df(duration_s=120.0, hz=10.0):
@@ -526,7 +545,7 @@ def make_session_df(duration_s=120.0, hz=10.0):
 
 def test_sample_timeline_values_and_laps():
     df = make_session_df()
-    laps = [(1, 0.0, 50.0), (2, 50.0, 95.0)]
+    laps = [(0, -10.0, 0.0), (1, 0.0, 50.0), (2, 50.0, 95.0), (3, 95.0, 110.0)]
     # video starts 10 s into the session, 30 s long, 2 fps
     tl = sample_timeline(df, laps, video_offset_s=10.0, start_s=0.0, duration_s=30.0, fps=2.0)
     assert len(tl.frames) == 60
