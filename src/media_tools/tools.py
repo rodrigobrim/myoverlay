@@ -8,10 +8,20 @@ instead, in this order:
 
   1. an env var the launcher exports from the exe's real location
      (MYOVERLAY_FFMPEG_DIR, MYOVERLAY_GCLOUD_BIN) - authoritative at runtime;
-  2. the install directory persisted in config.toml ([tools] install_dir),
+  2. the directory the frozen exe is running from - ground truth on every
+     install, whatever the launcher build;
+  3. the install directory persisted in config.toml ([tools] install_dir),
      mapped onto the known PyInstaller onedir layout;
-  3. the bare name - dev checkouts, zip deploys, or a deleted install, where
+  4. the bare name - dev checkouts, zip deploys, or a deleted install, where
      PATH resolution (or the launcher's PATH prepend) still applies.
+
+Step 2 exists because the launcher (which sets the env vars and writes
+install_dir) is frozen into the exe, while this module updates with every git
+pull: an exe built before those were added would otherwise leave gcloud
+unresolvable forever - exactly how `mt google-setup` came to report
+"gcloud not found" on a machine where the MSI had installed the SDK next to
+the exe. sys.executable needs no cooperation from the launcher, so new code
+running under an old exe still finds the bundled tools.
 
 Every full-path candidate is existence-checked, so a config pointing at a
 moved/deleted install quietly degrades to the bare name rather than failing.
@@ -21,6 +31,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from functools import cache
 from pathlib import Path
 
@@ -39,6 +50,30 @@ def _config_install_dir() -> Path | None:
     except Exception:  # noqa: BLE001 - any config error -> no install dir
         return None
     return Path(install_dir) if install_dir else None
+
+
+def _frozen_install_dir() -> Path | None:
+    """The directory the frozen exe runs from, or None outside a frozen app.
+
+    PyInstaller sets sys.frozen/sys.executable in every build, so this works
+    under any launcher version - including ones predating the env vars and the
+    config [tools] section - and stays correct if the install is moved.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        return Path(sys.executable).resolve().parent
+    except OSError:
+        return None
+
+
+def _install_dirs() -> list[Path]:
+    """Install-dir candidates, best first (runtime location, then config)."""
+    dirs: list[Path] = []
+    for candidate in (_frozen_install_dir(), _config_install_dir()):
+        if candidate is not None and candidate not in dirs:
+            dirs.append(candidate)
+    return dirs
 
 
 def _ffmpeg_dir_from_install(install_dir: Path) -> Path:
@@ -63,8 +98,7 @@ def _resolve_exe(name: str, env_dir: str, install_subdir) -> str:
         if candidate.is_file():
             return str(candidate)
 
-    install_dir = _config_install_dir()
-    if install_dir is not None:
+    for install_dir in _install_dirs():
         candidate = install_subdir(install_dir) / exe
         if candidate.is_file():
             return str(candidate)
@@ -90,8 +124,7 @@ def _gcloud_path() -> str | None:
         if candidate.is_file():
             return str(candidate)
 
-    install_dir = _config_install_dir()
-    if install_dir is not None:
+    for install_dir in _install_dirs():
         candidate = _gcloud_bin_from_install(install_dir) / name
         if candidate.is_file():
             return str(candidate)

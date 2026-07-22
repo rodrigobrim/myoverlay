@@ -55,6 +55,44 @@ def test_config_pointing_at_deleted_install_falls_back(tmp_path, monkeypatch):
     assert tools.ffmpeg_exe() == "ffmpeg"
 
 
+def _fake_frozen(monkeypatch, install_dir):
+    """Pretend we run as the frozen exe installed in `install_dir`."""
+    monkeypatch.setattr(tools.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tools.sys, "executable", str(install_dir / "myoverlay.exe"))
+
+
+def test_frozen_exe_dir_resolves_without_config(tmp_path, monkeypatch):
+    # The launcher that wrote [tools] install_dir / the env vars may predate
+    # this code (it only updates on a rebuild); the exe's own location must be
+    # enough. This is the regression: gcloud installed next to the exe, but
+    # config.toml had no [tools] section at all.
+    monkeypatch.setattr(os, "name", "nt")
+    gcloud = _touch(tmp_path / "google-cloud-sdk" / "bin" / "gcloud.cmd")
+    ffmpeg = _touch(tmp_path / "_internal" / "ffmpeg" / "ffmpeg.exe")
+    _fake_frozen(monkeypatch, tmp_path)
+    assert tools.gcloud_available() is True
+    assert tools.gcloud_cmd() == ["cmd", "/c", str(gcloud)]
+    assert tools.ffmpeg_exe() == str(ffmpeg)
+
+
+def test_frozen_exe_dir_without_bundled_tools_falls_back(tmp_path, monkeypatch):
+    # A frozen run whose install lacks the SDK (component unticked) must still
+    # degrade to PATH lookup rather than returning a non-existent path.
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(tools.shutil, "which", lambda name: None)
+    _fake_frozen(monkeypatch, tmp_path)
+    assert tools.gcloud_available() is False
+    assert tools.ffmpeg_exe() == "ffmpeg"
+
+
+def test_config_install_dir_still_used_when_not_frozen(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(tools.sys, "frozen", False, raising=False)
+    gcloud = _touch(tmp_path / "google-cloud-sdk" / "bin" / "gcloud.cmd")
+    monkeypatch.setattr(tools, "_config_install_dir", lambda: tmp_path)
+    assert tools.gcloud_cmd() == ["cmd", "/c", str(gcloud)]
+
+
 def test_gcloud_cmd_keeps_cmd_c_wrapper_on_windows(monkeypatch):
     monkeypatch.setattr(os, "name", "nt")
     prefix = tools.gcloud_cmd()

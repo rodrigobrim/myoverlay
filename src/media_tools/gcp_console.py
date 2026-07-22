@@ -195,7 +195,13 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     the YouTube Data API. Returns True when the project is ready. The browser
     steps that follow (in setup_google_api) need this done first."""
     if not gcloud_available():
-        report.append("! Google Cloud SDK (gcloud) not found on PATH")
+        report.append("! Google Cloud SDK (gcloud) not found")
+        report.append(
+            "  It normally ships with myoverlay (installed next to the app). "
+            "Re-run the installer with the 'Google Cloud SDK' component ticked, "
+            "or install it from https://cloud.google.com/sdk/docs/install and "
+            "run `myoverlay google-setup` again."
+        )
         return False
 
     def active_account() -> str:

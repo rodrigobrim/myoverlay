@@ -84,6 +84,13 @@ repo as `client_secret.json`). The chosen destination is recorded as
 `[tools] install_dir` in `config.toml` (refreshed on every launch), so the
 pipeline finds the bundled ffmpeg and Google Cloud SDK by full path.
 
+That recording, like the `MYOVERLAY_*` env vars, comes from the launcher —
+which is frozen into the exe and only changes on a rebuild. `media_tools.tools`
+therefore also resolves the bundled tools from `sys.executable`'s own
+directory, so new pipeline code running under an older exe still finds them.
+`build_msi.ps1` refuses to package a `dist\myoverlay` payload older than
+`myoverlay_launcher.py`/`myoverlay.spec` for the same reason.
+
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
 the software installed: app files, shortcuts, `install_settings.yaml`, and
