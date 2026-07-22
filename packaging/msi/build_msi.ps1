@@ -17,8 +17,26 @@ $wix = Join-Path $vendor "wix"
 $build = Join-Path $repo "packaging\build\msi"
 $out = Join-Path $repo "dist\myoverlay-setup.msi"
 
-if (-not (Test-Path (Join-Path $payload "myoverlay.exe"))) {
-    throw "Payload missing: $payload\myoverlay.exe - run packaging\build_exe.ps1 first."
+$payloadExe = Join-Path $payload "myoverlay.exe"
+if (-not (Test-Path $payloadExe)) {
+    throw "Payload missing: $payloadExe - run packaging\build_exe.ps1 first."
+}
+
+# The launcher is FROZEN into the exe: unlike media_tools (which every install
+# git-pulls), launcher fixes only reach users through a rebuild. Shipping a
+# payload older than the launcher source silently ships those fixes' absence -
+# that is how an MSI once installed the Google Cloud SDK next to an exe that
+# knew nothing about it, leaving `google-setup` reporting "gcloud not found".
+$launcherSrc = Join-Path $repo "packaging\myoverlay_launcher.py"
+$specSrc = Join-Path $repo "packaging\myoverlay.spec"
+$exeTime = (Get-Item $payloadExe).LastWriteTime
+foreach ($src in @($launcherSrc, $specSrc)) {
+    if (-not (Test-Path $src)) { continue }
+    $srcTime = (Get-Item $src).LastWriteTime
+    if ($srcTime -gt $exeTime) {
+        throw ("Stale payload: $payloadExe ($exeTime) is older than $src ($srcTime). " +
+               "Re-run packaging\build_exe.ps1 so the MSI ships the current launcher.")
+    }
 }
 
 # --- WiX toolset (binaries zip, no install required) ---
