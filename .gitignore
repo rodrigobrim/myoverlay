@@ -48,6 +48,9 @@ packaging/vendor/
 Thumbs.db
 desktop.ini
 
+# Local AI-assistant state (never part of the project)
+.claude/
+
 # Generated wizard bitmaps (from assets/branding via gen_bitmaps.py)
 packaging/msi/banner.bmp
 packaging/msi/dialog.bmp
