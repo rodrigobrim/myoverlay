@@ -339,6 +339,16 @@
         <Control Id="ProgressBar" Type="ProgressBar" X="25" Y="115" Width="320" Height="10" ProgressBlocks="yes" Text="Progress done">
           <Subscribe Event="SetProgress" Attribute="Progress" />
         </Control>
+        <!-- Google sign-in happens near the end of this same dialog's
+             lifetime (RunGoogleSetup, an immediate CA run from the UI
+             sequence After ExecuteAction - see Product.wxs). Shown from the
+             start so the user isn't caught off guard when the browser pops
+             up; condition mirrors RunGoogleSetup's own so it only appears on
+             fresh installs that will actually run it. -->
+        <Control Id="GoogleNote" Type="Text" X="25" Y="140" Width="320" Height="48" NoPrefix="yes" Text="[P_PROG_GOOGLE_NOTE]">
+          <Condition Action="hide">Installed OR NOT (INSTALL_GCLOUD = "1" OR GCLOUD_PRESENT)</Condition>
+          <Condition Action="show">NOT Installed AND (INSTALL_GCLOUD = "1" OR GCLOUD_PRESENT)</Condition>
+        </Control>
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Disabled="yes" Text="[P_BACK]" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Disabled="yes" Text="[P_NEXT]" />
