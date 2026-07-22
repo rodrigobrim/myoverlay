@@ -383,12 +383,16 @@
 
     <UIRef Id="WixUI_Common" />
 
-    <!-- Own dialog sequencing (the stock WixUI Welcome/Progress/Exit are not
-         referenced, so their Show entries do not exist). -->
+    <!-- Own dialog sequencing. WixUI_Common links the stock ProgressDlg WITH
+         its own overridable Show entry right before ExecuteAction - left
+         alone it replaces MyProgressDlg on screen for the entire install
+         (which is why the Google sign-in note never appeared). Override it
+         with a never-true condition so only MyProgressDlg is shown. -->
     <InstallUISequence>
       <Show Dialog="MyWelcomeDlg" After="CostFinalize">NOT Installed</Show>
       <Show Dialog="MyMaintWelcomeDlg" After="MyWelcomeDlg">Installed AND NOT RESUME AND NOT Preselected AND NOT PATCH</Show>
       <Show Dialog="MyProgressDlg" After="MyMaintWelcomeDlg">1</Show>
+      <Show Dialog="ProgressDlg" Before="ExecuteAction">0</Show>
       <Show Dialog="MyExitDlg" OnExit="success" />
     </InstallUISequence>
   </Fragment>
