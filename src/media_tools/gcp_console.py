@@ -638,9 +638,13 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
     # the create API response itself: it carries the client id and the
     # GOCSPX- secret that the dialog renders. Sniff responses around the
     # Create click and synthesize the standard installed-app JSON from them.
+    # Sniffing is tried FIRST and polled: the response arrives about a second
+    # after the click, whereas the download path can only ever time out here.
     sniffed: list = []
 
     def _on_response(resp) -> None:
+        # Only buffer here - reading a body inside the event handler can block
+        # on a response that is still streaming. Bodies are read while polling.
         try:
             if re.search(r"client|oauth", resp.url, re.I):
                 sniffed.append(resp)
@@ -649,12 +653,13 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
 
     page.on("response", _on_response)
     _click(page, "button", "Create")
-    time.sleep(4)  # let the create call and dialog finish
-    ts.snap(page, "client_created")
 
-    saved = _download_json(page, cfg.youtube.client_secret_file, report)
+    saved = _await_secret_from_responses(cfg, sniffed, report)
+    ts.snap(page, "client_created")
     if not saved:
-        saved = _secret_from_responses(cfg, sniffed, report)
+        # Sniffing missed it (body unavailable, or Google changed the payload).
+        # Fall back to the dialog's own download link.
+        saved = _download_json(page, cfg.youtube.client_secret_file, report)
     try:
         page.remove_listener("response", _on_response)
     except Exception:  # noqa: BLE001
@@ -671,37 +676,62 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
         ts.dump_html(page, "download_fail_dom")
 
 
-def _secret_from_responses(cfg: Config, responses: list, report: list[str]) -> bool:
-    """Extract client id + GOCSPX- secret from the create call's response and
+def _await_secret_from_responses(
+    cfg: Config, responses: list, report: list[str], timeout_s: float = 20.0
+) -> bool:
+    """Poll the sniffed responses until the create call's body shows up.
+
+    `responses` is appended to by the page's response handler while this runs,
+    so this both waits for the create call and reads bodies that were not yet
+    available on an earlier tick. Returns as soon as the secret is written -
+    typically about a second after the Create click, instead of the fixed
+    multi-second sleep plus download timeout this replaces."""
+    deadline = time.monotonic() + timeout_s
+    scanned: set[int] = set()  # responses whose body was read and did not match
+    while True:
+        # Newest first: the create call is the last request the click fires.
+        for resp in reversed(list(responses)):
+            if id(resp) in scanned:
+                continue
+            try:
+                body = resp.text()
+            except Exception:  # noqa: BLE001 - body may not be ready yet; retry
+                continue
+            scanned.add(id(resp))
+            if _secret_from_body(cfg, body, report):
+                return True
+        if time.monotonic() >= deadline:
+            report.append("~ create response did not carry the secret within "
+                          f"{timeout_s:.0f}s")
+            return False
+        time.sleep(0.25)
+
+
+def _secret_from_body(cfg: Config, body: str, report: list[str]) -> bool:
+    """Extract client id + GOCSPX- secret from a create-call response body and
     write the standard installed-app client_secret.json ourselves."""
     import json
 
-    for resp in reversed(responses):  # newest first: the create call is last
-        try:
-            body = resp.text()
-        except Exception:  # noqa: BLE001 - body may be unavailable/binary
-            continue
-        secret = re.search(r"GOCSPX-[\w-]+", body)
-        client = re.search(r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", body)
-        if not (secret and client):
-            continue
-        data = {
-            "installed": {
-                "client_id": client.group(0),
-                "project_id": cfg.youtube.project_id,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_secret": secret.group(0),
-                "redirect_uris": ["http://localhost"],
-            }
+    secret = re.search(r"GOCSPX-[\w-]+", body)
+    client = re.search(r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", body)
+    if not (secret and client):
+        return False
+    data = {
+        "installed": {
+            "client_id": client.group(0),
+            "project_id": cfg.youtube.project_id,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": secret.group(0),
+            "redirect_uris": ["http://localhost"],
         }
-        dest = cfg.youtube.client_secret_file
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        report.append("client secret captured from the create API response")
-        return True
-    return False
+    }
+    dest = cfg.youtube.client_secret_file
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    report.append("client secret captured from the create API response")
+    return True
 
 
 def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
@@ -722,7 +752,9 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
             loc = locate()
             if loc is None:
                 continue
-            with page.expect_download(timeout=30_000) as dl:
+            # Short: a download that is going to fire, fires right after the
+            # click. Waiting 30s per candidate only ever stalled the run.
+            with page.expect_download(timeout=6_000) as dl:
                 loc.click(timeout=8_000)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dl.value.save_as(str(dest))
