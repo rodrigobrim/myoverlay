@@ -122,15 +122,27 @@ def _resolve_project(cfg: Config, report: list[str]) -> str | None:
     else - we instead reuse OUR project (display name 'myoverlay', matched
     across runs) or create a fresh id with that name."""
     configured = cfg.youtube.project_id
-    # a) a previously-resolved id we actually own -> reuse it.
+    # a) a previously-resolved id we actually own -> reuse it. Check the
+    #    lifecycle state, not just existence: describe still succeeds on a
+    #    project scheduled for deletion, and reusing one lands the Console
+    #    automation on a dead project ("Project scheduled for deletion").
     if configured and configured != "myoverlay":
-        d = _run_gcloud(["projects", "describe", configured], capture_output=True, text=True)
-        if d.returncode == 0:
+        d = _run_gcloud(
+            ["projects", "describe", configured, "--format=value(lifecycleState)"],
+            capture_output=True, text=True,
+        )
+        if d.returncode == 0 and (d.stdout or "").strip() == "ACTIVE":
             report.append(f"reusing configured project '{configured}'")
             return configured
-    # b) our own project whose display name is 'myoverlay' -> reuse (idempotent).
+    # b) our own project whose display name is 'myoverlay' -> reuse
+    #    (idempotent). ACTIVE only: a deleted 'myoverlay' lingers in listings
+    #    for its 30-day grace period and must not be picked up again.
     listed = _run_gcloud(
-        ["projects", "list", "--filter=name=myoverlay", "--format=value(projectId)"],
+        [
+            "projects", "list",
+            "--filter=name=myoverlay AND lifecycleState=ACTIVE",
+            "--format=value(projectId)",
+        ],
         capture_output=True, text=True,
     )
     ids = [x.strip() for x in (listed.stdout or "").splitlines() if x.strip()]
