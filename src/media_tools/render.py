@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from .encoding import encoder_args
+from .tools import ffmpeg_exe, ffprobe_exe
 from .library import DayManifest, Library, RenderOutput, TrackSession, VideoClip, utcnow
 from .overlay import FrameValues, OverlayRenderer, TrackProjection
 from .telemetry import DayFrame, load_day_frame, opened_laps, valid_laps
@@ -57,7 +58,7 @@ class RenderProgress:
 def probe_video_size(path: Path) -> tuple[int, int]:
     out = subprocess.run(
         [
-            "ffprobe", "-v", "error",
+            ffprobe_exe(), "-v", "error",
             "-select_streams", "v:0",
             "-show_entries", "stream=width,height",
             "-of", "csv=p=0",
@@ -480,7 +481,7 @@ def composite_stream(
     tmp = dest.with_name(dest.stem + ".encoding.mp4")
     log_path = dest.with_name(dest.stem + ".ffmpeg.log")
 
-    cmd = ["ffmpeg", "-y", "-v", "error"]
+    cmd = [ffmpeg_exe(), "-y", "-v", "error"]
     if start_s > 0:
         cmd += ["-ss", f"{start_s:.3f}"]
     if duration_s is not None:
@@ -570,7 +571,7 @@ def composite(
     codec: str = "libx264",
     scale_to: tuple[int, int] | None = None,
 ) -> None:
-    cmd = ["ffmpeg", "-y", "-v", "error"]
+    cmd = [ffmpeg_exe(), "-y", "-v", "error"]
     if start_s > 0:
         cmd += ["-ss", f"{start_s:.3f}"]
     if duration_s is not None:

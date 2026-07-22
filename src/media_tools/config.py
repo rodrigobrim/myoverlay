@@ -155,6 +155,13 @@ class YouTubeConfig(BaseModel):
     project_id: str = "myoverlay"
 
 
+class ToolsConfig(BaseModel):
+    # Install directory of the frozen app, recorded by the launcher so the
+    # pipeline can locate the bundled ffmpeg / Google Cloud SDK by full path.
+    # None in dev checkouts and zip deploys (bare-name PATH resolution applies).
+    install_dir: Path | None = None
+
+
 class Config(BaseModel):
     library_root: Path
     # Output language for the overlay labels and YouTube title/description
@@ -166,6 +173,7 @@ class Config(BaseModel):
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     @field_validator("language")
     @classmethod

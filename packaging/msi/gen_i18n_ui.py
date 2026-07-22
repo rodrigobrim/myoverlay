@@ -78,6 +78,22 @@ S: dict[str, dict[str, str]] = {
         "Google Cloud SDK нужен только для загрузки видео на YouTube. Снимите флажок, если не планируете публиковать видео автоматически (по умолчанию — по ссылке). Рекомендуется установить его, а затем при желании отключить автопубликацию.",
     ])),
 
+    # -------- destination page --------
+    "DEST_TITLE": dict(zip(L, ["Destination folder", "Pasta de destino", "Carpeta de destino", "インストール先フォルダー", "مجلد الوجهة", "Dossier de destination", "Cartella di destinazione", "Папка назначения"])),
+    "DEST_DESC": dict(zip(L, ["Choose where to install MyOverlay.", "Escolha onde instalar o MyOverlay.", "Elija dónde instalar MyOverlay.", "MyOverlay のインストール先を選択してください。", "اختر مكان تثبيت MyOverlay.", "Choisissez où installer MyOverlay.", "Scegli dove installare MyOverlay.", "Выберите, куда установить MyOverlay."])),
+    "DEST_EXPLAIN": dict(zip(L, [
+        "All bundled tools (FFmpeg, Git and, if selected, the Google Cloud SDK) are installed under this folder. Pick a location with enough free space.",
+        "Todas as ferramentas incluídas (FFmpeg, Git e, se selecionado, o Google Cloud SDK) são instaladas nesta pasta. Escolha um local com espaço livre suficiente.",
+        "Todas las herramientas incluidas (FFmpeg, Git y, si se selecciona, el Google Cloud SDK) se instalan en esta carpeta. Elija una ubicación con suficiente espacio libre.",
+        "同梱ツール（FFmpeg、Git、選択した場合は Google Cloud SDK）はすべてこのフォルダーにインストールされます。十分な空き容量のある場所を選んでください。",
+        "يتم تثبيت جميع الأدوات المضمنة (FFmpeg وGit، وGoogle Cloud SDK إذا تم تحديده) داخل هذا المجلد. اختر موقعا به مساحة خالية كافية.",
+        "Tous les outils inclus (FFmpeg, Git et, si sélectionné, le Google Cloud SDK) sont installés dans ce dossier. Choisissez un emplacement disposant de suffisamment d'espace libre.",
+        "Tutti gli strumenti inclusi (FFmpeg, Git e, se selezionato, il Google Cloud SDK) vengono installati in questa cartella. Scegli una posizione con spazio libero sufficiente.",
+        "Все включённые инструменты (FFmpeg, Git и, если выбрано, Google Cloud SDK) устанавливаются в эту папку. Выберите место с достаточным свободным местом.",
+    ])),
+    "DEST_LABEL": dict(zip(L, ["Install MyOverlay to:", "Instalar o MyOverlay em:", "Instalar MyOverlay en:", "MyOverlay のインストール先:", "تثبيت MyOverlay في:", "Installer MyOverlay dans :", "Installa MyOverlay in:", "Установить MyOverlay в:"])),
+    "DEST_BROWSE": dict(zip(L, ["B&rowse...", "&Procurar...", "&Examinar...", "参照(&R)...", "استعراض(&R)...", "&Parcourir...", "S&foglia...", "О&бзор..."])),
+
     # -------- shortcuts page --------
     "SC_TITLE": dict(zip(L, ["Shortcuts", "Atalhos", "Accesos directos", "ショートカット", "الاختصارات", "Raccourcis", "Collegamenti", "Ярлыки"])),
     "SC_DESC":  dict(zip(L, ["Choose which shortcuts to create.", "Escolha quais atalhos criar.", "Elija qué accesos directos crear.", "作成するショートカットを選択してください。", "اختر الاختصارات التي تريد إنشاءها.", "Choisissez les raccourcis à créer.", "Scegli quali collegamenti creare.", "Выберите, какие ярлыки создать."])),
@@ -217,6 +233,11 @@ ZH: dict[str, str] = {
     "COMP_REQUIRED": "（必需）",
     "COMP_OPTIONAL": "（可选）",
     "COMP_GCLOUD_NOTE": "Google Cloud SDK 仅用于将视频上传到 YouTube。如果您不打算自动发布视频（默认不公开），请取消勾选。建议先安装它，之后可根据需要禁用自动发布。",
+    "DEST_TITLE": "目标文件夹",
+    "DEST_DESC": "选择 MyOverlay 的安装位置。",
+    "DEST_EXPLAIN": "所有捆绑工具（FFmpeg、Git，以及如已选择的 Google Cloud SDK）都会安装到此文件夹下。请选择有足够可用空间的位置。",
+    "DEST_LABEL": "将 MyOverlay 安装到：",
+    "DEST_BROWSE": "浏览(&R)...",
     "SC_TITLE": "快捷方式",
     "SC_DESC": "选择要创建的快捷方式。",
     "SC_START": "创建“开始”菜单快捷方式",

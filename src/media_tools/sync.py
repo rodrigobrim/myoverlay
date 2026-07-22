@@ -21,6 +21,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .tools import ffmpeg_exe
+
 FEATURE_HZ = 10.0
 AUDIO_RATE = 8000
 # Overlap shorter than this contributes too little evidence to trust.
@@ -146,7 +148,7 @@ def extract_audio_pcm(video: Path) -> np.ndarray:
     """Decode the clip's audio to mono float32 at AUDIO_RATE via ffmpeg."""
     proc = subprocess.run(
         [
-            "ffmpeg", "-v", "error",
+            ffmpeg_exe(), "-v", "error",
             "-i", str(video),
             "-vn", "-ac", "1", "-ar", str(AUDIO_RATE),
             "-f", "s16le", "-",

@@ -1,12 +1,15 @@
 // MSI deferred custom action: persist the setup wizard's choices as
-// install_settings.json next to myoverlay.exe. The launcher reads it on
-// first run to seed config.toml (language, resolution) and to copy the
+// install_settings.yaml next to myoverlay.exe. The launcher reads it on first
+// run to seed config.toml (language, resolution, install_dir) and to copy the
 // Google client secret into place.
 //
+// The file is a flat `key: value` document (the launcher parses it with a tiny
+// hand parser - no YAML library). Values are written literally and unquoted:
+// the launcher splits each line on its FIRST colon, so paths keep their drive
+// letter and backslashes untouched.
+//
 // CustomActionData: INSTALLFOLDER|OUTPUT_LANGUAGE|RESOLUTION|GOOGLE_CLIENT_SECRET|GOOGLE_SKIPPED
-function jsonEscape(s) {
-    return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
+// (INSTALLFOLDER is both where the file is written and the recorded install_dir.)
 
 // Immediate custom action: preselect OUTPUT_LANGUAGE from the machine's UI
 // language when it is one of the supported nine, else leave English. The
@@ -34,16 +37,21 @@ function WriteSettings() {
         var resolution = parts[2] || "2k";
         var secret = parts[3] || "";
         var skipped = parts[4] === "1";
-        var json = "{\n"
-            + '  "language": "' + jsonEscape(language) + '",\n'
-            + '  "resolution": "' + jsonEscape(resolution) + '",\n'
-            + '  "client_secret": "' + jsonEscape(secret) + '",\n'
-            + '  "google_skipped": ' + (skipped ? "true" : "false") + "\n"
-            + "}\n";
+        // The install dir is INSTALLFOLDER without its trailing backslash.
+        var installDir = folder;
+        if (installDir.substr(installDir.length - 1) === "\\") {
+            installDir = installDir.substr(0, installDir.length - 1);
+        }
+        var yaml = ""
+            + "language: " + language + "\n"
+            + "resolution: " + resolution + "\n"
+            + "client_secret: " + secret + "\n"
+            + "google_skipped: " + (skipped ? "true" : "false") + "\n"
+            + "install_dir: " + installDir + "\n";
         var fso = new ActiveXObject("Scripting.FileSystemObject");
         if (folder.substr(folder.length - 1) !== "\\") folder += "\\";
-        var ts = fso.CreateTextFile(folder + "install_settings.json", true, false);
-        ts.Write(json);
+        var ts = fso.CreateTextFile(folder + "install_settings.yaml", true, false);
+        ts.Write(yaml);
         ts.Close();
     } catch (e) {
         // Non-fatal: the app falls back to defaults without the file.

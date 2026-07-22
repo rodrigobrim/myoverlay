@@ -66,21 +66,27 @@ The setup wizard asks for:
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an
    "already installed" checkbox skips it).
-3. **Start Menu / Desktop shortcuts** (they launch `myoverlay run`).
-4. **Google API configuration** — step-by-step Cloud Console instructions,
+3. **Install destination folder** — where the app (and all bundled tools:
+   ffmpeg, git, the Google Cloud SDK) is installed. Defaults to
+   `Program Files\MyOverlay`; a Browse button and path validation are the
+   stock WiX folder dialogs.
+4. **Start Menu / Desktop shortcuts** (they launch `myoverlay run`).
+5. **Google API configuration** — step-by-step Cloud Console instructions,
    a Validate button that checks the client_secret JSON is a Desktop-app
    OAuth client, and a Skip button that warns YouTube publishing will be
    unavailable.
-5. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
+6. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
 
-The choices are written to `install_settings.json` next to the installed
+The choices are written to `install_settings.yaml` next to the installed
 exe; the launcher applies them when it creates `config.toml` on first run
 (language, resolution, and it copies the validated client secret to the
-repo as `client_secret.json`).
+repo as `client_secret.json`). The chosen destination is recorded as
+`[tools] install_dir` in `config.toml` (refreshed on every launch), so the
+pipeline finds the bundled ffmpeg and Google Cloud SDK by full path.
 
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
-the software installed: app files, shortcuts, `install_settings.json`, and
+the software installed: app files, shortcuts, `install_settings.yaml`, and
 `%LOCALAPPDATA%\myoverlay` (pipeline clone, config.toml, Google
 credentials). A checkbox on the remove-options page additionally
 uninstalls the Google Cloud SDK (unchecked by default). The media library

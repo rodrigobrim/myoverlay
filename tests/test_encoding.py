@@ -74,7 +74,9 @@ def test_probe_uses_a_real_test_encode(monkeypatch):
     monkeypatch.setattr(enc.subprocess, "run", fake_run(0, calls))
     enc.encoder_available("h264_nvenc")
     cmd = calls[0]
-    assert cmd[0] == "ffmpeg"
+    # In a clean test env (no MYOVERLAY_FFMPEG_DIR / [tools] config) the helper
+    # resolves to the bare name; an installed run would give a full ffmpeg path.
+    assert cmd[0] == enc.ffmpeg_exe()
     assert "-c:v" in cmd and "h264_nvenc" in cmd
     assert "-f" in cmd and "null" in cmd  # encodes, discards output
 
