@@ -83,8 +83,16 @@
       <Publish Dialog="RemoveOptionsDlg" Control="Next" Event="NewDialog" Value="MyVerifyRemoveDlg">1</Publish>
 
       <Publish Dialog="MyVerifyRemoveDlg" Control="Back" Event="NewDialog" Value="RemoveOptionsDlg">1</Publish>
-      <Publish Dialog="MyVerifyRemoveDlg" Control="Remove" Event="Remove" Value="All" Order="1">1</Publish>
-      <Publish Dialog="MyVerifyRemoveDlg" Control="Remove" Event="EndDialog" Value="Return" Order="2">1</Publish>
+      <!-- Set REMOVE=ALL explicitly: the Remove ControlEvent alone requests
+           the features one by one, which the engine records as a
+           reconfiguration - the product is unregistered and its files go, but
+           REMOVE never literally equals "ALL", so every cleanup custom action
+           conditioned on REMOVE="ALL" (RemoveAppData, RemoveGCloud) silently
+           skips. Observed live: an uninstall that left the launcher clone and
+           appdata behind. The property makes it a true product uninstall. -->
+      <Publish Dialog="MyVerifyRemoveDlg" Control="Remove" Property="REMOVE" Value="ALL" Order="1">1</Publish>
+      <Publish Dialog="MyVerifyRemoveDlg" Control="Remove" Event="Remove" Value="All" Order="2">1</Publish>
+      <Publish Dialog="MyVerifyRemoveDlg" Control="Remove" Event="EndDialog" Value="Return" Order="3">1</Publish>
 
       <Publish Dialog="MyVerifyRepairDlg" Control="Back" Event="NewDialog" Value="MyMaintTypeDlg">1</Publish>
       <Publish Dialog="MyVerifyRepairDlg" Control="Repair" Event="ReinstallMode" Value="ecmus" Order="1">1</Publish>
