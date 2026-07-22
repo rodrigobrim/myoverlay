@@ -640,18 +640,24 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
     # Create click and synthesize the standard installed-app JSON from them.
     # Sniffing is tried FIRST and polled: the response arrives about a second
     # after the click, whereas the download path can only ever time out here.
+    # Listen for `requestfinished` (NOT `response`): in the sync API,
+    # Response.text() blocks until the response completes, and the Console
+    # keeps long-poll/streaming connections open whose URLs also match the
+    # filter - reading one of those froze the flow for 30+ seconds. A finished
+    # request's body reads back instantly. The create call is a mutation, so
+    # only POSTs are buffered (the long-lived channels are GETs).
     sniffed: list = []
 
-    def _on_response(resp) -> None:
-        # Only buffer here - reading a body inside the event handler can block
-        # on a response that is still streaming. Bodies are read while polling.
+    def _on_finished(req) -> None:
+        # Only touch local properties here - blocking Playwright calls inside
+        # an event handler can deadlock the sync dispatcher.
         try:
-            if re.search(r"client|oauth", resp.url, re.I):
-                sniffed.append(resp)
+            if req.method == "POST" and re.search(r"client|oauth", req.url, re.I):
+                sniffed.append(req)
         except Exception:  # noqa: BLE001
             pass
 
-    page.on("response", _on_response)
+    page.on("requestfinished", _on_finished)
     _click(page, "button", "Create")
 
     saved = _await_secret_from_responses(cfg, sniffed, report)
@@ -661,7 +667,7 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
         # Fall back to the dialog's own download link.
         saved = _download_json(page, cfg.youtube.client_secret_file, report)
     try:
-        page.remove_listener("response", _on_response)
+        page.remove_listener("requestfinished", _on_finished)
     except Exception:  # noqa: BLE001
         pass
     if saved:
@@ -677,27 +683,28 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
 
 
 def _await_secret_from_responses(
-    cfg: Config, responses: list, report: list[str], timeout_s: float = 20.0
+    cfg: Config, requests: list, report: list[str], timeout_s: float = 20.0
 ) -> bool:
-    """Poll the sniffed responses until the create call's body shows up.
+    """Poll the sniffed FINISHED requests until the create call's body shows up.
 
-    `responses` is appended to by the page's response handler while this runs,
-    so this both waits for the create call and reads bodies that were not yet
-    available on an earlier tick. Returns as soon as the secret is written -
-    typically about a second after the Create click, instead of the fixed
-    multi-second sleep plus download timeout this replaces."""
+    `requests` is appended to by the page's requestfinished handler while this
+    runs, so this both waits for the create call and scans arrivals on later
+    ticks. Every buffered request has completed, so response() / text() return
+    immediately - the loop never blocks on an open connection. Returns as soon
+    as the secret is written, typically about a second after the Create click."""
     deadline = time.monotonic() + timeout_s
-    scanned: set[int] = set()  # responses whose body was read and did not match
+    scanned: set[int] = set()  # requests already read (matched or not)
     while True:
         # Newest first: the create call is the last request the click fires.
-        for resp in reversed(list(responses)):
-            if id(resp) in scanned:
+        for req in reversed(list(requests)):
+            if id(req) in scanned:
                 continue
+            scanned.add(id(req))
             try:
-                body = resp.text()
-            except Exception:  # noqa: BLE001 - body may not be ready yet; retry
+                resp = req.response()
+                body = resp.text() if resp else ""
+            except Exception:  # noqa: BLE001 - body gone (e.g. context torn down)
                 continue
-            scanned.add(id(resp))
             if _secret_from_body(cfg, body, report):
                 return True
         if time.monotonic() >= deadline:
