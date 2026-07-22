@@ -60,3 +60,9 @@ client_secret_file = "client_secret.json"
 token_file = "token.json"
 # Cloud project used by `mt google-setup` (Console browser automation)
 # project_id = "media-tools-yt-1784475396"
+
+[tools]
+# Where the myoverlay app is installed. Written automatically by the launcher
+# (the setup wizard's chosen destination); used to locate the bundled ffmpeg
+# and Google Cloud SDK by full path. Normally you never edit this by hand.
+# install_dir = "C:/Program Files/MyOverlay"

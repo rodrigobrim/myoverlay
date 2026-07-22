@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from .config import Config
+from .tools import gcloud_available, gcloud_cmd
 
 
 def _gcp_data_dir(cfg: Config) -> Path:
@@ -101,8 +101,10 @@ class _Shoot:
 
 
 def _run_gcloud(args: list[str], **kw):
-    """Run gcloud (a .cmd on Windows) via cmd /c so it resolves from PATH."""
-    return subprocess.run(["cmd", "/c", "gcloud", *args], **kw)
+    """Run gcloud by full path when the bundled copy is known, else by name.
+
+    gcloud is a .cmd on Windows, so it goes through `cmd /c` (see gcloud_cmd)."""
+    return subprocess.run([*gcloud_cmd(), *args], **kw)
 
 
 def _unique_project_id() -> str:
@@ -180,7 +182,7 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     project (default 'myoverlay') or reuse it if it already exists, and enable
     the YouTube Data API. Returns True when the project is ready. The browser
     steps that follow (in setup_google_api) need this done first."""
-    if shutil.which("gcloud") is None:
+    if not gcloud_available():
         report.append("! Google Cloud SDK (gcloud) not found on PATH")
         return False
 

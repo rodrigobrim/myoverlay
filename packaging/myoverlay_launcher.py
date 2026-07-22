@@ -30,7 +30,6 @@ Environment overrides:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -187,12 +186,40 @@ def ensure_repo(
         say("warning: could not reach the remote (offline?); using the current version")
 
 
+def _parse_settings_yaml(text: str) -> dict:
+    """Parse the flat `key: value` install_settings.yaml.
+
+    Deliberately tiny (no PyYAML dependency): the installer only ever writes a
+    flat map of scalars. Splits on the first colon (so Windows paths like
+    C:/... keep their drive letter), unquotes, and coerces true/false to bool
+    to match the old JSON semantics of google_skipped.
+    """
+    out: dict = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        low = value.lower()
+        out[key] = True if low == "true" else False if low == "false" else value
+    return out
+
+
 def installer_settings() -> dict:
     """Choices made in the MSI setup wizard, if this exe was installed by it.
 
-    The installer writes install_settings.json next to myoverlay.exe:
-      {"language": "pt", "resolution": "fhd",
-       "client_secret": "C:\\...\\client_secret.json", "google_skipped": false}
+    The installer writes install_settings.yaml next to myoverlay.exe:
+      language: pt
+      resolution: fhd
+      client_secret: C:\\...\\client_secret.json
+      google_skipped: false
+      install_dir: C:/Program Files/MyOverlay
     A zip/dev deployment has no such file; everything keeps its default.
     """
     exe_dir = (
@@ -200,12 +227,12 @@ def installer_settings() -> dict:
         if getattr(sys, "frozen", False)
         else Path(__file__).resolve().parent
     )
-    f = exe_dir / "install_settings.json"
+    f = exe_dir / "install_settings.yaml"
     if not f.is_file():
         return {}
     try:
-        return json.loads(f.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+        return _parse_settings_yaml(f.read_text(encoding="utf-8-sig"))
+    except OSError:
         say(f"warning: could not read {f}; using default settings")
         return {}
 
@@ -234,21 +261,67 @@ def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
         say("YouTube publishing is disabled until you configure it (README).")
 
 
+def _runtime_install_dir() -> str | None:
+    """Where this frozen exe actually runs from (its own directory), or None in
+    a dev checkout. Ground truth for locating the bundled tools - it stays
+    correct even if the install was moved."""
+    if not getattr(sys, "frozen", False):
+        return None
+    return str(Path(sys.executable).resolve().parent)
+
+
+def _upsert_install_dir(cfg: Path, install_dir: str) -> None:
+    """Write [tools] install_dir into config.toml, refreshing a stale value.
+
+    Idempotent: a no-op when the value is already current, so it doesn't
+    rewrite the file on every launch. Forward slashes keep the TOML string
+    valid without backslash escaping. Modeled on gcp_console._persist_project_id.
+    """
+    value = install_dir.replace("\\", "/").rstrip("/")
+    try:
+        text = cfg.read_bytes().decode("utf-8-sig")
+    except OSError:
+        return
+    if re.search(r"(?m)^\s*install_dir\s*=", text):
+        if re.search(rf'(?m)^\s*install_dir\s*=\s*"{re.escape(value)}"\s*$', text):
+            return  # already current
+        text = re.sub(r"(?m)^(\s*)install_dir\s*=.*$", rf'\1install_dir = "{value}"', text)
+    elif re.search(r"(?m)^\[tools\]", text):
+        text = re.sub(r"(?m)^(\[tools\][^\n]*)$", rf'\1\ninstall_dir = "{value}"', text, count=1)
+    else:
+        text = text.rstrip() + f'\n\n[tools]\ninstall_dir = "{value}"\n'
+    # Normalize to LF and write without newline translation (see the same
+    # trick in gcp_console._persist_project_id) so tomllib doesn't choke.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        cfg.write_text(text, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
 def ensure_config(repo: Path) -> None:
     cfg = repo / "config.toml"
     example = repo / "config.example.toml"
-    if cfg.is_file() or not example.is_file():
-        return
-    shutil.copy2(example, cfg)
-    _apply_installer_settings(repo, cfg, installer_settings())
-    say("=" * 62)
-    say("Created your configuration file:")
-    say(f"    {cfg}")
-    say("Open it in Notepad and set at least:")
-    say("    library_root      (where processed videos will live)")
-    say("    [mychron] rs3_data_dirs  (Race Studio 3 data folder)")
-    say("For YouTube upload, see the README section 'YouTube setup'.")
-    say("=" * 62)
+    settings = installer_settings()
+    if not cfg.is_file():
+        if not example.is_file():
+            return
+        shutil.copy2(example, cfg)
+        _apply_installer_settings(repo, cfg, settings)
+        say("=" * 62)
+        say("Created your configuration file:")
+        say(f"    {cfg}")
+        say("Open it in Notepad and set at least:")
+        say("    library_root      (where processed videos will live)")
+        say("    [mychron] rs3_data_dirs  (Race Studio 3 data folder)")
+        say("For YouTube upload, see the README section 'YouTube setup'.")
+        say("=" * 62)
+
+    # Record (and keep current, across reinstalls) where the frozen app runs
+    # from, so the pipeline resolves the bundled ffmpeg / gcloud by full path.
+    install_dir = _runtime_install_dir() or settings.get("install_dir")
+    if install_dir and cfg.is_file():
+        _upsert_install_dir(cfg, str(install_dir))
 
 
 def main() -> None:
@@ -261,6 +334,13 @@ def main() -> None:
     if not (ffmpeg_dir / "ffmpeg.exe").is_file():
         say(f"ERROR: bundled ffmpeg missing at {ffmpeg_dir} - broken build")
         sys.exit(2)
+    # Point the pipeline at the bundled binaries by full path (media_tools.tools
+    # reads these), so it never picks up a different ffmpeg/gcloud that happens
+    # to be first on PATH. The PATH prepend below stays too, as a compatibility
+    # bridge: the pipeline updates via git pull independently of this exe, so an
+    # old exe (no env vars) running new code, and a new exe running old code
+    # (bare names), both still resolve the bundled tools.
+    os.environ["MYOVERLAY_FFMPEG_DIR"] = str(ffmpeg_dir)
     # Bundled tools first on PATH: the pipeline invokes ffmpeg/ffprobe by name.
     path_parts = [str(ffmpeg_dir), str(git.parent)]
     # The MSI installs the Google Cloud SDK next to the exe (not inside the
@@ -272,6 +352,7 @@ def main() -> None:
         gcloud_bin = exe_dir / "google-cloud-sdk" / "bin"
         if gcloud_bin.is_dir():
             path_parts.append(str(gcloud_bin))
+            os.environ["MYOVERLAY_GCLOUD_BIN"] = str(gcloud_bin)
     os.environ["PATH"] = os.pathsep.join(path_parts + [os.environ.get("PATH", "")])
 
     argv = list(sys.argv[1:])

@@ -20,6 +20,7 @@ import psutil
 
 from ..config import Config
 from ..library import Library, VideoClip
+from ..tools import ffprobe_exe
 
 # e.g. DJI_20260712143205_0012_D.MP4
 DJI_NAME_RE = re.compile(r"DJI_(\d{14})_")
@@ -66,7 +67,7 @@ def probe_duration_s(path: Path) -> float | None:
     try:
         out = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_exe(),
                 "-v",
                 "error",
                 "-show_entries",

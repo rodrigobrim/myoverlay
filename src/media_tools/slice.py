@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from .encoding import encoder_args
+from .tools import ffmpeg_exe
 
 _RANGE_RE = re.compile(r"^(.+?)\s*-\s*(.+)$")
 
@@ -66,7 +67,7 @@ def slice_video(
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{source.stem}_{_stamp(start_s)}-{_stamp(end_s)}{source.suffix}"
 
-    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}", "-i", str(source)]
+    cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}", "-i", str(source)]
     if copy:
         cmd += ["-c", "copy"]
     else:
