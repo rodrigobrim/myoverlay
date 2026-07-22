@@ -66,10 +66,22 @@
     </Directory>
 
     <!-- Shortcuts run `myoverlay run` (the zero-touch workflow) in a console.
-         Non-advertised, conditioned on the wizard checkboxes. -->
+         Non-advertised, conditioned on the wizard checkboxes. Component
+         conditions re-run on every transaction with the properties reset to
+         defaults, so each condition also accepts the component's own registry
+         marker - otherwise a plain repair silently deleted the desktop
+         shortcut (its property has no default). -->
+    <Property Id="STARTMENU_SC_SAVED">
+      <RegistrySearch Id="StartMenuScSaved" Root="HKLM" Key="Software\MyOverlay"
+                      Name="StartMenuShortcut" Type="raw" Win64="yes" />
+    </Property>
+    <Property Id="DESKTOP_SC_SAVED">
+      <RegistrySearch Id="DesktopScSaved" Root="HKLM" Key="Software\MyOverlay"
+                      Name="DesktopShortcut" Type="raw" Win64="yes" />
+    </Property>
     <DirectoryRef Id="AppMenuFolder">
       <Component Id="StartMenuShortcut" Guid="10B3B9E4-63F2-4C89-9A57-2E24D8B10F01" Win64="yes">
-        <Condition>STARTMENU_SHORTCUT = "1"</Condition>
+        <Condition>STARTMENU_SHORTCUT = "1" OR STARTMENU_SC_SAVED</Condition>
         <Shortcut Id="StartMenuRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
                   Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
@@ -81,7 +93,7 @@
     </DirectoryRef>
     <DirectoryRef Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="1B0B18A2-7B4B-45D3-8E19-6A4E2C33AB02" Win64="yes">
-        <Condition>DESKTOP_SHORTCUT = "1"</Condition>
+        <Condition>DESKTOP_SHORTCUT = "1" OR DESKTOP_SC_SAVED</Condition>
         <Shortcut Id="DesktopRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
                   Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
@@ -104,8 +116,11 @@
       <ComponentGroupRef Id="GCloudFiles" />
       <ComponentRef Id="GCloudPath" />
       <!-- Skip when already on the machine, or when the user unticked it on
-           the component page. -->
-      <Condition Level="0">GCLOUD_PRESENT OR INSTALL_GCLOUD &lt;&gt; "1"</Condition>
+           the component page. First install only: feature conditions re-run
+           on EVERY transaction, and on a repair the wizard properties are
+           back at their defaults - without the Installed guard a repair
+           could silently add or remove the SDK against the original choice. -->
+      <Condition Level="0">NOT Installed AND (GCLOUD_PRESENT OR INSTALL_GCLOUD &lt;&gt; "1")</Condition>
     </Feature>
 
     <!-- The offline SDK is bundled as MSI files (GCloudFiles component group,
@@ -212,8 +227,13 @@
       <Custom Action="DetectLanguage" After="AppSearch">NOT Installed AND UILevel &lt; 5</Custom>
       <Custom Action="WriteSettings.SetData" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="WriteSettings" After="WriteSettings.SetData">NOT Installed</Custom>
-      <Custom Action="RemoveGCloud" After="InstallInitialize">REMOVE="ALL" AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
-      <Custom Action="RemoveAppData" After="RemoveGCloud">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <!-- "Uninstall" is matched two ways: REMOVE="ALL" (true product
+           uninstall) OR the core feature installed-and-requested-absent
+           (feature-wise removal, which is what the wizard's Remove event
+           produces on its own). With only the literal check, a wizard
+           uninstall stripped the product but never ran these cleanups. -->
+      <Custom Action="RemoveGCloud" After="InstallInitialize">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RemoveAppData" After="RemoveGCloud">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>
 
     <UIRef Id="MyOverlayWizard" />
