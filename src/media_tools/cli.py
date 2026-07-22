@@ -251,6 +251,61 @@ def google_setup(
         console.print(f"  {line}", markup=False)
 
 
+@app.command(name="google-auth")
+def google_auth() -> None:
+    """Authorize YouTube uploads: opens Google's consent screen, then saves the
+    refresh token. Uploads nothing - `google-setup` only creates the OAuth
+    client, and until this runs the first upload is what triggers consent."""
+    from .publish import get_credentials
+
+    cfg = get_config()
+    console.print("[bold]google-auth[/bold]:")
+    if not cfg.youtube.client_secret_file.is_file():
+        console.print(
+            f"  ! no OAuth client secret at {cfg.youtube.client_secret_file}"
+            " - run `mt google-setup` first",
+            markup=False,
+        )
+        raise typer.Exit(1)
+    # Say up front whether consent is actually needed, so a silent no-op is
+    # never mistaken for a completed authorization.
+    from .publish import _token_client_mismatch
+
+    reused = False
+    if cfg.youtube.token_file.is_file():
+        from google.oauth2.credentials import Credentials
+
+        from .publish import SCOPES
+
+        try:
+            existing = Credentials.from_authorized_user_file(
+                str(cfg.youtube.token_file), SCOPES
+            )
+        except Exception:  # noqa: BLE001 - unreadable token: just re-authorize
+            existing = None
+        if existing is not None and _token_client_mismatch(cfg, existing):
+            console.print("  existing token belongs to a different OAuth client - re-authorizing")
+        elif existing is not None:
+            reused = True
+            console.print("  existing token is still valid - reusing it")
+    if not reused:
+        console.print("  a browser window will open - click Allow to authorize")
+    try:
+        creds = get_credentials(cfg)
+    except Exception as exc:  # noqa: BLE001 - report, never traceback at the CLI
+        console.print(f"  ! authorization failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+    console.print(
+        f"  + {'token still valid' if reused else 'authorized'}"
+        f" -> token saved to {cfg.youtube.token_file}",
+        markup=False,
+    )
+    if not getattr(creds, "refresh_token", None):
+        # Without a refresh token the watcher cannot upload unattended.
+        console.print("  ? no refresh token returned - re-run after revoking the old grant")
+    console.print("  next: `mt publish` uploads your renders")
+
+
 @app.command(name="join")
 def join_cmd(
     day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
