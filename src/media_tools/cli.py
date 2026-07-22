@@ -267,15 +267,36 @@ def google_auth() -> None:
             markup=False,
         )
         raise typer.Exit(1)
-    already = cfg.youtube.token_file.is_file()
-    console.print("  a browser window will open - click Allow to authorize")
+    # Say up front whether consent is actually needed, so a silent no-op is
+    # never mistaken for a completed authorization.
+    from .publish import _token_client_mismatch
+
+    reused = False
+    if cfg.youtube.token_file.is_file():
+        from google.oauth2.credentials import Credentials
+
+        from .publish import SCOPES
+
+        try:
+            existing = Credentials.from_authorized_user_file(
+                str(cfg.youtube.token_file), SCOPES
+            )
+        except Exception:  # noqa: BLE001 - unreadable token: just re-authorize
+            existing = None
+        if existing is not None and _token_client_mismatch(cfg, existing):
+            console.print("  existing token belongs to a different OAuth client - re-authorizing")
+        elif existing is not None:
+            reused = True
+            console.print("  existing token is still valid - reusing it")
+    if not reused:
+        console.print("  a browser window will open - click Allow to authorize")
     try:
         creds = get_credentials(cfg)
     except Exception as exc:  # noqa: BLE001 - report, never traceback at the CLI
         console.print(f"  ! authorization failed: {exc}", markup=False)
         raise typer.Exit(1) from exc
     console.print(
-        f"  + {'refreshed' if already else 'authorized'}"
+        f"  + {'token still valid' if reused else 'authorized'}"
         f" -> token saved to {cfg.youtube.token_file}",
         markup=False,
     )

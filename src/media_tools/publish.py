@@ -58,6 +58,24 @@ def _title_context(
     )
 
 
+def _token_client_mismatch(cfg: Config, creds) -> bool:
+    """True when the saved token was issued by a different OAuth client than
+    the one in client_secret.json. Unreadable/odd files answer False: this is a
+    guard against a silent stale-token failure, never a new way to fail."""
+    import json
+
+    token_client = getattr(creds, "client_id", None)
+    if not token_client:
+        return False
+    try:
+        secret = json.loads(
+            cfg.youtube.client_secret_file.read_text(encoding="utf-8-sig")
+        )["installed"]["client_id"]
+    except Exception:  # noqa: BLE001 - missing/unparsable secret: not our call
+        return False
+    return token_client != secret
+
+
 def get_credentials(cfg: Config):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -67,6 +85,13 @@ def get_credentials(cfg: Config):
     token_file = cfg.youtube.token_file
     if token_file.is_file():
         creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    # A token is bound to the OAuth client that issued it. Re-running
+    # google-setup mints a NEW client (the old secret is unrecoverable, and a
+    # deleted project forces a fresh one), and the stale token still parses and
+    # still looks unexpired - so without this check it is accepted here and
+    # only fails later, at the first API call, as an opaque auth error.
+    if creds and _token_client_mismatch(cfg, creds):
+        creds = None
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
     if not creds or not creds.valid:
