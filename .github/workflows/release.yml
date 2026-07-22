@@ -1,0 +1,94 @@
+name: release
+
+# Tag a release to build and publish it:
+#     git tag v1.2.0 && git push origin v1.2.0
+# Or run manually from the Actions tab to get the artifacts without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp, e.g. 1.2.0 (manual runs do not publish)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # Cold builds pull ~1 GB of vendored tools, then light.exe cabs 1.2 GB at
+    # LZX high, which is single-threaded. Warm cache is far quicker.
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+              $v = $env:GITHUB_REF_NAME -replace '^v', ''
+          } elseif ("${{ inputs.version }}") {
+              $v = "${{ inputs.version }}"
+          } else {
+              $v = "0.0.0"
+          }
+          # MSI ProductVersion is strictly MAJOR.MINOR.PATCH. Fail loudly here
+          # rather than let candle emit a subtly wrong installer.
+          if ($v -notmatch '^\d+\.\d+\.\d+$') {
+              throw "Version '$v' must be MAJOR.MINOR.PATCH (MSI ProductVersion)"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "building version $v"
+
+      # packaging/vendor/ is gitignored - the build scripts download MinGit,
+      # ffmpeg, WiX 3.14 and the offline Google Cloud SDK into it (~1 GB) and
+      # skip the download when already present. The download URLs live in the
+      # scripts, so key the cache on them.
+      - name: Cache vendored build tools
+        uses: actions/cache@v4
+        with:
+          path: packaging/vendor
+          key: vendor-${{ runner.os }}-${{ hashFiles('packaging/build_exe.ps1', 'packaging/msi/build_msi.ps1') }}
+          restore-keys: |
+            vendor-${{ runner.os }}-
+
+      - name: Build the launcher exe
+        shell: pwsh
+        run: packaging\build_exe.ps1
+
+      - name: Build the MSI
+        shell: pwsh
+        run: packaging\msi\build_msi.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      # Manual runs keep the artifacts for inspection; tagged runs attach them
+      # to the release instead, so there is no point storing them twice.
+      - name: Upload build artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: myoverlay-${{ steps.ver.outputs.version }}
+          path: |
+            dist/myoverlay-setup.msi
+            dist/myoverlay-win64.zip
+          retention-days: 14
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            --title "MyOverlay ${{ steps.ver.outputs.version }}" `
+            --generate-notes `
+            dist/myoverlay-setup.msi dist/myoverlay-win64.zip

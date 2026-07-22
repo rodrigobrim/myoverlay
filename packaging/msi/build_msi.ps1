@@ -7,8 +7,19 @@
 #   3. compiles Product.wxs + WizardUI.wxs and links dist\myoverlay-setup.msi.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File packaging\msi\build_msi.ps1
+#         ... -Version 1.2.0     (release builds; CI passes the git tag)
+#
+# -Version becomes the MSI ProductVersion. It MUST change between releases:
+# Product.wxs pairs `Product Id="*"` with a fixed UpgradeCode and
+# <MajorUpgrade>, so two MSIs sharing a version never upgrade each other -
+# the second install collides with the first instead of replacing it. The
+# 0.1.0 default keeps local/dev builds behaving exactly as before.
+param([string]$Version = "0.1.0")
 
 $ErrorActionPreference = "Stop"
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Version '$Version' must be MAJOR.MINOR.PATCH (MSI ProductVersion)."
+}
 $msiDir = $PSScriptRoot
 $repo = (Resolve-Path (Join-Path $msiDir "..\..")).Path
 $payload = Join-Path $repo "dist\myoverlay"
@@ -97,6 +108,7 @@ $gcloudVersion = (Get-Content (Join-Path $gcloudSdk "VERSION") -ErrorAction Sile
     Select-Object -First 1)
 if ([string]::IsNullOrWhiteSpace($gcloudVersion)) { $gcloudVersion = "unknown" }
 Write-Host "Bundled versions -> ffmpeg $ffmpegVersion | git $gitVersion | gcloud $gcloudVersion"
+Write-Host "Product version  -> $Version"
 
 # --- harvest the onedir payload ---
 & (Join-Path $wix "heat.exe") dir $payload `
@@ -112,6 +124,7 @@ if ($LASTEXITCODE -ne 0) { throw "heat (gcloud) failed" }
 
 # --- compile ---
 & (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudDir=$gcloudSdk" `
+    "-dProductVersion=$Version" `
     "-dFfmpegVersion=$ffmpegVersion" "-dGitVersion=$gitVersion" "-dGcloudVersion=$gcloudVersion" `
     -ext WixUIExtension -out "$build\" `
     (Join-Path $msiDir "Product.wxs") `
