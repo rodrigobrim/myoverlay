@@ -97,10 +97,17 @@ def test_probe_frame_is_above_nvenc_minimum(monkeypatch):
     assert w >= 256 and h >= 240, f"probe frame {w}x{h} too small for NVENC"
 
 
-@pytest.mark.skipif(
-    subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode != 0,
-    reason="ffmpeg not available",
-)
+def have_ffmpeg() -> bool:
+    # Guarded: an unguarded subprocess.run here raises FileNotFoundError while
+    # the decorator below is evaluated at import, which errors out collection
+    # of this whole module on any machine without ffmpeg (CI runners).
+    try:
+        return subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not have_ffmpeg(), reason="ffmpeg not available")
 def test_real_ffmpeg_probe_returns_a_usable_codec():
     """Against the real ffmpeg on this machine, whatever comes back must be
     an encoder that actually works here."""

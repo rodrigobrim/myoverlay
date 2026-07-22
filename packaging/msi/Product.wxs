@@ -15,7 +15,7 @@
   <Product Id="*"
            Name="MyOverlay - the definitive overlay tool for MyChron users"
            Language="1033"
-           Version="0.1.0"
+           Version="$(var.ProductVersion)"
            Manufacturer="Rodrigo Brim"
            UpgradeCode="7C3B7A66-9A1E-4C1D-B7F1-52A70E6D0D11">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
