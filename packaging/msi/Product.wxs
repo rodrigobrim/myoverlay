@@ -160,16 +160,18 @@
       </Component>
     </DirectoryRef>
 
-    <!-- Google API config runs DURING the wizard, from the Finish button, as
-         an IMMEDIATE action in the interactive UI session - the only context
-         where the sign-in browser can actually appear (deferred CAs run
-         non-interactively). Synchronous (Return=ignore: the wizard waits for
-         it, but a cancel/failure never blocks finishing). Full exe path +
-         working dir so it launches reliably; property refs expand because
-         immediate CAs (unlike deferred) have property access. -->
-    <CustomAction Id="RunGoogleSetup" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]myoverlay.exe&quot; google-setup"
-                  Execute="immediate" Return="ignore" />
+    <!-- Google API config runs DURING the wizard as an IMMEDIATE action in
+         the interactive UI session - the only context where the sign-in
+         browser can actually appear (deferred CAs run non-interactively).
+         JScript launcher (run_google_setup.js): starts the exe asynchronously
+         and polls it, pinging the wizard every second so Cancel stays live.
+         On cancel it kills the console + browsers and schedules a passive
+         uninstall of the just-committed install (Google-side changes are
+         left alone), then returns UserExit (2). Return="check" so that exit
+         code closes the wizard; every other path returns success. -->
+    <Binary Id="RunGoogleSetupJs" SourceFile="run_google_setup.js" />
+    <CustomAction Id="RunGoogleSetup" BinaryKey="RunGoogleSetupJs"
+                  JScriptCall="RunGoogleSetup" Execute="immediate" Return="check" />
 
     <!-- Persist wizard choices next to the exe (elevated, after files land). -->
     <Binary Id="WriteSettingsJs" SourceFile="write_settings.js" />
