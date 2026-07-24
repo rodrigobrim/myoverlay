@@ -62,6 +62,12 @@ The setup wizard asks for:
 1. **Video language** (en default, pt/es/ja/ar/fr/it/ru) — applies to the
    delta overlay labels and the YouTube title/description defaults only;
    config and CLI stay English.
+   After it, a **dependency check** page (`detect_deps.js`) reports whether
+   software MyOverlay works with is present — currently Race Studio 3
+   (matched by installed-MSI product name, with the default
+   `C:\AIM_SPORT\RaceStudio3` folder as fallback). Each dependency is either
+   *blocking* (Next stays disabled until it is installed) or a *warning*
+   (proceed allowed with a note); RS3 is a warning.
 2. **Google Cloud SDK** — the official Windows installer
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an
