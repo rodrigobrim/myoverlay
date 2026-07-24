@@ -109,10 +109,24 @@
       </Component>
     </DirectoryRef>
 
+    <!-- myoverlay.exe on the machine PATH, same mechanism as GCloudPath
+         below: MSI's own Environment table - silent, and cleanly removed on
+         uninstall. Rides in the Main feature, so it always accompanies the
+         app. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AppPath" Guid="6E2D4B87-0C31-4F5A-8D4E-9B1F3A7C5E20" Win64="yes">
+        <Environment Id="AppBinPath" Name="PATH" Part="last" Action="set"
+                     Permanent="no" System="yes" Value="[INSTALLFOLDER]" />
+        <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="AppPath"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
     <Feature Id="Main" Title="MyOverlay" Level="1" Absent="disallow" Display="hidden">
       <ComponentGroupRef Id="MyOverlayFiles" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="AppPath" />
     </Feature>
 
     <!-- The bundled SDK is its own feature so it can be conditionally skipped
