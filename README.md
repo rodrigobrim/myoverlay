@@ -34,7 +34,9 @@ skips anything already done, so all commands are safe to re-run.
    *YouTube Data API v3*, create a **Desktop** OAuth client, save the JSON as
    `client_secret.json` in the repo, **publish** the OAuth consent screen
    (otherwise the token expires weekly), then run `myoverlay publish --dry-run`
-   once and complete the browser authorization.
+   once and complete the browser authorization. `myoverlay google-setup`
+   automates all of this; the manual procedure is detailed in
+   [docs/google-manual-setup.md](docs/google-manual-setup.md).
 
 ## Usage
 
