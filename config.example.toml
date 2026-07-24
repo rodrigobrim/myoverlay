@@ -1,7 +1,8 @@
 # media-tools configuration. Copy to config.toml and edit.
 
 # Root folder where ingested/processed media lives (one subfolder per track day).
-library_root = "D:/karting/library"
+# Optional: defaults to ~/Videos/karting when omitted. Uncomment to override.
+# library_root = "D:/karting/library"
 
 # Language of the video output (overlay labels + default YouTube title and
 # description): en | pt | es | ja | ar | fr | it | ru | zh. Config stays English.
