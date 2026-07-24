@@ -111,6 +111,34 @@ def _walk(cmd, path: list[str], out: list[str]) -> None:
         _command_section(cmd, path, out)
 
 
+def iter_command_paths() -> list[str]:
+    """Every runnable command path, e.g. ['ingest', ..., 'camera list', ...].
+
+    The machine-readable twin of docs/CLI.md: both walk the same command tree,
+    so anything asserted against this list is asserted against the documented
+    CLI surface. Groups (`camera`, `telemetry`) are not themselves runnable and
+    are not included - only their leaf sub-commands are.
+    """
+    import typer.main
+
+    from .cli import app
+
+    root = typer.main.get_command(app)
+    paths: list[str] = []
+
+    def walk(cmd, path: list[str]) -> None:
+        subcommands = getattr(cmd, "commands", None)
+        if subcommands:
+            for name in sorted(subcommands):
+                walk(subcommands[name], path + [name])
+        else:
+            paths.append(" ".join(path))
+
+    for name in sorted(root.commands):
+        walk(root.commands[name], [name])
+    return paths
+
+
 def generate_cli_docs() -> str:
     """Render the full CLI reference as Markdown (LF newlines, byte-stable)."""
     import typer.main
