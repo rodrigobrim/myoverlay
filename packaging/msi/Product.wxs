@@ -2,9 +2,9 @@
 <!--
   MyOverlay MSI. Payload = the PyInstaller onedir build (dist\myoverlay,
   harvested by heat into HarvestedFiles.wxs at build time). The setup wizard
-  (WizardUI.wxs) collects: output language, install destination, shortcut
-  choices, Google API client secret (validated, skippable with a warning) and
-  default render resolution; a deferred CA writes them to
+  (WizardUI.wxs) collects: output language, a dependency check (Race Studio 3
+  presence), install destination, shortcut choices, Google API client secret
+  (validated, skippable with a warning) and default render resolution; a deferred CA writes them to
   install_settings.yaml, which the launcher applies when it creates config.toml
   on first run (the chosen destination is also recorded there as
   [tools] install_dir so the pipeline finds the bundled ffmpeg/gcloud).
@@ -185,6 +185,17 @@
     <!-- Preselect the wizard's language from the machine's UI language. -->
     <CustomAction Id="DetectLanguage" BinaryKey="WriteSettingsJs"
                   JScriptCall="DetectLanguage" Execute="immediate" Return="ignore" />
+    <!-- Dependency-detection phase (detect_deps.js): checks the machine for
+         software MyOverlay works with (currently Race Studio 3) and fills the
+         DEP_*/DEPS_* properties the DependenciesDlg page binds to. Each
+         dependency is blocking (Next disabled until installed) or a warning
+         (proceed allowed); registering another one is a new entry in the
+         script's DEPS table plus a row on the page. Runs after
+         ApplyUiLanguage - it composes localized status text - and re-runs
+         from the language page's Next. -->
+    <Binary Id="DetectDepsJs" SourceFile="detect_deps.js" />
+    <CustomAction Id="DetectDependencies" BinaryKey="DetectDepsJs"
+                  JScriptCall="DetectDependencies" Execute="immediate" Return="ignore" />
     <!-- Fill every P_* wizard string for the active language (generated file;
          see gen_i18n_ui.py). Runs before the first dialog and again from the
          language combo's Next/Back. -->
@@ -221,6 +232,9 @@
       <!-- Unconditional: maintenance mode dialogs localize too. -->
       <Custom Action="DetectLanguage" After="AppSearch">1</Custom>
       <Custom Action="ApplyUiLanguage" After="DetectLanguage">1</Custom>
+      <!-- Fresh installs only: the dependency page is not in the maintenance
+           chain. -->
+      <Custom Action="DetectDependencies" After="ApplyUiLanguage">NOT Installed</Custom>
       <!-- Configure the Google API right after the install completes but while
            still in the interactive UI session (After ExecuteAction, before the
            Exit page). This is the only spot that is BOTH post-install (the exe
