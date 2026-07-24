@@ -56,6 +56,64 @@ class ScanResult(BaseModel):
     orphan_telemetry: list[ScanTelemetry] = []
 
 
+class CameraVideo(BaseModel):
+    source_name: str
+    size_bytes: int
+    start_utc: datetime
+    source_path: str
+    status: str  # "new" | "ingested"
+
+
+class CameraListResult(BaseModel):
+    sources: list[str] = []
+    videos: list[CameraVideo] = []
+
+
+class TelemetryFileEntry(BaseModel):
+    source_name: str
+    size_bytes: int
+    source_path: str
+    status: str  # "new" | "ingested"
+
+
+class TelemetryListResult(BaseModel):
+    sources: list[str] = []
+    files: list[TelemetryFileEntry] = []
+
+
+def list_camera_videos(cfg: Config, include_ingested: bool = False) -> CameraListResult:
+    """Read-only listing of videos on the camera (default: only not-yet-ingested)."""
+    sources, files = _cam.enumerate_camera_videos(cfg)
+    videos = [
+        CameraVideo(
+            source_name=f.name,
+            size_bytes=f.size,
+            start_utc=f.start_utc,
+            source_path=str(f.path),
+            status="ingested" if f.ingested else "new",
+        )
+        for f in files
+        if include_ingested or not f.ingested
+    ]
+    return CameraListResult(sources=[str(s) for s in sources], videos=videos)
+
+
+def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> TelemetryListResult:
+    """Read-only listing of .xrk files in RS3's data dir (default: only new)."""
+    sources, files = _my.enumerate_telemetry_files(cfg)
+    entries = [
+        TelemetryFileEntry(
+            source_name=f.name,
+            size_bytes=f.size,
+            source_path=str(f.path),
+            status="ingested" if f.ingested else "new",
+        )
+        for f in files
+        if include_ingested or not f.ingested
+    ]
+    return TelemetryListResult(sources=[str(s) for s in sources], files=entries)
+
+
 def _telemetry_window(cfg: Config, path, logger_tz):
     """(XrkInfo, start_utc, end_utc), applying the same wrong-clock correction
     and mtime fallback as ingest_mychron so the preview times line up."""

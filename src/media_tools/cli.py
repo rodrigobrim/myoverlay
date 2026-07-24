@@ -14,6 +14,10 @@ from .config import Config, load_config
 from .library import Library
 
 app = typer.Typer(help="Zero-touch karting video + telemetry pipeline.", no_args_is_help=True)
+camera_app = typer.Typer(help="Camera SD-card utilities (list / selective download).", no_args_is_help=True)
+telemetry_app = typer.Typer(help="MyChron telemetry utilities (list / download).", no_args_is_help=True)
+app.add_typer(camera_app, name="camera")
+app.add_typer(telemetry_app, name="telemetry")
 console = Console()
 
 _config_path: Path | None = None
@@ -92,6 +96,10 @@ def ingest(
             "control tree, unhide already-downloaded sessions, scroll the list, 30s waits",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Re-download and refresh files already ingested"),
+    ] = False,
 ):
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
@@ -107,11 +115,11 @@ def ingest(
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 
-        _print_ingest_report("camera", ingest_camera(cfg))
+        _print_ingest_report("camera", ingest_camera(cfg, force=force))
     if source in ("all", "mychron"):
         from .ingest.mychron import ingest_mychron
 
-        _print_ingest_report("mychron", ingest_mychron(cfg))
+        _print_ingest_report("mychron", ingest_mychron(cfg, force=force))
 
 
 @app.command()
@@ -151,6 +159,147 @@ def scan(
         for t in result.orphan_telemetry:
             orphan.add(f"{t.source_name} - {t.lap_count} laps, best {t.best_lap}")
     console.print(tree)
+
+
+def _fmt_size(n: int) -> str:
+    mb = n / 1_000_000
+    return f"{mb / 1000:.2f} GB" if mb >= 1000 else f"{mb:.1f} MB"
+
+
+@camera_app.command("list")
+def camera_list(
+    all_: Annotated[
+        bool, typer.Option("--all", help="Include videos already downloaded (default: only new)")
+    ] = False,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List videos on the connected camera. Copies nothing."""
+    from .scan import list_camera_videos
+
+    cfg = get_config()
+    result = list_camera_videos(cfg, include_ingested=all_)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.sources:
+        console.print("[dim]no camera volume found[/dim]")
+        return
+    if not result.videos:
+        console.print("[dim]no new videos[/dim]" if not all_ else "[dim]no videos on camera[/dim]")
+        return
+
+    camera_tz = cfg.camera.tzinfo()
+    table = Table(title="camera videos")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("captured (local)")
+    table.add_column("status")
+    for v in result.videos:
+        status = "[green]new[/green]" if v.status == "new" else "[dim]ingested[/dim]"
+        table.add_row(
+            v.source_name,
+            _fmt_size(v.size_bytes),
+            v.start_utc.astimezone(camera_tz).strftime("%Y-%m-%d %H:%M:%S"),
+            status,
+        )
+    console.print(table)
+
+
+@camera_app.command("get")
+def camera_get(
+    names: Annotated[
+        Optional[list[str]],
+        typer.Argument(help="Video filenames from `mt camera list` (omit to download all new)"),
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-download and refresh files already ingested")
+    ] = False,
+):
+    """Download videos from the camera into the library (all new, or only the named ones)."""
+    from .ingest.camera import ingest_camera
+
+    report = ingest_camera(get_config(), only_names=names or None, force=force)
+    _print_ingest_report("camera", report)
+    if report.requested_missing:
+        console.print(f"[red]not found on camera: {', '.join(report.requested_missing)}[/red]")
+        raise typer.Exit(1)
+
+
+@telemetry_app.command("list")
+def telemetry_list(
+    all_: Annotated[
+        bool, typer.Option("--all", help="Include sessions already ingested (default: only new)")
+    ] = False,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List MyChron .xrk sessions in Race Studio 3's data dir. Copies nothing."""
+    from .scan import list_telemetry_files
+
+    cfg = get_config()
+    result = list_telemetry_files(cfg, include_ingested=all_)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.files:
+        console.print("[dim]no new sessions[/dim]" if not all_ else "[dim]no sessions found[/dim]")
+        return
+
+    table = Table(title="mychron sessions")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("status")
+    for f in result.files:
+        status = "[green]new[/green]" if f.status == "new" else "[dim]ingested[/dim]"
+        table.add_row(f.source_name, _fmt_size(f.size_bytes), status)
+    console.print(table)
+
+
+@telemetry_app.command("get")
+def telemetry_get(
+    names: Annotated[
+        Optional[list[str]],
+        typer.Argument(help="Session filenames from `mt telemetry list` (omit to download all new)"),
+    ] = None,
+    rs3: Annotated[
+        bool,
+        typer.Option("--rs3/--no-rs3", help="First drive Race Studio 3 to pull sessions off the MyChron"),
+    ] = True,
+    troubleshoot: Annotated[
+        bool, typer.Option("--troubleshoot", help="RS3 diagnostics; skips the file ingest step")
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-ingest files already downloaded (only files already on disk; RS3 hides "
+            "sessions already pulled off the device)",
+        ),
+    ] = False,
+):
+    """Download MyChron sessions via Race Studio 3 and ingest them. No camera involvement."""
+    cfg = get_config()
+    if rs3 or troubleshoot:
+        from .ingest.rs3 import trigger_rs3_download
+
+        console.print("[bold]rs3[/bold]:")
+        for line in trigger_rs3_download(cfg, troubleshoot=troubleshoot):
+            console.print(f"  {line}", markup=False)
+    if troubleshoot:
+        return
+
+    from .ingest.mychron import ingest_mychron
+
+    report = ingest_mychron(cfg, only_names=names or None, force=force)
+    _print_ingest_report("mychron", report)
+    if report.requested_missing:
+        console.print(f"[red]not found: {', '.join(report.requested_missing)}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
