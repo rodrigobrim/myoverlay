@@ -87,15 +87,18 @@ S: dict[str, dict[str, str]] = {
         "Puoi continuare, ma le funzionalità che dipendono dal software mancante non funzioneranno finché non lo installi.",
         "Вы можете продолжить, но функции, зависящие от отсутствующей программы, не будут работать, пока вы её не установите.",
     ])),
-    "DEPS_BLOCK_NOTE": dict(zip(L, [
-        "Required software is missing. Install it, then click Back and Next to check again.",
-        "Um software obrigatório está ausente. Instale-o e depois clique em Voltar e Avançar para verificar novamente.",
-        "Falta software obligatorio. Instálelo y luego haga clic en Atrás y Siguiente para comprobar de nuevo.",
-        "必須のソフトウェアが見つかりません。インストールしてから、[戻る]と[次へ]をクリックして再確認してください。",
-        "برنامج مطلوب مفقود. قم بتثبيته ثم انقر فوق السابق ثم التالي لإعادة التحقق.",
-        "Un logiciel requis est manquant. Installez-le, puis cliquez sur Précédent puis Suivant pour vérifier à nouveau.",
-        "Manca un software obbligatorio. Installalo, poi fai clic su Indietro e Avanti per verificare di nuovo.",
-        "Отсутствует обязательная программа. Установите её, затем нажмите «Назад» и «Далее», чтобы проверить снова.",
+    # -------- missing-required-software page (dead end) --------
+    "DEPB_TITLE": dict(zip(L, ["Setup cannot continue", "A instalação não pode continuar", "La instalación no puede continuar", "セットアップを続行できません", "لا يمكن متابعة الإعداد", "L'installation ne peut pas continuer", "L'installazione non può continuare", "Установка не может быть продолжена"])),
+    "DEPB_DESC": dict(zip(L, ["The following software must be installed first:", "O software a seguir precisa ser instalado primeiro:", "Primero debe instalarse el software siguiente:", "先に次のソフトウェアをインストールする必要があります:", "يجب تثبيت البرامج التالية أولا:", "Le logiciel suivant doit d'abord être installé :", "Il software seguente deve prima essere installato:", "Сначала необходимо установить следующие программы:"])),
+    "DEPB_EXPLAIN": dict(zip(L, [
+        "MyOverlay cannot work without it. Install it now (keep this window open), then click Back to check again - or click Cancel to exit setup and run it again later.",
+        "O MyOverlay não funciona sem ele. Instale-o agora (mantenha esta janela aberta) e depois clique em Voltar para verificar novamente - ou clique em Cancelar para sair da instalação e executá-la de novo mais tarde.",
+        "MyOverlay no puede funcionar sin él. Instálelo ahora (mantenga esta ventana abierta) y luego haga clic en Atrás para comprobar de nuevo - o haga clic en Cancelar para salir de la instalación y ejecutarla de nuevo más tarde.",
+        "MyOverlay はこれなしでは動作しません。今すぐインストールし（このウィンドウは開いたままにしてください）、[戻る]をクリックして再確認してください。または[キャンセル]をクリックしてセットアップを終了し、後で再実行してください。",
+        "لا يمكن لـ MyOverlay العمل بدونه. قم بتثبيته الآن (أبق هذه النافذة مفتوحة)، ثم انقر فوق السابق لإعادة التحقق - أو انقر فوق إلغاء للخروج من الإعداد وتشغيله مرة أخرى لاحقا.",
+        "MyOverlay ne peut pas fonctionner sans lui. Installez-le maintenant (gardez cette fenêtre ouverte), puis cliquez sur Précédent pour vérifier à nouveau - ou cliquez sur Annuler pour quitter l'installation et la relancer plus tard.",
+        "MyOverlay non può funzionare senza. Installalo ora (tieni aperta questa finestra), poi fai clic su Indietro per verificare di nuovo - oppure fai clic su Annulla per uscire dall'installazione ed eseguirla di nuovo più tardi.",
+        "MyOverlay не может работать без неё. Установите её сейчас (не закрывайте это окно), затем нажмите «Назад», чтобы проверить снова, - или нажмите «Отмена», чтобы выйти из установки и запустить её позже.",
     ])),
 
     # -------- component-selection page --------
@@ -281,7 +284,9 @@ ZH: dict[str, str] = {
     "DEPS_MISSING": "未找到",
     "DEPS_RS3_NOTE": "Race Studio 3 是 AiM 的免费程序，用于从您的 MyChron 下载遥测数据——MyOverlay 需要它的数据。请从 www.aim-sportline.com 下载。",
     "DEPS_WARN_NOTE": "您可以继续，但依赖缺失软件的功能在安装它之前将无法使用。",
-    "DEPS_BLOCK_NOTE": "缺少必需的软件。请先安装，然后单击“上一步”和“下一步”重新检查。",
+    "DEPB_TITLE": "无法继续安装",
+    "DEPB_DESC": "必须先安装以下软件：",
+    "DEPB_EXPLAIN": "没有它，MyOverlay 无法工作。请立即安装（保持此窗口打开），然后单击“上一步”重新检查——或单击“取消”退出安装，稍后再运行。",
     "COMP_TITLE": "选择要安装的组件",
     "COMP_DESC": "MyOverlay 捆绑了以下工具。部分为必需项，无法更改。",
     "COMP_GROUP": "捆绑的软件",

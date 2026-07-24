@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Custom setup wizard chain, fully localized at runtime:
-    Welcome -> Language -> Dependencies [Race Studio 3 check] ->
+    Welcome -> Language -> Dependencies [Race Studio 3 check; a missing
+    blocking dependency detours to the DepsBlockedDlg dead end] ->
     Components [Google Cloud SDK] -> Destination -> Shortcuts -> Resolution ->
     VerifyReady -> progress -> exit.
   (Google API setup is informational; it is automated on first launch, or the
@@ -52,11 +53,17 @@
       <Publish Dialog="LanguageDlg" Control="Next" Event="DoAction" Value="DetectDependencies" Order="2">1</Publish>
       <Publish Dialog="LanguageDlg" Control="Next" Event="NewDialog" Value="DependenciesDlg" Order="3">1</Publish>
 
-      <!-- Dependency check: Next is disabled while a blocking dependency is
-           missing (DetectDependencies / detect_deps.js); missing warning
-           dependencies only show a note. -->
+      <!-- Dependency check (DetectDependencies / detect_deps.js): while a
+           blocking dependency is missing, Next leads to the DepsBlockedDlg
+           dead-end page; missing warning dependencies only show a note.
+           DepsBlockedDlg's Back re-runs the detection on its way back, so
+           installing the software and clicking Back is enough to unblock. -->
       <Publish Dialog="DependenciesDlg" Control="Back" Event="NewDialog" Value="LanguageDlg">1</Publish>
-      <Publish Dialog="DependenciesDlg" Control="Next" Event="NewDialog" Value="ComponentsDlg">1</Publish>
+      <Publish Dialog="DependenciesDlg" Control="Next" Event="NewDialog" Value="DepsBlockedDlg">DEPS_BLOCKING_MISSING</Publish>
+      <Publish Dialog="DependenciesDlg" Control="Next" Event="NewDialog" Value="ComponentsDlg">NOT DEPS_BLOCKING_MISSING</Publish>
+
+      <Publish Dialog="DepsBlockedDlg" Control="Back" Event="DoAction" Value="DetectDependencies" Order="1">1</Publish>
+      <Publish Dialog="DepsBlockedDlg" Control="Back" Event="NewDialog" Value="DependenciesDlg" Order="2">1</Publish>
 
       <!-- Component selection: FFmpeg + Git are mandatory (ticked, disabled);
            the Google Cloud SDK is optional (INSTALL_GCLOUD). -->
@@ -155,10 +162,10 @@
       <!-- ______________ Dependency check ______________ -->
       <!-- One row per entry in detect_deps.js's DEPS table: product name plus
            the localized [DEP_<id>_STATUS] filled by DetectDependencies before
-           this dialog is created. A missing BLOCKING dependency disables
-           Next; a missing WARNING dependency only shows the notes. Show/hide
-           conditions come in pairs because they re-evaluate each time the
-           dialog is (re)created. -->
+           this dialog is created. With a missing BLOCKING dependency, Next
+           routes to DepsBlockedDlg; a missing WARNING dependency only shows
+           the notes. Show/hide conditions come in pairs because they
+           re-evaluate each time the dialog is (re)created. -->
       <Dialog Id="DependenciesDlg" Width="370" Height="270" Title="[ProductName]">
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
@@ -175,18 +182,32 @@
           <Condition Action="hide">NOT DEPS_WARNING_MISSING</Condition>
           <Condition Action="show">DEPS_WARNING_MISSING</Condition>
         </Control>
-        <Control Id="BlockNote" Type="Text" X="25" Y="196" Width="320" Height="32" NoPrefix="yes" Text="[P_DEPS_BLOCK_NOTE]">
-          <Condition Action="hide">NOT DEPS_BLOCKING_MISSING</Condition>
-          <Condition Action="show">DEPS_BLOCKING_MISSING</Condition>
-        </Control>
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]">
-          <Condition Action="disable">DEPS_BLOCKING_MISSING</Condition>
-          <Condition Action="enable">NOT DEPS_BLOCKING_MISSING</Condition>
-        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]" />
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">
           <Publish Event="SpawnDialog" Value="MyCancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <!-- ______________ Missing required software (dead end) ______________ -->
+      <!-- Reached from DependenciesDlg's Next while a blocking dependency is
+           missing. Exactly two options: Back returns to the dependency page
+           re-running the detection (install the software, click Back, and the
+           check clears), and Cancel exits setup - directly, no confirmation
+           popup: this page IS the explanation. [DEPS_BLOCKING_LIST] is the
+           bullet list composed by detect_deps.js. -->
+      <Dialog Id="DepsBlockedDlg" Width="370" Height="270" Title="[ProductName]">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_DEPB_TITLE]" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_DEPB_DESC]" />
+        <Control Id="MissingList" Type="Text" X="40" Y="60" Width="305" Height="48" NoPrefix="yes" Text="[DEPS_BLOCKING_LIST]" />
+        <Control Id="Explain" Type="Text" X="25" Y="116" Width="320" Height="56" NoPrefix="yes" Text="[P_DEPB_EXPLAIN]" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Default="yes" Text="[P_BACK]" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">
+          <Publish Event="EndDialog" Value="Exit">1</Publish>
         </Control>
       </Dialog>
 
