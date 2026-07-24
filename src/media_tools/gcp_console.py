@@ -440,21 +440,75 @@ def _has_google_session(profile_dir: Path) -> bool:
     return False
 
 
-def _close_profile_browsers(profile_dir: Path) -> None:
-    """Close every browser process bound to this profile so the automated pass
-    can take the profile lock. Safe because we only call it once the session
-    cookie is already flushed to disk - a terminate loses nothing."""
+def _profile_browser_pids(profile_dir: Path) -> set[int]:
+    """Pids of every chrome/msedge process bound to this profile dir."""
     import psutil
 
     key = str(profile_dir)
-    victims = []
+    pids: set[int] = set()
     for p in psutil.process_iter(["name", "cmdline"]):
         try:
             name = (p.info["name"] or "").lower()
             if ("chrome" in name or "msedge" in name) and key in " ".join(
                 p.info["cmdline"] or []
             ):
-                victims.append(p)
+                pids.add(p.pid)
+        except Exception:  # noqa: BLE001 - vanished process
+            continue
+    return pids
+
+
+def _console_window_open(profile_dir: Path) -> bool:
+    """Engine-agnostic sign-in signal: the login handoff carries a continue URL
+    into the Cloud Console, so once sign-in completes the tab title becomes
+    '... - Google Cloud console' - readable from outside the browser via Win32
+    title enumeration. This is the only passive signal that works on Edge,
+    whose profile files carry no Google-account marker and whose cookie DB is
+    exclusively locked. It must stay passive: launching the handoff browser
+    with a DevTools port makes Google reject the sign-in outright
+    (accounts.google.com/v3/signin/rejected)."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    pids = _profile_browser_pids(profile_dir)
+    if not pids:
+        return False
+
+    user32 = ctypes.windll.user32
+    hit = False
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def _cb(hwnd, _lparam):
+        nonlocal hit
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        pid = wt.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value not in pids:
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            if "google cloud" in buf.value.lower():
+                hit = True
+                return False  # stop enumerating
+        return True
+
+    user32.EnumWindows(_cb, 0)
+    return hit
+
+
+def _close_profile_browsers(profile_dir: Path) -> None:
+    """Close every browser process bound to this profile so the automated pass
+    can take the profile lock. Safe because we only call it once the session
+    cookie is already flushed to disk - a terminate loses nothing."""
+    import psutil
+
+    victims = []
+    for pid in _profile_browser_pids(profile_dir):
+        try:
+            victims.append(psutil.Process(pid))
         except Exception:  # noqa: BLE001 - vanished process
             continue
     for p in victims:
@@ -474,7 +528,8 @@ def _close_profile_browsers(profile_dir: Path) -> None:
 def _manual_login(profile_dir: Path, report: list[str]) -> bool:
     """Google rejects sign-in inside an automation-controlled browser, so open
     a PLAIN browser on the same profile and let the human sign in there. We
-    watch the profile for the Google session cookie and close the window
+    watch for the sign-in (profile files, or the Cloud Console window title
+    for engines like Edge whose profile carries no signal) and close the window
     OURSELVES once it appears - the user just signs in, nothing to close. The
     retry pass then reuses the session; no credential is ever typed by us."""
     import subprocess
@@ -510,7 +565,7 @@ def _manual_login(profile_dir: Path, report: list[str]) -> bool:
         if proc.poll() is not None:  # user closed it themselves
             time.sleep(2)
             return True
-        if _has_google_session(profile_dir):
+        if _has_google_session(profile_dir) or _console_window_open(profile_dir):
             report.append("sign-in detected - closing the login window")
             _close_profile_browsers(profile_dir)
             return True
