@@ -19,7 +19,8 @@ clock_tolerance_s = 900.0
 [mychron]
 # Where Race Studio 3 stores downloaded .xrk sessions.
 rs3_data_dirs = ["C:/AIM_SPORT/RaceStudio3/user/data"]
-extensions = [".xrk", ".xrz"]
+# Only the .xrk log is a session; RS3's compressed .xrz twin is always skipped.
+extensions = [".xrk"]
 # timezone = "America/Sao_Paulo"
 
 [rs3]
