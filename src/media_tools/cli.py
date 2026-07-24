@@ -1009,5 +1009,38 @@ def status(
     console.print(table)
 
 
+@app.command()
+def docs(
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Write to this file (default docs/CLI.md in the repo checkout; '-' for stdout)",
+        ),
+    ] = None,
+):
+    """Regenerate the CLI reference (docs/CLI.md) from the command tree."""
+    from .docs_gen import generate_cli_docs
+
+    text = generate_cli_docs()
+    if output is not None and str(output) == "-":
+        typer.echo(text, nl=False)
+        return
+    if output is None:
+        root = next(
+            (p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()),
+            None,
+        )
+        if root is None:
+            # Frozen exe / installed wheel: no repo checkout to write into.
+            typer.echo(text, nl=False)
+            return
+        output = root / "docs" / "CLI.md"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8", newline="\n")
+    console.print(f"[green]+[/green] {output}")
+
+
 if __name__ == "__main__":
     app()

@@ -40,18 +40,14 @@ skips anything already done, so all commands are safe to re-run.
 
 ## Usage
 
-All commands run through the `myoverlay` executable (`dist/myoverlay/myoverlay.exe`):
+All commands run through the `myoverlay` executable (`dist/myoverlay/myoverlay.exe`).
+The full command reference — every command and option — is auto-generated in
+**[docs/CLI.md](docs/CLI.md)**. The day-to-day entry points:
 
 ```
 myoverlay run                # full chain: ingest -> correlate -> sync -> render
 myoverlay run --publish      # ... and upload to YouTube
-myoverlay run --res hd       # override output resolution (hd|fhd|2k|4k; default 2k)
 myoverlay status             # pipeline state of every track day
-myoverlay ingest             # individual stages...
-myoverlay correlate 2026-07-12
-myoverlay sync 2026-07-12
-myoverlay render 2026-07-12
-myoverlay publish 2026-07-12 --dry-run
 ```
 
 The exe self-updates from this repo and bundles git + ffmpeg, so friends need
@@ -114,3 +110,6 @@ Tests cover each stage including an end-to-end render against a generated
 test clip (requires ffmpeg). Sync correlation is tested against synthesized
 engine audio with a known offset. To rebuild the shareable exe after adding a
 new dependency: `powershell -File packaging/build_exe.ps1`.
+
+After changing any CLI command or option, run `uv run mt docs` to regenerate
+[docs/CLI.md](docs/CLI.md) — a test fails if it is stale.
