@@ -185,14 +185,14 @@
     <!-- Preselect the wizard's language from the machine's UI language. -->
     <CustomAction Id="DetectLanguage" BinaryKey="WriteSettingsJs"
                   JScriptCall="DetectLanguage" Execute="immediate" Return="ignore" />
-    <!-- Dependency-detection phase (detect_deps.js): checks the machine for
-         software MyOverlay works with (currently Race Studio 3) and fills the
-         DEP_*/DEPS_* properties the DependenciesDlg page binds to. Each
-         dependency is blocking (Next disabled until installed) or a warning
-         (proceed allowed); registering another one is a new entry in the
-         script's DEPS table plus a row on the page. Runs after
-         ApplyUiLanguage - it composes localized status text - and re-runs
-         from the language page's Next. -->
+    <!-- Dependency-detection phase (detect_deps.js): silently checks the
+         machine for software MyOverlay needs (currently Race Studio 3) and
+         fills the DEP_*/DEPS_* properties. No page appears when everything
+         is present; a missing blocking dependency detours the wizard to the
+         DepsBlockedDlg dead end. Registering another dependency is a new
+         entry in the script's DEPS table plus a hint on that page. Runs
+         before the first dialog and re-runs from the language page's
+         Next. -->
     <Binary Id="DetectDepsJs" SourceFile="detect_deps.js" />
     <CustomAction Id="DetectDependencies" BinaryKey="DetectDepsJs"
                   JScriptCall="DetectDependencies" Execute="immediate" Return="ignore" />

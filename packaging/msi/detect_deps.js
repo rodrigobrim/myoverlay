@@ -1,21 +1,21 @@
 // MSI immediate CA: the wizard's dependency-detection phase.
 //
-// DEPS below is the single place to register a dependency. Each entry:
-//   id        - suffix of the DEP_<id>_FOUND / DEP_<id>_STATUS properties the
-//               wizard page binds to (add a row in DependenciesDlg,
-//               WizardUI.wxs, plus a P_DEPS_<id>_NOTE string in
-//               gen_i18n_ui.py for the "where to get it" hint).
+// The check is silent: no page appears when everything is present. DEPS
+// below is the single place to register a dependency. Each entry:
+//   id        - suffix of the DEP_<id>_FOUND property (drives the
+//               per-dependency hint's visibility on DepsBlockedDlg - add a
+//               P_DEPS_<id>_NOTE string in gen_i18n_ui.py and a note control
+//               on that page).
 //   name      - display name, shown in the missing-required list on the
 //               DepsBlockedDlg page.
-//   blocking  - true: Next on the dependency page leads to DepsBlockedDlg
-//               (Back re-checks, Cancel exits setup) until the dependency is
-//               installed. false: a warning is shown but the install may
-//               proceed.
+//   blocking  - true: while missing, the wizard detours to DepsBlockedDlg
+//               (Back + Next re-checks, Cancel exits setup). false: reserved
+//               for proceed-with-warning dependencies (none currently; no UI
+//               surfaces them yet).
 //   detect    - returns { found: bool, version: string }.
 //
-// Runs from the UI sequence after ApplyUiLanguage (it composes the localized
-// status text from the P_DEPS_* strings) and again from the language page's
-// Next, so the status is re-localized when the language changes.
+// Runs from the UI sequence before the first dialog and again from the
+// language page's Next.
 
 var DEPS = [
     {
@@ -62,16 +62,11 @@ function DetectDependencies() {
     var anyBlocking = "";
     var anyWarning = "";
     var blockingNames = [];
-    var tFound = Session.Property("P_DEPS_FOUND") || "installed";
-    var tMissing = Session.Property("P_DEPS_MISSING") || "not found";
     for (var i = 0; i < DEPS.length; i++) {
         var dep = DEPS[i];
         var r = { found: false, version: "" };
         try { r = dep.detect(); } catch (e) { }
         Session.Property("DEP_" + dep.id + "_FOUND") = r.found ? "1" : "";
-        Session.Property("DEP_" + dep.id + "_STATUS") = r.found
-            ? (tFound + (r.version ? " (" + r.version + ")" : ""))
-            : tMissing;
         if (!r.found) {
             if (dep.blocking) {
                 anyBlocking = "1";
