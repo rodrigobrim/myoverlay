@@ -67,7 +67,7 @@ The setup wizard asks for:
    (matched by installed-MSI product name, with the default
    `C:\AIM_SPORT\RaceStudio3` folder as fallback). Each dependency is either
    *blocking* (Next stays disabled until it is installed) or a *warning*
-   (proceed allowed with a note); RS3 is a warning.
+   (proceed allowed with a note); RS3 is blocking.
 2. **Google Cloud SDK** — the official Windows installer
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an

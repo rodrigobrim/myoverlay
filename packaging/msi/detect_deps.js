@@ -17,10 +17,10 @@
 var DEPS = [
     {
         // Race Studio 3 (AiM) downloads the telemetry from the MyChron; the
-        // pipeline watches its data folder. Warning-level: MyOverlay installs
-        // and runs without it, but no telemetry arrives until it is there.
+        // pipeline watches its data folder. Blocking: without it no telemetry
+        // ever arrives, so the wizard will not proceed until it is installed.
         id: "RS3",
-        blocking: false,
+        blocking: true,
         detect: function () {
             // RS3 ships as an MSI whose ProductCode changes per release, so
             // enumerate installed products and match the display name
