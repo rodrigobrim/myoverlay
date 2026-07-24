@@ -2,7 +2,12 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import media_tools.ingest.mychron as mychron
-from media_tools.ingest.mychron import XrkInfo, _parse_log_datetime, ingest_mychron
+from media_tools.ingest.mychron import (
+    XrkInfo,
+    _parse_log_datetime,
+    enumerate_telemetry_files,
+    ingest_mychron,
+)
 from media_tools.library import Lap, Library
 
 
@@ -121,3 +126,50 @@ def test_corrupt_xrk_reports_error_and_continues(cfg, tmp_path, monkeypatch):
     report = ingest_mychron(cfg, extra_sources=[rs3])
     assert len(report.copied) == 1
     assert len(report.errors) == 1 and "bad.xrk" in report.errors[0]
+
+
+def test_enumerate_does_not_parse(cfg, tmp_path, monkeypatch):
+    rs3 = tmp_path / "rs3"
+    rs3.mkdir()
+    (rs3 / "a.xrk").write_bytes(b"a")
+    (rs3 / "b.xrk").write_bytes(b"bb")
+    (rs3 / "notes.txt").write_bytes(b"ignored")
+    monkeypatch.setattr(
+        mychron, "parse_xrk", lambda p, tz: (_ for _ in ()).throw(AssertionError("parsed"))
+    )
+    _sources, files = enumerate_telemetry_files(cfg, extra_sources=[rs3])
+    assert {f.name for f in files} == {"a.xrk", "b.xrk"}
+    assert all(not f.ingested for f in files)
+
+
+def test_only_names_selective_and_missing(cfg, tmp_path, monkeypatch):
+    rs3 = tmp_path / "rs3"
+    rs3.mkdir()
+    (rs3 / "session_a.xrk").write_bytes(b"a")
+    (rs3 / "session_b.xrk").write_bytes(b"b")
+    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+
+    report = ingest_mychron(cfg, extra_sources=[rs3], only_names=["SESSION_A.XRK"])
+    assert len(report.copied) == 1
+    assert report.requested_missing == []
+
+    missing = ingest_mychron(cfg, extra_sources=[rs3], only_names=["nope.xrk"])
+    assert missing.copied == [] and missing.requested_missing == ["nope.xrk"]
+
+
+def test_force_replaces_telemetry_in_place(cfg, tmp_path, monkeypatch):
+    rs3 = tmp_path / "rs3"
+    rs3.mkdir()
+    (rs3 / "session_a.xrk").write_bytes(b"a")
+    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+
+    ingest_mychron(cfg, extra_sources=[rs3])
+    again = ingest_mychron(cfg, extra_sources=[rs3])
+    assert again.copied == [] and again.skipped_known == 1
+
+    forced = ingest_mychron(cfg, extra_sources=[rs3], force=True)
+    assert len(forced.copied) == 1
+
+    lib = Library(cfg.library_root)
+    m = lib.load_day(date(2026, 7, 12))
+    assert [t.source_name for t in m.telemetry].count("session_a.xrk") == 1

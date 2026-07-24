@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
@@ -35,6 +36,19 @@ class IngestReport:
     skipped_known: int = 0
     sources_scanned: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Names passed via only_names that matched no file on any source.
+    requested_missing: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CameraFile:
+    """One video present on a source, with its already-ingested status."""
+
+    path: Path
+    name: str
+    size: int
+    start_utc: datetime
+    ingested: bool
 
 
 def find_dcim_sources() -> list[Path]:
@@ -99,57 +113,113 @@ def iter_source_videos(sources: list[Path], extensions: list[str]):
             yield path
 
 
-def ingest_camera(cfg: Config, extra_sources: list[Path] | None = None) -> IngestReport:
+def enumerate_camera_videos(
+    cfg: Config, extra_sources: list[Path] | None = None
+) -> tuple[list[Path], list[CameraFile]]:
+    """List every video on the connected camera/sources, with ingested status.
+
+    Read-only: copies nothing and does not probe durations, so it is instant.
+    Returns (sources, files).
+    """
+    lib = Library(cfg.library_root)
+    camera_tz = cfg.camera.tzinfo()
+    sources = find_dcim_sources() + list(cfg.camera.source_dirs) + list(extra_sources or [])
+    known = lib.known_videos()
+
+    files: list[CameraFile] = []
+    for path in iter_source_videos(sources, cfg.camera.extensions):
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        files.append(
+            CameraFile(
+                path=path,
+                name=path.name,
+                size=size,
+                start_utc=capture_time(path, camera_tz),
+                ingested=(path.name, size) in known,
+            )
+        )
+    return sources, files
+
+
+def ingest_camera(
+    cfg: Config,
+    extra_sources: list[Path] | None = None,
+    only_names: Collection[str] | None = None,
+    force: bool = False,
+) -> IngestReport:
     report = IngestReport()
     lib = Library(cfg.library_root)
     camera_tz = cfg.camera.tzinfo()
 
-    sources = find_dcim_sources() + list(cfg.camera.source_dirs) + list(extra_sources or [])
+    sources, files = enumerate_camera_videos(cfg, extra_sources)
     report.sources_scanned = [str(s) for s in sources]
     if not sources:
         return report
 
-    seen = lib.known_videos()
+    wanted = {n.casefold(): n for n in only_names} if only_names is not None else None
+    matched: set[str] = set()
     manifests: dict[str, tuple] = {}  # date iso -> (manifest, day_dir)
 
-    for path in iter_source_videos(sources, cfg.camera.extensions):
+    for cf in files:
         try:
-            size = path.stat().st_size
-            if (path.name, size) in seen:
+            if wanted is not None:
+                key = cf.name.casefold()
+                if key not in wanted:
+                    continue
+                matched.add(key)
+
+            if cf.ingested and not force:
                 report.skipped_known += 1
                 continue
 
-            start_utc = capture_time(path, camera_tz)
+            path, size, start_utc = cf.path, cf.size, cf.start_utc
             # Day folder keyed by *camera-local* capture date: a late session
             # should land with its track day, not the next UTC day.
             local_day = start_utc.astimezone(camera_tz).date()
 
-            key = local_day.isoformat()
-            if key not in manifests:
-                manifests[key] = (lib.load_day(local_day), lib.ensure_day(local_day))
-            manifest, day_dir = manifests[key]
+            day_key = local_day.isoformat()
+            if day_key not in manifests:
+                manifests[day_key] = (lib.load_day(local_day), lib.ensure_day(local_day))
+            manifest, day_dir = manifests[day_key]
 
             dest = day_dir / "raw" / "video" / path.name
-            if not (dest.is_file() and dest.stat().st_size == size):
+            if force or not (dest.is_file() and dest.stat().st_size == size):
                 shutil.copy2(path, dest)
             if dest.stat().st_size != size:
                 report.errors.append(f"size mismatch after copy: {path} -> {dest}")
                 dest.unlink(missing_ok=True)
                 continue
 
-            manifest.videos.append(
-                VideoClip(
-                    file=str(dest.relative_to(day_dir)).replace("\\", "/"),
-                    source_name=path.name,
-                    size_bytes=size,
-                    duration_s=probe_duration_s(dest),
-                    start_utc_estimate=start_utc,
-                )
+            clip = VideoClip(
+                file=str(dest.relative_to(day_dir)).replace("\\", "/"),
+                source_name=path.name,
+                size_bytes=size,
+                duration_s=probe_duration_s(dest),
+                start_utc_estimate=start_utc,
             )
-            seen.add((path.name, size))
+            # On --force, replace the existing entry in place rather than
+            # appending a duplicate for the same (source_name, size).
+            existing = next(
+                (
+                    i
+                    for i, v in enumerate(manifest.videos)
+                    if v.source_name == path.name and v.size_bytes == size
+                ),
+                None,
+            )
+            if existing is not None:
+                manifest.videos[existing] = clip
+            else:
+                manifest.videos.append(clip)
             report.copied.append(f"{path} -> {dest}")
         except OSError as exc:
-            report.errors.append(f"{path}: {exc}")
+            report.errors.append(f"{cf.path}: {exc}")
+
+    if wanted is not None:
+        report.requested_missing = [orig for key, orig in wanted.items() if key not in matched]
 
     for manifest, _ in manifests.values():
         manifest.videos.sort(key=lambda v: v.start_utc_estimate)

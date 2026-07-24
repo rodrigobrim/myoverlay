@@ -9,6 +9,7 @@ log date. Identity = filename + size, so re-running is a no-op.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -35,6 +36,18 @@ class IngestReport:
     skipped_known: int = 0
     sources_scanned: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Names passed via only_names that matched no file on any source.
+    requested_missing: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TelemetryFile:
+    """One .xrk present in RS3's data dir, with its already-ingested status."""
+
+    path: Path
+    name: str
+    size: int
+    ingested: bool
 
 
 def _parse_log_datetime(metadata: dict, logger_tz: tzinfo) -> datetime | None:
@@ -108,20 +121,58 @@ def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[P
     return files
 
 
-def ingest_mychron(cfg: Config, extra_sources: list[Path] | None = None) -> IngestReport:
+def enumerate_telemetry_files(
+    cfg: Config, extra_sources: list[Path] | None = None
+) -> tuple[list[Path], list[TelemetryFile]]:
+    """List every .xrk in RS3's data dir(s), with ingested status.
+
+    Read-only: does not parse the .xrk (parsing is the slow/fragile part, done
+    only on ingest). Returns (sources, files).
+    """
+    lib = Library(cfg.library_root)
+    sources = list(cfg.mychron.rs3_data_dirs) + list(extra_sources or [])
+    known = lib.known_telemetry()
+
+    files: list[TelemetryFile] = []
+    for path in scan_sources(cfg, extra_sources):
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        files.append(
+            TelemetryFile(
+                path=path, name=path.name, size=size, ingested=(path.name, size) in known
+            )
+        )
+    return sources, files
+
+
+def ingest_mychron(
+    cfg: Config,
+    extra_sources: list[Path] | None = None,
+    only_names: Collection[str] | None = None,
+    force: bool = False,
+) -> IngestReport:
     report = IngestReport()
     lib = Library(cfg.library_root)
     logger_tz = cfg.mychron.tzinfo()
 
-    sources = list(cfg.mychron.rs3_data_dirs) + list(extra_sources or [])
+    sources, files = enumerate_telemetry_files(cfg, extra_sources)
     report.sources_scanned = [str(s) for s in sources]
 
-    seen = lib.known_telemetry()
+    wanted = {n.casefold(): n for n in only_names} if only_names is not None else None
+    matched: set[str] = set()
 
-    for path in scan_sources(cfg, extra_sources):
+    for tf in files:
+        path, size = tf.path, tf.size
         try:
-            size = path.stat().st_size
-            if (path.name, size) in seen:
+            if wanted is not None:
+                key = tf.name.casefold()
+                if key not in wanted:
+                    continue
+                matched.add(key)
+
+            if tf.ingested and not force:
                 report.skipped_known += 1
                 continue
 
@@ -146,30 +197,44 @@ def ingest_mychron(cfg: Config, extra_sources: list[Path] | None = None) -> Inge
             day_dir = lib.ensure_day(local_day)
 
             dest = day_dir / "raw" / "telemetry" / path.name
-            if not (dest.is_file() and dest.stat().st_size == size):
+            if force or not (dest.is_file() and dest.stat().st_size == size):
                 shutil.copy2(path, dest)
 
-            manifest.telemetry.append(
-                TelemetryLog(
-                    file=str(dest.relative_to(day_dir)).replace("\\", "/"),
-                    source_name=path.name,
-                    size_bytes=size,
-                    start_utc=start_utc,
-                    end_utc=end_utc,
-                    venue=info.venue,
-                    driver=info.driver,
-                    laps=info.laps,
-                    channels=info.channels,
-                )
+            log = TelemetryLog(
+                file=str(dest.relative_to(day_dir)).replace("\\", "/"),
+                source_name=path.name,
+                size_bytes=size,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                venue=info.venue,
+                driver=info.driver,
+                laps=info.laps,
+                channels=info.channels,
             )
+            # On --force, replace the existing entry in place rather than
+            # appending a duplicate for the same (source_name, size).
+            existing = next(
+                (
+                    i
+                    for i, t in enumerate(manifest.telemetry)
+                    if t.source_name == path.name and t.size_bytes == size
+                ),
+                None,
+            )
+            if existing is not None:
+                manifest.telemetry[existing] = log
+            else:
+                manifest.telemetry.append(log)
             if manifest.track is None and info.venue:
                 manifest.track = info.venue
             manifest.telemetry.sort(key=lambda t: t.start_utc or datetime.min.replace(tzinfo=timezone.utc))
             lib.save_day(manifest)
 
-            seen.add((path.name, size))
             report.copied.append(f"{path} -> {dest}")
         except Exception as exc:  # noqa: BLE001 - a corrupt .xrk must not stop the scan
             report.errors.append(f"{path}: {exc}")
+
+    if wanted is not None:
+        report.requested_missing = [orig for key, orig in wanted.items() if key not in matched]
 
     return report
