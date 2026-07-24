@@ -19,6 +19,12 @@ from dateutil import parser as dtparser
 from ..config import Config
 from ..library import Lap, Library, TelemetryLog
 
+# Race Studio 3 writes a compressed .xrz twin alongside every .xrk session. It
+# carries no extra information (the .xrk is the real telemetry libxrk reads), so
+# it is never a session in its own right - always skip it, even if a config
+# lists it in `extensions`. Mirrors camera.SKIP_SUFFIXES for .lrf/.thm proxies.
+SKIP_SUFFIXES = {".xrz"}
+
 
 @dataclass
 class XrkInfo:
@@ -110,13 +116,15 @@ def parse_xrk(path: Path, logger_tz: tzinfo) -> XrkInfo:
 
 
 def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[Path]:
-    exts = {e.lower() for e in cfg.mychron.extensions}
+    exts = {e.lower() for e in cfg.mychron.extensions} - SKIP_SUFFIXES
     files: list[Path] = []
     for src in list(cfg.mychron.rs3_data_dirs) + list(extra_sources or []):
         if not src.is_dir():
             continue
         files.extend(
-            p for p in sorted(src.rglob("*")) if p.is_file() and p.suffix.lower() in exts
+            p
+            for p in sorted(src.rglob("*"))
+            if p.is_file() and p.suffix.lower() in exts and p.suffix.lower() not in SKIP_SUFFIXES
         )
     return files
 

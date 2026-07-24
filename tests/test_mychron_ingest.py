@@ -128,6 +128,26 @@ def test_corrupt_xrk_reports_error_and_continues(cfg, tmp_path, monkeypatch):
     assert len(report.errors) == 1 and "bad.xrk" in report.errors[0]
 
 
+def test_xrz_twin_is_skipped(cfg, tmp_path, monkeypatch):
+    """A session is its .xrk; RS3's compressed .xrz twin is never enumerated,
+    even when a config lists .xrz in extensions."""
+    cfg.mychron.extensions = [".xrk", ".xrz"]
+    rs3 = tmp_path / "rs3"
+    rs3.mkdir()
+    (rs3 / "session_a.xrk").write_bytes(b"real")
+    (rs3 / "session_a.xrz").write_bytes(b"compressed-twin")
+    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+
+    _sources, files = enumerate_telemetry_files(cfg, extra_sources=[rs3])
+    assert [f.name for f in files] == ["session_a.xrk"]
+
+    report = ingest_mychron(cfg, extra_sources=[rs3])
+    assert len(report.copied) == 1 and not report.errors
+    lib = Library(cfg.library_root)
+    m = lib.load_day(date(2026, 7, 12))
+    assert [t.source_name for t in m.telemetry] == ["session_a.xrk"]
+
+
 def test_enumerate_does_not_parse(cfg, tmp_path, monkeypatch):
     rs3 = tmp_path / "rs3"
     rs3.mkdir()
