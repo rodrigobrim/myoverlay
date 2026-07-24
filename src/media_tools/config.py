@@ -163,7 +163,9 @@ class ToolsConfig(BaseModel):
 
 
 class Config(BaseModel):
-    library_root: Path
+    # Root folder where ingested/processed media lives (one subfolder per track
+    # day). Defaults to ~/Videos/karting when unset in config.toml.
+    library_root: Path = Field(default_factory=lambda: Path.home() / "Videos" / "karting")
     # Output language for the overlay labels and YouTube title/description
     # defaults. Everything else (config, CLI, logs) stays in English.
     language: str = "en"
