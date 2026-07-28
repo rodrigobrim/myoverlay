@@ -59,7 +59,7 @@ def test_camera_get_all_then_missing(cfg_with_card):
 
 def test_telemetry_get_drives_rs3_and_ingests(cfg_with_card, monkeypatch):
     calls = {"rs3": 0}
-    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False: (calls.__setitem__("rs3", calls["rs3"] + 1) or ["ok"]))
+    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False, echo=None: (calls.__setitem__("rs3", calls["rs3"] + 1) or ["ok"]))
 
     seen = {}
 
@@ -78,7 +78,7 @@ def test_telemetry_get_drives_rs3_and_ingests(cfg_with_card, monkeypatch):
 
 
 def test_telemetry_get_no_rs3_skips_pull(cfg_with_card, monkeypatch):
-    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False: (_ for _ in ()).throw(AssertionError("rs3 driven")))
+    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False, echo=None: (_ for _ in ()).throw(AssertionError("rs3 driven")))
     monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
     r = runner.invoke(cli.app, ["telemetry", "get", "--no-rs3"])
     assert r.exit_code == 0
