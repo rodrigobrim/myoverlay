@@ -107,8 +107,14 @@ def ingest(
         from .ingest.rs3 import trigger_rs3_download
 
         console.print("[bold]rs3[/bold]:")
-        for line in trigger_rs3_download(cfg, troubleshoot=troubleshoot):
-            console.print(f"  {line}", markup=False)
+        # echo streams each line the moment it happens - the flow can run for
+        # many minutes (app cold start, device transfer) and buffered output
+        # reads as a silent hang.
+        trigger_rs3_download(
+            cfg,
+            troubleshoot=troubleshoot,
+            echo=lambda line: console.print(f"  {line}", markup=False),
+        )
     if rs3_only or troubleshoot:
         # RS-download-only: never touch camera/mychron ingest (and never render).
         return
@@ -288,8 +294,11 @@ def telemetry_get(
         from .ingest.rs3 import trigger_rs3_download
 
         console.print("[bold]rs3[/bold]:")
-        for line in trigger_rs3_download(cfg, troubleshoot=troubleshoot):
-            console.print(f"  {line}", markup=False)
+        trigger_rs3_download(
+            cfg,
+            troubleshoot=troubleshoot,
+            echo=lambda line: console.print(f"  {line}", markup=False),
+        )
     if troubleshoot:
         return
 

@@ -216,7 +216,7 @@ def trigger_rs3_download(cfg: Config, troubleshoot: bool = False, echo=None) -> 
     return report
 
 
-def _connect_when_ready(cfg: Config, deadline_s: float = 180.0):
+def _connect_when_ready(cfg: Config, deadline_s: float = 180.0, report: list[str] | None = None):
     """Connect to the RS3 window, polling short connects until it exists or the
     deadline passes; returns the Application or None.
 
@@ -228,13 +228,19 @@ def _connect_when_ready(cfg: Config, deadline_s: float = 180.0):
     from pywinauto.findwindows import ElementNotFoundError
     from pywinauto.timings import TimeoutError as UIATimeoutError
 
-    deadline = time.monotonic() + deadline_s
+    start = time.monotonic()
+    deadline = start + deadline_s
+    last_beat = start
     while time.monotonic() < deadline:
         try:
             return Application(backend="uia").connect(
                 title_re=cfg.rs3.window_title_re, timeout=3
             )
         except (ElementNotFoundError, UIATimeoutError):
+            now = time.monotonic()
+            if report is not None and now - last_beat >= 30:
+                report.append(f"still waiting for the RS3 window ({now - start:.0f}s)...")
+                last_beat = now
             time.sleep(3)
     return None
 
@@ -288,7 +294,7 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
             # connect(timeout=60)` is exactly what produced the intermittent
             # TimeoutError twice. Keep trying short connects until the window
             # really exists or a generous deadline passes.
-            app = _connect_when_ready(cfg, deadline_s=180.0)
+            app = _connect_when_ready(cfg, deadline_s=180.0, report=report)
             if app is None:
                 report.append(
                     "! RS3 launched but no matching window appeared within 180s "
@@ -352,7 +358,7 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
                 f"{device}: a transfer is already in progress - waiting for it "
                 "instead of starting a new one"
             )
-            if _wait_download_finished(window, timeout_s=600.0):
+            if _wait_download_finished(window, timeout_s=600.0, report=report):
                 report.append("in-progress transfer finished")
             else:
                 report.append("? transfer still running after 10 min - leaving it to finish")
@@ -402,7 +408,7 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
         confirm_s = 30.0
         finish_s = 30.0 if ts else 600.0
         _confirm_dialogs(app, window, report, duration_s=confirm_s)
-        if _wait_download_finished(window, timeout_s=finish_s):
+        if _wait_download_finished(window, timeout_s=finish_s, report=report):
             report.append("MyChron download complete")
             if ts:
                 ts.snap(window, "download_done")
@@ -680,7 +686,9 @@ def _scroll_capture(window, ts: "_Troubleshoot") -> None:
         ts.snap(window, f"list_page_{i}")
 
 
-def _wait_download_finished(window, timeout_s: float = 600.0) -> bool:
+def _wait_download_finished(
+    window, timeout_s: float = 600.0, report: list[str] | None = None
+) -> bool:
     """During a download the toolbar shows 'Cancel'; it reverts to
     'Data Download' when the transfer completes.
 
@@ -692,7 +700,9 @@ def _wait_download_finished(window, timeout_s: float = 600.0) -> bool:
     download - the same symptom as VirtualBox's USB layer starving it, just
     from RS3's own side this time.
     """
-    deadline = time.monotonic() + timeout_s
+    start = time.monotonic()
+    deadline = start + timeout_s
+    last_beat = start
     while time.monotonic() < deadline:
         time.sleep(20)
         try:
@@ -705,6 +715,10 @@ def _wait_download_finished(window, timeout_s: float = 600.0) -> bool:
         if "cancel" not in names and "data download" in names:
             time.sleep(3)  # let RS3 finish writing files
             return True
+        now = time.monotonic()
+        if report is not None and now - last_beat >= 60:
+            report.append(f"transfer in progress ({now - start:.0f}s)...")
+            last_beat = now
     return False
 
 
