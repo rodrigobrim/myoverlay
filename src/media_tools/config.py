@@ -88,6 +88,15 @@ class Rs3Config(BaseModel):
     # UI snapshots. Anything else is refused with a clear message rather than
     # clicked blind - a mis-click mid-transfer can wedge the MyChron.
     validated_versions: list[str] = Field(default_factory=lambda: ["3.83.39"])
+    # With no device on USB, open RS3's "Available devices" dialog and connect
+    # to the MyChron over WiFi before downloading.
+    wifi_connect: bool = True
+    # How long to wait for a WiFi-connected device to show up in RS3 after
+    # clicking Connect (the handshake goes over the device's own AP).
+    wifi_connect_timeout_s: float = 120.0
+    # SSID prefix AiM devices broadcast; also the search filter that isolates
+    # them from house networks in the Available devices list.
+    wifi_device_prefix: str = "AiM-"
 
 
 class WatchConfig(BaseModel):

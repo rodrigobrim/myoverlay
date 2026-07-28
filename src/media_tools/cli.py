@@ -60,6 +60,33 @@ def get_config() -> Config:
         raise typer.Exit(2)
 
 
+def _console_ask(question: str, options: list[str]) -> int | None:
+    """Ask the operator to pick one of `options`; None when they decline.
+
+    Returns None immediately when stdin is not a console - the pipeline also
+    runs from a scheduled task, where a prompt would hang the run forever.
+    """
+    import sys
+
+    if not sys.stdin or not sys.stdin.isatty():
+        return None
+    console.print(f"  [bold]{question}[/bold]")
+    for i, option in enumerate(options, 1):
+        console.print(f"    {i}) {option}")
+    try:
+        answer = typer.prompt("  choice (empty to skip)", default="", show_default=False)
+    # isatty() can still be True with nothing on stdin (a background/detached
+    # run): click then raises Abort on EOF, which must read as "no answer",
+    # not as a failed RS3 attempt.
+    except (EOFError, KeyboardInterrupt, typer.Abort):
+        return None
+    answer = (answer or "").strip()
+    if not answer.isdigit():
+        return None
+    idx = int(answer) - 1
+    return idx if 0 <= idx < len(options) else None
+
+
 def _print_ingest_report(name: str, report) -> None:
     console.print(f"[bold]{name}[/bold]: scanned {len(report.sources_scanned)} source(s)")
     for line in report.copied:
@@ -114,6 +141,7 @@ def ingest(
             cfg,
             troubleshoot=troubleshoot,
             echo=lambda line: console.print(f"  {line}", markup=False),
+            ask=_console_ask,
         )
     if rs3_only or troubleshoot:
         # RS-download-only: never touch camera/mychron ingest (and never render).
@@ -298,6 +326,7 @@ def telemetry_get(
             cfg,
             troubleshoot=troubleshoot,
             echo=lambda line: console.print(f"  {line}", markup=False),
+            ask=_console_ask,
         )
     if troubleshoot:
         return

@@ -40,43 +40,56 @@ Current list: `3.83.39`.
   unsupported version blocks setup with the version named on the deps page.
 - `tests/test_rs3_dialogs.py` asserts both lists match.
 
-## WiFi connect flow (learned from real screenshots, NOT yet automated)
+## WiFi connect flow (AUTOMATED - `_connect_over_wifi` in rs3.py)
 
-Screenshots from a 3.83.39 install (Win11 machine) show the manual flow:
+Implemented and validated against the live 3.83.39 UI + a real MyChron6.
+Behaviour: no USB device -> open Available devices, filter to AiM devices,
+one device -> connect; several -> ask which (via the CLI `ask` callback);
+none -> ask the user to turn the MyChron on, offer a rescan. Every path
+that connects also disconnects afterwards (RS3 holding the MyChron's WiFi
+means the PC has NO INTERNET - the logger's AP replaces the house network),
+and the "Can't communicate" error state is detected by OCR and aborts the
+download with a disconnect.
 
-1. No device: left pane shows "Connected Devices / No device connected".
-2. An "Available devices" dialog (title exactly that) lists under
-   "AiM devices" rows like `AiM-MYC6-021763-MyChron6 Brim`, separate from
-   "Other networks". Buttons: Connect / Rescan / View: all / Settings... /
-   Exit. Tooltip on Connect: "Connect to the selected device or network".
-3. Select the AiM row, click Connect -> device appears in Connected Devices
-   as "MyChron6 Brim" (WiFi icon), device page title "MyChron6 Brim (WiFi)".
-4. When connected, the same dialog shows the row suffixed "- connected" and
-   the Connect button becomes Disconnect.
+What the live probing established (2026-07-28):
 
-Desired automation (requested, pending):
-
-- USB device present -> proceed as today.
-- No USB -> open Available devices, Rescan, pick the AiM device row, Connect,
-  wait for it to appear in Connected Devices, then download as usual, then
-  Disconnect (only if the automation itself connected).
-- More than one AiM device -> ask the user to choose.
-- No device at all -> stop and ask the user to make a connection available;
-  resume after confirmation.
-- The WiFi error state "Can't communicate, try reconnecting or restarting
-  your device" (red text on the device page) must be detected and reported.
-
-### Blocker: how to OPEN the Available devices dialog
-
-Unknown. On the 3.83.39 home view (no device), UIA enumeration of the main
-window returns NOTHING - not even nameless controls via `descendants()` -
-so the opener cannot be found by name from that state. In the screenshots
-the 6th top-left toolbar icon appears pressed while the dialog is open
-(the same slot shows the "AiM Devices" nav label when a device is
-connected). Next step: on a machine with working WiFi, probe UIA with the
-dialog OPEN (it is a titled window - `Available devices` - so it can be
-found directly) and check whether the opener icon exposes a name/automation
-id from other states, or whether the dialog auto-opens on some action.
+- The old "UIA sees nothing" blocker was wrong: the home view exposes the
+  toolbar as nameless Buttons with numeric automation_ids (2506..2521 on
+  this build). Their ONLY identification is their tooltip - hover and read.
+  Left: Preferences, Configurations, Analysis, Tracks, Custom Sensors, CAN
+  Protocols, Devices. Right: user login, **WiFi (2519 - the opener)**, Web
+  Updates, AiM Website.
+- Clicking the WiFi icon opens the "Available devices" dialog: a child
+  Window of the MAIN window (not reliably a desktop top-level). Named
+  buttons: Connect (disabled until a row is selected) / Rescan / View: all /
+  Settings... / Exit, plus an Edit search box.
+- The device/network rows are OWNER-DRAWN: no UIA text, no children, and
+  the underlying ListBox returns garbage for LB_GETTEXT (items are
+  pointers). Section headers ("AiM devices", "Other networks") are ~33px,
+  selectable entries ~40px - height is the only structural difference.
+  Scrolled-out rows report zero-size rects.
+- Typing the `AiM-` SSID prefix into the search box filters the list to
+  AiM devices only - that is how device rows are isolated without reading
+  labels. Row NAMES (for the "which one?" prompt) come from OCR of the row
+  bitmap via Windows' built-in OCR engine (PowerShell WinRT, no extra
+  dependency).
+- "View: all" is a CYCLING filter (all -> only mine -> ...), NOT a menu.
+  Cycling it hides unmarked devices and pops an info dialog ("You have not
+  marked any device as 'mine' yet"). Never click it. Never touch
+  "Settings..." either.
+- The connected device pane ("Connected Devices", top-left) is ALSO
+  owner-drawn: the rows exist as whitespace-named ListItems. A WiFi-linked
+  device is detected by OCR of that pane region.
+- **The handshake is fragile**: after clicking Connect, RS3 negotiates with
+  the logger on the same thread that runs its UI. Typing/clicking ANYTHING
+  during those seconds (e.g. clearing the search box) starves the link and
+  leaves the device in the red "Can't communicate, try reconnecting or
+  restarting your device" state. The flow waits ~25s doing NOTHING after
+  Connect, then polls coarsely (20s); the dialog is only tidied up after
+  the link settles. This mirrors the coarse-polling rule for transfers.
+- After a failed handshake RS3 may keep a stale "connected" entry with the
+  red banner; once the AP link drops, RS3 clears it by itself and Windows
+  falls back to the house network.
 
 ## Testing without a rebuild
 
@@ -87,7 +100,10 @@ Point the installed exe at a checkout of this branch:
 
 (or `MYOVERLAY_REPO=<path to a clone on this branch>` +
 `MYOVERLAY_NO_UPDATE=1`). The launcher loads the pipeline from the repo, so
-code changes apply without rebuilding the exe.
+code changes apply without rebuilding the exe. Note: `MYOVERLAY_REPO` must
+point at a REGULAR clone - a `.claude/worktrees` worktree has a `.git`
+*file*, which the launcher's `(repo / ".git").is_dir()` first-run check does
+not recognise, so it tries to clone over it and errors out.
 
 ## Hardware/env facts that keep biting
 

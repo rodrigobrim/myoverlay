@@ -179,7 +179,9 @@ class _Report(list):
                 pass
 
 
-def trigger_rs3_download(cfg: Config, troubleshoot: bool = False, echo=None) -> list[str]:
+def trigger_rs3_download(
+    cfg: Config, troubleshoot: bool = False, echo=None, ask=None
+) -> list[str]:
     """Drive RS3 to download from the MyChron. Retries once: RS3 crashes and
     UIA/COM hiccups (busy repaint, app restart) are transient in practice.
 
@@ -188,32 +190,51 @@ def trigger_rs3_download(cfg: Config, troubleshoot: bool = False, echo=None) -> 
     the list) with short 30s waits, to understand/refine the procedure.
 
     echo, when given, receives each report line as soon as it is produced.
+
+    ask, when given, is called as ask(question, options) -> index or None, and
+    is how the WiFi flow asks which MyChron to use. Without it the run is
+    non-interactive (a scheduled task has no console): an ambiguous or absent
+    device is reported and the run stops rather than guessing.
     """
     if not cfg.rs3.enabled:
         return ["rs3 automation disabled (set [rs3] enabled = true)"]
 
     report: list[str] = _Report(echo)
     ts = _Troubleshoot(cfg) if troubleshoot else None
+    # Set by the WiFi flow so the link is always dropped again, whichever way
+    # the run ends - while RS3 holds the MyChron's WiFi the PC has no
+    # internet, so leaving it connected breaks everything downstream.
+    link = {"connected": False, "window": None}
     # Troubleshooting is a single deliberate pass; don't blur it with a retry.
     attempts = (1,) if ts else (1, 2)
-    for attempt in attempts:
-        try:
-            _attempt_download(cfg, report, ts)
-            if ts:
-                report.append(f"troubleshoot snapshots -> {ts.dir}")
-            return report
-        except Exception as exc:  # noqa: BLE001 - never kill the pipeline
-            if ts:
-                ts.snap_desktop("error")
-                report.append(f"! rs3 troubleshoot pass raised: {exc!r}")
-                report.append(f"troubleshoot snapshots -> {ts.dir}")
+    try:
+        for attempt in attempts:
+            try:
+                _attempt_download(cfg, report, ts, ask, link)
+                if ts:
+                    report.append(f"troubleshoot snapshots -> {ts.dir}")
                 return report
-            if attempt == 1:
-                report.append(f"~ rs3 attempt 1 failed ({exc!r}); retrying")
-                time.sleep(15)
-            else:
-                report.append(f"! rs3 automation failed: {exc!r}")
-    return report
+            except Exception as exc:  # noqa: BLE001 - never kill the pipeline
+                if ts:
+                    ts.snap_desktop("error")
+                    report.append(f"! rs3 troubleshoot pass raised: {exc!r}")
+                    report.append(f"troubleshoot snapshots -> {ts.dir}")
+                    return report
+                if attempt == 1:
+                    report.append(f"~ rs3 attempt 1 failed ({exc!r}); retrying")
+                    time.sleep(15)
+                else:
+                    report.append(f"! rs3 automation failed: {exc!r}")
+        return report
+    finally:
+        if link["connected"] and link["window"] is not None:
+            try:
+                disconnect_wifi_device(link["window"], report)
+            except Exception:  # noqa: BLE001 - cleanup must never raise
+                report.append(
+                    "~ could not disconnect the MyChron - disconnect it in RS3 "
+                    "by hand to get the WiFi back"
+                )
 
 
 def _connect_when_ready(cfg: Config, deadline_s: float = 180.0, report: list[str] | None = None):
@@ -245,7 +266,13 @@ def _connect_when_ready(cfg: Config, deadline_s: float = 180.0, report: list[str
     return None
 
 
-def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None" = None) -> None:
+def _attempt_download(
+    cfg: Config,
+    report: list[str],
+    ts: "_Troubleshoot | None" = None,
+    ask=None,
+    link: dict | None = None,
+) -> None:
     try:
         from pywinauto import Application, Desktop
         from pywinauto.findwindows import ElementNotFoundError
@@ -339,10 +366,23 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
             if ts:
                 ts.snap(window, "no_device")
                 ts.dump(window, "no_device")
-            report.append(
-                "? no AiM device connected (USB or WiFi) - cannot download"
-            )
-            return
+            # Nothing on USB: the MyChron may still be reachable over its own
+            # WiFi. Offer/perform the connect before giving up.
+            if cfg.rs3.wifi_connect:
+                device = _connect_over_wifi(cfg, window, report, ts, ask)
+                if device and link is not None:
+                    # We took the WiFi; the caller drops it again whatever
+                    # happens from here on.
+                    link["connected"] = True
+                    link["window"] = window
+            if not device:
+                if cfg.rs3.wifi_connect:
+                    # _connect_over_wifi already said why.
+                    return
+                report.append(
+                    "? no AiM device connected (USB or WiFi) - cannot download"
+                )
+                return
 
         # Open the DEVICE's Data Download sub-tab (the global "Data Download"
         # button is a different, mostly-disabled nav control).
@@ -723,15 +763,88 @@ def _wait_download_finished(
 
 
 def _connected_device_name(window) -> str | None:
-    """Name of a connected AiM device tab, e.g. 'MyChron6 Brim (USB)'."""
+    """Name of the connected AiM device, e.g. 'MyChron6 Brim (USB)'.
+
+    RS3 3.83.39 exposes the "Connected Devices" pane as rows whose UIA name is
+    whitespace - the label is drawn, not published - so a name found there is
+    used when present and the pane is otherwise read by OCR. Missing this is
+    what made a successful WiFi connect look like a failure.
+    """
     try:
         for tab in window.descendants(control_type="TabItem"):
             text = (tab.window_text() or "").strip()
-            if "mychron" in text.lower() or "(usb)" in text.lower():
+            low = text.lower()
+            if "mychron" in low or "(usb)" in low or "(wifi)" in low:
                 return text
     except Exception:  # noqa: BLE001
         pass
+    return _connected_device_by_ocr(window)
+
+
+# The device pane sits in the top-left of the main window; the device page
+# (and its error banner) fills the area to the right of the splitter.
+def _connected_device_by_ocr(window) -> str | None:
+    """Read the Connected Devices pane with OCR; None when it says nothing."""
+    text = _ocr_region(_device_pane_rect(window))
+    if not text:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        low = line.lower()
+        if not line or "connected devices" in low:
+            continue
+        if "no device" in low:
+            return None
+        # The pane lists the device by name once it is actually linked.
+        if "mychron" in low or "aim" in low:
+            return line
     return None
+
+
+def device_page_has_comms_error(text: str) -> bool:
+    """True for RS3's red "Can't communicate..." banner on the device page.
+
+    The device answers the WiFi scan and RS3 lists it as connected, but the
+    data link never comes up - downloading in that state is what leaves the
+    MyChron wedged, so the run must stop and disconnect instead.
+    """
+    low = (text or "").lower()
+    return "can't communicate" in low or "cant communicate" in low
+
+
+def _device_pane_rect(window):
+    try:
+        rect = window.rectangle()
+    except Exception:  # noqa: BLE001
+        return None
+    # Left-hand device pane, below the toolbar.
+    return (rect.left + 3, rect.top + 79, rect.left + 690, rect.top + 400)
+
+
+def _device_page_rect(window):
+    try:
+        rect = window.rectangle()
+    except Exception:  # noqa: BLE001
+        return None
+    return (rect.left + 690, rect.top + 79, rect.right - 3, rect.top + 400)
+
+
+def _ocr_region(bbox) -> str:
+    """OCR a screen region; '' when anything at all goes wrong."""
+    if bbox is None:
+        return ""
+    try:
+        import tempfile
+
+        from PIL import ImageGrab
+
+        shot = ImageGrab.grab(bbox=bbox, all_screens=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "region.png"
+            shot.save(path)
+            return _windows_ocr(path)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _click_named_button(window, name: str) -> bool:
@@ -851,6 +964,527 @@ def _click_download_button(window, cfg: Config, report: list[str], exclude=froze
             b.click_input()
             report.append(f"clicked '{b.window_text().strip()}' in Race Studio 3")
             return name_of(b)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# WiFi connect ("Available devices" dialog)
+#
+# Learned by probing a live 3.83.39 install (see docs/rs3-automation.md):
+#
+#   * The dialog is opened by the WiFi icon in the main window's top-right
+#     toolbar. Every toolbar icon is a nameless Button; the ONLY thing that
+#     identifies it is its tooltip, so the tooltip is read and matched before
+#     clicking. Its automation_id (2519 here) is a fallback hint, never the
+#     sole criterion - ids shift between builds.
+#   * The dialog is a child Window of the main window titled "Available
+#     devices". It is NOT reliably reachable through Desktop().windows().
+#   * Its rows are owner-drawn: no text via UIA, and the underlying ListBox
+#     holds pointers rather than strings (LB_GETTEXT returns garbage), so row
+#     labels can only be read by OCR of the row bitmap.
+#   * Rows come in two heights: section headers ("AiM devices", "Other
+#     networks") are shorter than device/network rows. That is the structural
+#     way to tell a header from a selectable entry.
+#   * Typing the AiM SSID prefix into the search box filters the list down to
+#     AiM devices only - which is how the device rows are isolated without
+#     reading a single label.
+#   * "View:" is a CYCLING filter (all -> only mine -> ...), not a menu. It is
+#     never clicked: cycling it hides the device and pops an info dialog.
+#     "Settings..." is likewise never touched - it configures the device.
+# ---------------------------------------------------------------------------
+
+_WIFI_TOOLTIPS = ("wifi", "wi-fi")
+_WIFI_TOOLBAR_AUTOMATION_ID = "2519"
+_AVAILABLE_DEVICES_TITLE = "available devices"
+
+
+def _connect_over_wifi(
+    cfg: Config, window, report: list[str], ts: "_Troubleshoot | None" = None, ask=None
+) -> str | None:
+    """Connect to a MyChron over WiFi; returns the connected device name.
+
+    One device -> connect it. Several -> ask which (never guess: connecting
+    drives someone else's logger). None -> ask the user to make one available
+    and retry once they confirm. Without an `ask` callback the run is
+    non-interactive and anything ambiguous is reported instead of chosen.
+    """
+    dlg = _open_available_devices(window, report)
+    if dlg is None:
+        return None
+    connect_clicked = False
+    try:
+        devices = _scan_for_aim_devices(cfg, dlg, report)
+
+        # Nothing found: let the user power the MyChron up / wake its WiFi,
+        # then rescan. This is the "ask for the user to connect it" case.
+        if not devices and ask is not None:
+            answer = ask(
+                "No MyChron found over WiFi. Turn it on (and enable its WiFi), "
+                "then choose:",
+                ["Rescan now", "Give up"],
+            )
+            if answer == 0:
+                devices = _scan_for_aim_devices(cfg, dlg, report, rescan=True)
+        if not devices:
+            report.append(
+                "? no AiM device on USB and none broadcasting WiFi - turn the "
+                "MyChron on (WiFi enabled) and run again"
+            )
+            return None
+
+        if len(devices) == 1:
+            chosen = devices[0]
+        elif ask is None:
+            names = ", ".join(d.label for d in devices)
+            report.append(
+                f"? {len(devices)} AiM devices are reachable over WiFi ({names}) "
+                "- rerun interactively to choose one, or leave only one on"
+            )
+            return None
+        else:
+            idx = ask(
+                "More than one MyChron is reachable over WiFi. Which one?",
+                [d.label for d in devices],
+            )
+            if idx is None or not 0 <= idx < len(devices):
+                report.append("? no device chosen - skipping the WiFi download")
+                return None
+            chosen = devices[idx]
+
+        report.append(f"connecting to {chosen.label} over WiFi...")
+        if ts:
+            ts.snap(dlg, "wifi_before_connect")
+        if not _click_row_and_connect(dlg, chosen, report):
+            return None
+        connect_clicked = True
+    finally:
+        # On abandon/failure, leave the dialog closed and its search filter
+        # clean. But NEVER right after Connect: the handshake is running on
+        # the same UI thread, and typing/clicking in the dialog at that moment
+        # is what leaves the device in the "Can't communicate" state. RS3
+        # keeps working fine with the dialog open; it is tidied up after the
+        # link settles (or on disconnect).
+        if not connect_clicked:
+            _close_available_devices(dlg, report)
+
+    device = _wait_for_connected_device(
+        window, timeout_s=cfg.rs3.wifi_connect_timeout_s, report=report
+    )
+    # The handshake is over (either way) - now it is safe to tidy the dialog.
+    _close_available_devices(dlg, report)
+    if device is None:
+        report.append(
+            f"? {chosen.label} did not come up in RS3 within "
+            f"{cfg.rs3.wifi_connect_timeout_s:.0f}s - it may be out of range or "
+            "already talking to another PC"
+        )
+        # It may still have half-connected and taken the WiFi adapter with it.
+        disconnect_wifi_device(window, report)
+        return None
+
+    # RS3 can list the device as connected while the data link is dead ("Can't
+    # communicate, try reconnecting or restarting your device"). Downloading
+    # then is what wedges the MyChron: stop, hand the WiFi back, say so.
+    if device_page_has_comms_error(_ocr_region(_device_page_rect(window))):
+        report.append(
+            f"! {device} connected but RS3 reports 'Can't communicate' - not "
+            "downloading in that state; restart the MyChron and try again"
+        )
+        disconnect_wifi_device(window, report)
+        return None
+
+    report.append(f"connected over WiFi: {device}")
+    if ts:
+        ts.snap(window, "wifi_connected")
+    return device
+
+
+class _DeviceRow:
+    """A selectable AiM device row: where to click, and what to call it."""
+
+    def __init__(self, index: int, rect, label: str) -> None:
+        self.index = index
+        self.rect = rect
+        self.label = label
+
+
+def _open_available_devices(window, report: list[str]):
+    """Click the toolbar's WiFi icon and return the dialog, or None."""
+    dlg = _find_available_devices(window)
+    if dlg is not None:
+        return dlg
+
+    button = _wifi_toolbar_button(window)
+    if button is None:
+        report.append(
+            "! could not find RS3's WiFi toolbar button (no icon reported a "
+            "WiFi tooltip) - cannot open the device list"
+        )
+        return None
+    try:
+        button.click_input()
+    except Exception as exc:  # noqa: BLE001
+        report.append(f"! clicking RS3's WiFi button failed: {exc!r}")
+        return None
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        time.sleep(1.5)
+        dlg = _find_available_devices(window)
+        if dlg is not None:
+            return dlg
+    report.append("! RS3's 'Available devices' dialog did not open")
+    return None
+
+
+def _find_available_devices(window):
+    try:
+        for child in window.descendants(control_type="Window"):
+            if _AVAILABLE_DEVICES_TITLE in (child.window_text() or "").lower():
+                return child
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _wifi_toolbar_button(window):
+    """The toolbar icon that opens the device list.
+
+    Toolbar buttons carry no name, so each is hovered and its tooltip read -
+    that is the only self-describing thing about them. The known automation
+    id is tried first as a hint, but it is still confirmed by tooltip, so a
+    renumbered build degrades to the (slower) scan instead of clicking a
+    button whose purpose we do not know.
+    """
+    from pywinauto import mouse
+
+    try:
+        buttons = [
+            b
+            for b in window.descendants(control_type="Button")
+            if (b.element_info.automation_id or "").isdigit()
+            and b.rectangle().width() > 20
+        ]
+    except Exception:  # noqa: BLE001
+        return None
+
+    buttons.sort(
+        key=lambda b: (b.element_info.automation_id or "") != _WIFI_TOOLBAR_AUTOMATION_ID
+    )
+    for button in buttons:
+        try:
+            rect = button.rectangle()
+            mouse.move(coords=((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2))
+            time.sleep(1.2)
+            if any(t in _tooltip_text(window) for t in _WIFI_TOOLTIPS):
+                return button
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _tooltip_text(window) -> str:
+    """Lowercased text of any tooltip currently showing."""
+    parts: list[str] = []
+    try:
+        for tip in window.descendants(control_type="ToolTip"):
+            parts.append((tip.window_text() or "").strip())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from pywinauto import Desktop
+
+        for top in Desktop(backend="uia").windows():
+            if top.element_info.control_type == "ToolTip":
+                parts.append((top.window_text() or "").strip())
+    except Exception:  # noqa: BLE001
+        pass
+    return " ".join(parts).lower()
+
+
+def _scan_for_aim_devices(
+    cfg: Config, dlg, report: list[str], rescan: bool = False
+) -> list[_DeviceRow]:
+    """AiM device rows currently listed, filtered away from house networks."""
+    if rescan:
+        if _click_named_button(dlg, "rescan"):
+            report.append("rescanning for AiM devices...")
+            time.sleep(20)
+    _filter_search(dlg, cfg.rs3.wifi_device_prefix)
+    time.sleep(2)
+
+    rows = _visible_rows(dlg)
+    if not rows:
+        return []
+    # Section headers are shorter than selectable entries; with the AiM filter
+    # applied every remaining entry is an AiM device. When every row is the
+    # same height there is nothing to tell a header from an entry, so nothing
+    # is offered: connecting drives a real logger, and a wrong click there is
+    # exactly what this module exists to avoid.
+    heights = {r.height() for r in rows}
+    if len(heights) < 2:
+        return []
+    tallest = max(heights)
+    entries = [r for r in rows if r.height() >= tallest]
+    return [
+        _DeviceRow(i, rect, _row_label(dlg, rect, i))
+        for i, rect in enumerate(entries)
+    ]
+
+
+def _visible_rows(dlg) -> list:
+    rows = []
+    try:
+        for row in dlg.descendants(control_type="ListItem"):
+            rect = row.rectangle()
+            if rect.width() > 0 and rect.height() > 0:
+                rows.append(rect)
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted(rows, key=lambda r: r.top)
+
+
+def _search_box(dlg):
+    try:
+        edits = dlg.descendants(control_type="Edit")
+        return edits[0] if edits else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _filter_search(dlg, text: str) -> None:
+    """Type `text` into the dialog's search box, replacing what is there."""
+    edit = _search_box(dlg)
+    if edit is None:
+        return
+    try:
+        edit.click_input()
+        time.sleep(0.4)
+        edit.type_keys("^a{DELETE}")
+        time.sleep(0.4)
+        if text:
+            edit.type_keys(text, with_spaces=True)
+    except Exception:  # noqa: BLE001 - filtering is an optimisation, not a must
+        pass
+
+
+def _row_label(dlg, rect, index: int) -> str:
+    """Human-readable name of a device row.
+
+    The rows are owner-drawn, so the label exists only as pixels: OCR the row
+    bitmap. Every part of this is best-effort - a device we cannot name is
+    still perfectly connectable, it just gets a positional label.
+    """
+    fallback = f"AiM device #{index + 1}"
+    try:
+        import re as _re
+        import tempfile
+
+        from PIL import ImageGrab
+
+        shot = ImageGrab.grab(
+            bbox=(rect.left, rect.top, rect.right, rect.bottom), all_screens=True
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "row.png"
+            shot.save(path)
+            text = _windows_ocr(path)
+        if not text:
+            return fallback
+        # Keep the SSID-looking token; the row also carries "not mine" etc.
+        for token in _re.findall(r"[A-Za-z0-9][\w.\- ]{4,}", text):
+            token = token.strip()
+            if token.lower().startswith("aim"):
+                return token
+        return text.strip().splitlines()[0][:60] or fallback
+    except Exception:  # noqa: BLE001
+        return fallback
+
+
+# Windows' own OCR engine reads the owner-drawn rows. It is driven through
+# PowerShell because the WinRT API has no dependency-free Python binding, and
+# adding one for a label we can live without is not worth it.
+_OCR_PS1 = r"""
+param([string]$Path)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+function Await($op, $type) {
+    $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+    $task.Wait(15000) | Out-Null
+    $task.Result
+}
+[Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType = WindowsRuntime] | Out-Null
+[Windows.Media.Ocr.OcrEngine, Windows.Media, ContentType = WindowsRuntime] | Out-Null
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Path)) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if (-not $engine) { exit 1 }
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+foreach ($line in $result.Lines) { $line.Text }
+"""
+
+
+def _windows_ocr(image_path: Path) -> str:
+    """Text in an image per Windows' built-in OCR; '' when unavailable."""
+    import tempfile
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "ocr.ps1"
+            script.write_text(_OCR_PS1, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-NonInteractive",
+                    "-ExecutionPolicy", "Bypass", "-File", str(script),
+                    "-Path", str(image_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        return proc.stdout if proc.returncode == 0 else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _click_row_and_connect(dlg, device: _DeviceRow, report: list[str]) -> bool:
+    """Select the device row, then press Connect."""
+    from pywinauto import mouse
+
+    rect = device.rect
+    try:
+        # Click well inside the row's label area: the right-hand end carries
+        # the "mine" toggle and the signal icon, which do other things.
+        mouse.click(coords=(rect.left + 120, rect.top + rect.height() // 2))
+        time.sleep(1.5)
+    except Exception as exc:  # noqa: BLE001
+        report.append(f"! could not select {device.label}: {exc!r}")
+        return False
+
+    connect = None
+    try:
+        for b in dlg.descendants(control_type="Button"):
+            if (b.window_text() or "").strip().lower() == "connect":
+                connect = b
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    if connect is None:
+        report.append("! no Connect button in the device list")
+        return False
+    if not connect.is_enabled():
+        report.append(
+            f"! Connect stayed disabled after selecting {device.label} - the row "
+            "may have moved during the scan"
+        )
+        return False
+    try:
+        connect.click_input()
+    except Exception as exc:  # noqa: BLE001
+        report.append(f"! clicking Connect failed: {exc!r}")
+        return False
+    return True
+
+
+def _close_available_devices(dlg, report: list[str]) -> None:
+    """Clear the search filter and close the dialog. Never fails the run."""
+    try:
+        _filter_search(dlg, "")
+        time.sleep(0.5)
+        _click_named_button(dlg, "exit")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def disconnect_wifi_device(window, report: list[str]) -> bool:
+    """Drop the WiFi link to the MyChron.
+
+    While RS3 holds a WiFi device the PC's adapter is tied up with the
+    logger's own network, so the machine has no internet - the rest of the
+    pipeline (YouTube upload, updates) cannot run until this happens. Every
+    path that connects must therefore also disconnect, success or not.
+    """
+    dlg = _open_available_devices(window, report)
+    if dlg is None:
+        report.append(
+            "! could not open the device list to disconnect - disconnect the "
+            "MyChron in RS3 by hand to get the WiFi back"
+        )
+        return False
+    try:
+        # The connected row is the one whose action button reads Disconnect;
+        # selecting it is what swaps Connect -> Disconnect.
+        for attempt in range(2):
+            if _click_named_button(dlg, "disconnect"):
+                report.append("disconnected from the MyChron (WiFi released)")
+                time.sleep(3)
+                return True
+            if attempt == 0:
+                rows = _visible_rows(dlg)
+                if not rows:
+                    break
+                heights = {r.height() for r in rows}
+                if len(heights) < 2:
+                    break
+                tallest = max(heights)
+                entry = next((r for r in rows if r.height() >= tallest), None)
+                if entry is None:
+                    break
+                from pywinauto import mouse
+
+                mouse.click(coords=(entry.left + 120, entry.top + entry.height() // 2))
+                time.sleep(1.5)
+        report.append(
+            "~ no Disconnect control found - the MyChron may already be "
+            "disconnected"
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001 - never fail the run over cleanup
+        report.append(f"~ disconnect failed ({exc!r}); disconnect it by hand")
+        return False
+    finally:
+        _close_available_devices(dlg, report)
+
+
+# The WiFi handshake is the most fragile moment in the whole flow: RS3 is
+# negotiating with the logger over its own access point on the same thread
+# that serves its UI. Every UIA query is a synchronous COM call into that
+# thread, and starving it there is what leaves the MyChron reporting "Can't
+# communicate". So the wait is passive: a long settle with the UI untouched,
+# then coarse polls - never the tight loop that would feel more responsive.
+_WIFI_SETTLE_S = 25.0
+_WIFI_POLL_S = 20.0
+
+
+def _wait_for_connected_device(
+    window, timeout_s: float = 120.0, report: list[str] | None = None
+) -> str | None:
+    """Wait for the device to appear in Connected Devices, touching nothing.
+
+    See _WIFI_SETTLE_S: the link is left strictly alone while it comes up.
+    """
+    start = time.monotonic()
+    deadline = start + timeout_s
+    if report is not None:
+        report.append("waiting for the WiFi link (leaving RS3 alone while it connects)...")
+    time.sleep(min(_WIFI_SETTLE_S, timeout_s))
+
+    last_beat = time.monotonic()
+    while time.monotonic() < deadline:
+        device = _connected_device_name(window)
+        if device:
+            return device
+        now = time.monotonic()
+        if report is not None and now - last_beat >= 60:
+            report.append(f"still waiting for the WiFi link ({now - start:.0f}s)...")
+            last_beat = now
+        time.sleep(_WIFI_POLL_S)
     return None
 
 
