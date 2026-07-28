@@ -28,9 +28,15 @@ extensions = [".xrk"]
 # Zero-touch MyChron download: drive Race Studio 3's UI automatically.
 # Brittle by nature - the pipeline also works if you click Download yourself.
 enabled = false
-# exe_path = "C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe"
-# Note: RS3's real window title has no space ("RaceStudio3 (64 bit) 3.83.11")
+# Auto-detected under C:/AIM_SPORT/RaceStudio3 when unset (the real 3.83
+# binary is 64/AiMRS3-64-ReleaseU.exe). Set only for unusual installs.
+# exe_path = "C:/AIM_SPORT/RaceStudio3/64/AiMRS3-64-ReleaseU.exe"
+# Note: RS3's real window title has no space ("RaceStudio3 (64 bit) 3.83.39")
 window_title_re = ".*Race\\s*Studio.*"
+# Only RS3 versions validated against real UI snapshots are ever driven -
+# any other version is refused instead of clicked blind. Empty list disables
+# the check (not recommended).
+# validated_versions = ["3.83.39"]
 download_button_names = ["Data Download", "Download Data", "Download"]
 trigger_interval_s = 600.0
 

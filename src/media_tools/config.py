@@ -83,6 +83,11 @@ class Rs3Config(BaseModel):
         default_factory=lambda: ["Data Download", "Download Data", "Download"]
     )
     trigger_interval_s: float = 600.0
+    # The automation clicks by control name in a UI AiM redesigns at will, so
+    # it only ever drives RS3 versions whose layout was validated against real
+    # UI snapshots. Anything else is refused with a clear message rather than
+    # clicked blind - a mis-click mid-transfer can wedge the MyChron.
+    validated_versions: list[str] = Field(default_factory=lambda: ["3.83.39"])
 
 
 class WatchConfig(BaseModel):

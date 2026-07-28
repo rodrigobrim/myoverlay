@@ -12,11 +12,69 @@ One-time RS3 setup that makes this effective:
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
 
 from ..config import Config
+
+# Known RS3 install locations, tried when rs3.exe_path is not set. The real
+# 3.83 binary is 64/AiMRS3-64-ReleaseU.exe - NOT the RaceStudio3.exe the old
+# example config suggested.
+_RS3_EXE_CANDIDATES = (
+    Path("C:/AIM_SPORT/RaceStudio3/64/AiMRS3-64-ReleaseU.exe"),
+    Path("C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe"),
+)
+
+
+def find_rs3_exe(cfg: Config) -> Path | None:
+    """The RS3 executable: configured path first, then known install spots."""
+    if cfg.rs3.exe_path and cfg.rs3.exe_path.is_file():
+        return cfg.rs3.exe_path
+    for candidate in _RS3_EXE_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    root = Path("C:/AIM_SPORT/RaceStudio3")
+    if root.is_dir():
+        for hit in sorted(root.glob("**/AiMRS3*.exe")):
+            if hit.is_file():
+                return hit
+    return None
+
+
+def version_from_title(title: str) -> str | None:
+    """'RaceStudio3 (64 bit) 3.83.39' -> '3.83.39'."""
+    m = re.search(r"(\d+\.\d+\.\d+)", title or "")
+    return m.group(1) if m else None
+
+
+def rs3_installed_version(cfg: Config) -> str | None:
+    """Version of the installed RS3 exe (file metadata), or None."""
+    exe = find_rs3_exe(cfg)
+    if exe is None:
+        return None
+    try:
+        import win32api
+
+        info = win32api.GetFileVersionInfo(str(exe), "\\")
+        ms, ls = info["FileVersionMS"], info["FileVersionLS"]
+        return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}"
+    except Exception:  # noqa: BLE001 - metadata may be absent
+        return None
+
+
+def rs3_version_supported(version: str | None, cfg: Config) -> bool:
+    """True when this RS3 version was validated against real UI snapshots.
+
+    An unknown (None) version is treated as UNSUPPORTED: the automation
+    clicks by control name in a UI AiM redesigns at will, and a mis-click
+    mid-transfer can wedge the MyChron - never drive a layout we have not
+    seen. An empty validated_versions list disables the check.
+    """
+    if not cfg.rs3.validated_versions:
+        return True
+    return version in cfg.rs3.validated_versions
 
 
 class _Troubleshoot:
@@ -207,14 +265,24 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
                     f"rs3.window_title_re={cfg.rs3.window_title_re!r} - fix the pattern"
                 )
                 return
-            if not cfg.rs3.exe_path or not cfg.rs3.exe_path.is_file():
+            exe = find_rs3_exe(cfg)
+            if exe is None:
                 report.append(
-                    "! Race Studio 3 is not running and rs3.exe_path is not set/found; "
-                    "cannot trigger download"
+                    "! Race Studio 3 is not running and no RS3 executable was "
+                    "found (set rs3.exe_path); cannot trigger download"
                 )
                 return
-            subprocess.Popen([str(cfg.rs3.exe_path)])
-            report.append(f"launched {cfg.rs3.exe_path}; waiting for its window")
+            installed = rs3_installed_version(cfg)
+            if not rs3_version_supported(installed, cfg):
+                report.append(
+                    f"! installed RS3 version {installed or 'unknown'} is not validated "
+                    f"for automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
+                    "refusing to drive an unvalidated UI - update RS3 or set "
+                    "[rs3] validated_versions"
+                )
+                return
+            subprocess.Popen([str(exe)])
+            report.append(f"launched {exe}; waiting for its window")
             # Poll instead of a fixed sleep+connect: RS3 cold start varies from
             # ~15s to well over a minute under load, so `sleep(30);
             # connect(timeout=60)` is exactly what produced the intermittent
@@ -230,6 +298,17 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
             report.append("RS3 window is up")
 
         window = app.top_window()
+        # Gate on the RUNNING instance's version (title carries it): only
+        # layouts validated against real UI snapshots are ever driven.
+        running = version_from_title(window.window_text() or "")
+        if not rs3_version_supported(running, cfg):
+            report.append(
+                f"! running RS3 version {running or 'unknown'} is not validated for "
+                f"automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
+                "refusing to drive an unvalidated UI - update RS3 or set "
+                "[rs3] validated_versions"
+            )
+            return
         try:
             if window.is_minimized():
                 window.restore()
