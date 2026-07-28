@@ -98,18 +98,43 @@ class _Troubleshoot:
             pass
 
 
-def trigger_rs3_download(cfg: Config, troubleshoot: bool = False) -> list[str]:
+class _Report(list):
+    """Report lines, optionally echoed the moment they are appended.
+
+    The RS3 flow can legitimately run for many minutes (cold app start, a
+    long device transfer). Buffering everything and printing at the end
+    reads as a silent hang from the console - the echo callback lets the
+    CLI stream each line live while the returned list stays intact for
+    callers that want the full report afterwards.
+    """
+
+    def __init__(self, echo=None) -> None:
+        super().__init__()
+        self._echo = echo
+
+    def append(self, line: str) -> None:
+        super().append(line)
+        if self._echo is not None:
+            try:
+                self._echo(line)
+            except Exception:  # noqa: BLE001 - display must never break the run
+                pass
+
+
+def trigger_rs3_download(cfg: Config, troubleshoot: bool = False, echo=None) -> list[str]:
     """Drive RS3 to download from the MyChron. Retries once: RS3 crashes and
     UIA/COM hiccups (busy repaint, app restart) are transient in practice.
 
     troubleshoot=True runs a single, heavily-instrumented pass (snapshots +
     control dumps at every step, unhides already-downloaded sessions, scrolls
     the list) with short 30s waits, to understand/refine the procedure.
+
+    echo, when given, receives each report line as soon as it is produced.
     """
     if not cfg.rs3.enabled:
         return ["rs3 automation disabled (set [rs3] enabled = true)"]
 
-    report: list[str] = []
+    report: list[str] = _Report(echo)
     ts = _Troubleshoot(cfg) if troubleshoot else None
     # Troubleshooting is a single deliberate pass; don't blur it with a retry.
     attempts = (1,) if ts else (1, 2)
@@ -238,6 +263,21 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
         # button is a different, mostly-disabled nav control).
         _open_device_download_view(window, device)
         _dismiss_blocking_dialogs(window, report)
+
+        # A transfer may already be running (a retry after a UIA hiccup, a
+        # human click, a previous run's transfer still going). Driving the
+        # UI on top of an active device transfer is exactly the kind of
+        # interference that wedges the MyChron - wait it out instead.
+        if _transfer_in_progress(window):
+            report.append(
+                f"{device}: a transfer is already in progress - waiting for it "
+                "instead of starting a new one"
+            )
+            if _wait_download_finished(window, timeout_s=600.0):
+                report.append("in-progress transfer finished")
+            else:
+                report.append("? transfer still running after 10 min - leaving it to finish")
+            return
         if ts:
             ts.snap(window, "download_view")
             ts.dump(window, "download_view")
@@ -298,12 +338,20 @@ def _attempt_download(cfg: Config, report: list[str], ts: "_Troubleshoot | None"
 # Never click anything whose name suggests data removal - RS3 places
 # "Delete" right next to "Data Download" - nor display toggles ("hide"
 # covers both states of the Hide/Unhide Downloaded button, whose label
-# contains "download" and would otherwise match the generic fallback).
-_FORBIDDEN_WORDS = ("delete", "erase", "remove", "clear", "format", "hide")
+# contains "download" and would otherwise match the generic fallback) -
+# nor anything touching device firmware or configuration.
+_FORBIDDEN_WORDS = (
+    "delete", "erase", "remove", "clear", "format", "hide",
+    "firmware", "firmup",
+)
 
 # Dialogs offering to send data off the machine are always declined too
-# (e.g. RS3's "Upload to AiM?" share-tracks nag).
-_DECLINE_TOPICS = _FORBIDDEN_WORDS + ("upload", "share", "send to aim")
+# (e.g. RS3's "Upload to AiM?" share-tracks nag), as is anything about
+# device configuration (firmware updates, WiFi settings): a download run
+# must never reconfigure the MyChron.
+_DECLINE_TOPICS = _FORBIDDEN_WORDS + (
+    "upload", "share", "send to aim", "wifi", "wi-fi",
+)
 
 # Buttons that safely acknowledge/advance a dialog.
 _CONFIRM_NAMES = ("ok", "yes", "confirm", "start", "start download", "continue", "proceed")
@@ -314,8 +362,10 @@ def choose_dialog_answer(dialog_texts: list[str]) -> str:
     """'confirm' or 'decline' for a dialog, based on what it says.
 
     Declined: anything suggesting data removal (RS3 offers 'erase memory
-    after download' - the pipeline never deletes data) and anything offering
-    to upload/share data with AiM's servers.
+    after download' - the pipeline never deletes data), anything offering
+    to upload/share data with AiM's servers, and anything touching device
+    configuration (firmware, WiFi) - a download run must never reconfigure
+    the MyChron.
     """
     blob = " ".join(dialog_texts).lower()
     if any(w in blob for w in _DECLINE_TOPICS):
@@ -390,6 +440,20 @@ def _download_button_enabled(window) -> bool:
     except Exception:  # noqa: BLE001
         pass
     return False
+
+
+def _transfer_in_progress(window) -> bool:
+    """True while a device transfer is running: the toolbar's 'Data Download'
+    button is replaced by 'Cancel' for the duration (see
+    _wait_download_finished, which watches the reverse transition)."""
+    try:
+        names = {
+            (b.window_text() or "").strip().lower()
+            for b in window.descendants(control_type="Button")
+        }
+        return "cancel" in names and "data download" not in names
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _session_list(window):
@@ -603,9 +667,17 @@ def _download_button_disabled(window, cfg: Config) -> bool:
 def _confirm_dialogs(app, window, report: list[str], duration_s: float = 90.0) -> None:
     """While the download runs, acknowledge dialogs RS3 pops up.
 
-    Scans the main window and any extra app windows; clicks OK/Yes/etc.
-    unless the dialog text mentions data removal, in which case No/Cancel.
-    Stops after a few quiet scans or duration_s.
+    ONLY true dialog windows are scanned: child Window controls of the main
+    window, plus extra top-level app windows. The main window itself is
+    NEVER a surface - its device tabs (WiFi and Properties, Settings,
+    Firmware) are full of buttons that send commands to the MyChron, and an
+    earlier version that scanned it clicked one mid-transfer ("answered
+    dialog with ''"), which is the prime suspect for the device ending up
+    wedged with corrupted WiFi config. Buttons whose current name is empty
+    are never clicked, for the same reason: we cannot know what they do.
+
+    Dialogs mentioning data removal or device configuration get No/Cancel;
+    anything else gets OK/Yes. Stops after a few quiet scans or duration_s.
 
     Poll interval is deliberately coarse - see _wait_download_finished for
     why hammering RS3's UI thread mid-transfer is unsafe.
@@ -615,30 +687,42 @@ def _confirm_dialogs(app, window, report: list[str], duration_s: float = 90.0) -
     while time.monotonic() < deadline and quiet_scans < 3:
         time.sleep(8)
         acted = False
+        surfaces = []
         try:
-            surfaces = [window] + [w for w in app.windows() if w.handle != window.handle]
+            surfaces += window.descendants(control_type="Window")
         except Exception:  # noqa: BLE001
-            surfaces = [window]
-        for surface in surfaces:
+            pass
+        try:
+            surfaces += [w for w in app.windows() if w.handle != window.handle]
+        except Exception:  # noqa: BLE001
+            pass
+        for dlg in surfaces:
             try:
-                buttons = surface.descendants(control_type="Button")
                 texts = [
                     (t.window_text() or "").strip()
-                    for t in surface.descendants(control_type="Text")
+                    for t in dlg.descendants(control_type="Text")
                 ]
-                names = {(b.window_text() or "").strip().lower(): b for b in buttons}
-                answer = choose_dialog_answer(texts)
+                names = {
+                    (b.window_text() or "").strip().lower(): b
+                    for b in dlg.descendants(control_type="Button")
+                }
+                answer = choose_dialog_answer(texts + [dlg.window_text() or ""])
                 wanted = _CONFIRM_NAMES if answer == "confirm" else _DECLINE_NAMES
                 for name in wanted:
                     b = names.get(name)
-                    if b is not None and b.is_enabled():
-                        b.click_input()
-                        report.append(
-                            f"answered dialog with '{b.window_text().strip()}'"
-                            + (" (declined: mentions data removal)" if answer == "decline" else "")
-                        )
-                        acted = True
-                        break
+                    if b is None or not b.is_enabled():
+                        continue
+                    label = (b.window_text() or "").strip()
+                    if not label:
+                        continue
+                    b.click_input()
+                    blurb = " | ".join(t for t in texts if t)[:120]
+                    report.append(
+                        f"answered dialog [{blurb}] with '{label}'"
+                        + (" (declined)" if answer == "decline" else "")
+                    )
+                    acted = True
+                    break
             except Exception:  # noqa: BLE001 - a vanished dialog is fine
                 continue
         quiet_scans = 0 if acted else quiet_scans + 1
