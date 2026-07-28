@@ -539,10 +539,19 @@ def _scroll_capture(window, ts: "_Troubleshoot") -> None:
 
 def _wait_download_finished(window, timeout_s: float = 600.0) -> bool:
     """During a download the toolbar shows 'Cancel'; it reverts to
-    'Data Download' when the transfer completes."""
+    'Data Download' when the transfer completes.
+
+    Poll interval is deliberately coarse: each check walks RS3's whole UIA
+    control tree via a synchronous COM call into its UI thread. Hammering
+    that every few seconds for the full multi-minute transfer contends with
+    the same thread that services the USB link to the MyChron, which has
+    reproduced the device going unresponsive / corrupting sessions mid
+    download - the same symptom as VirtualBox's USB layer starving it, just
+    from RS3's own side this time.
+    """
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        time.sleep(5)
+        time.sleep(20)
         try:
             names = {
                 (b.window_text() or "").strip().lower()
@@ -597,11 +606,14 @@ def _confirm_dialogs(app, window, report: list[str], duration_s: float = 90.0) -
     Scans the main window and any extra app windows; clicks OK/Yes/etc.
     unless the dialog text mentions data removal, in which case No/Cancel.
     Stops after a few quiet scans or duration_s.
+
+    Poll interval is deliberately coarse - see _wait_download_finished for
+    why hammering RS3's UI thread mid-transfer is unsafe.
     """
     deadline = time.monotonic() + duration_s
     quiet_scans = 0
     while time.monotonic() < deadline and quiet_scans < 3:
-        time.sleep(3)
+        time.sleep(8)
         acted = False
         try:
             surfaces = [window] + [w for w in app.windows() if w.handle != window.handle]
