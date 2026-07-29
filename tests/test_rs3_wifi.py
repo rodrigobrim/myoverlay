@@ -250,3 +250,9 @@ def test_aim_prefix_is_the_search_filter():
     """The prefix both identifies AiM SSIDs and is what isolates them from
     house networks in the list."""
     assert Config().rs3.wifi_device_prefix == "AiM-"
+
+
+def test_settle_default_matches_the_validated_short_handshake():
+    """3s connected cleanly against a real handshake (2026-07-28); the knob
+    exists to raise it if 'Can't communicate' states reappear."""
+    assert Config().rs3.wifi_settle_s == 3.0

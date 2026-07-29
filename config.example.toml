@@ -39,6 +39,13 @@ window_title_re = ".*Race\\s*Studio.*"
 # validated_versions = ["3.83.39"]
 download_button_names = ["Data Download", "Download Data", "Download"]
 trigger_interval_s = 600.0
+# With no device on USB, connect to the MyChron over WiFi (and disconnect
+# again afterwards - RS3 holding the device's WiFi replaces the house
+# network, i.e. no internet until released).
+# wifi_connect = true
+# Hands-off pause after clicking Connect while the WiFi handshake runs.
+# Raise this if devices land in the red "Can't communicate" state.
+# wifi_settle_s = 3.0
 
 [watch]
 poll_s = 30.0

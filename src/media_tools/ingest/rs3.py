@@ -1527,7 +1527,7 @@ def _wait_for_connected_device(
     window,
     timeout_s: float = 120.0,
     report: list[str] | None = None,
-    settle_s: float = 25.0,
+    settle_s: float = 3.0,
 ) -> str | None:
     """Wait for the device to appear in Connected Devices, touching nothing.
 
