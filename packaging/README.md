@@ -63,11 +63,17 @@ The setup wizard asks for:
    delta overlay labels and the YouTube title/description defaults only;
    config and CLI stay English.
    Its Next also runs a silent **dependency check** (`detect_deps.js`) —
-   currently Race Studio 3, matched by installed-MSI product name with the
-   default `C:\AIM_SPORT\RaceStudio3` folder as fallback. Nothing is shown
-   when everything is present; a missing blocking dependency detours to a
-   dead-end page listing the missing software, whose only options are Back
-   (return; Next re-checks) and Cancel (exits setup). RS3 is blocking.
+   currently Race Studio 3, read from Windows' installed-programs record
+   (the Uninstall registry keys behind Add/Remove Programs). That is the
+   same source `media_tools.ingest.rs3` uses, so the wizard cannot admit an
+   install the pipeline would then refuse to drive; an RS3 Windows has no
+   record of counts as absent. The **version** is checked too: only versions
+   the GUI automation was validated against are accepted (see
+   `VALIDATED_RS3_VERSIONS`, kept in sync with `Rs3Config.validated_versions`
+   by a unit test). Nothing is shown when everything is present; a missing
+   or unsupported blocking dependency detours to a dead-end page listing it,
+   whose only options are Back (return; Next re-checks) and Cancel (exits
+   setup). RS3 is blocking.
 2. **Google Cloud SDK** — the official Windows installer
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an
