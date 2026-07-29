@@ -28,6 +28,92 @@ $wix = Join-Path $vendor "wix"
 $build = Join-Path $repo "packaging\build\msi"
 $out = Join-Path $repo "dist\myoverlay-setup.msi"
 
+# Archive extraction that survives BOTH traps this build hits:
+#
+#   MAX_PATH - the Google Cloud SDK's deepest file lands ~268 characters in
+#   from a normal checkout, past Windows' 260 limit, and long paths are off
+#   by default (HKLM\...\FileSystem\LongPathsEnabled). Every path handed to
+#   the filesystem is therefore \\?\-prefixed, which bypasses the limit
+#   without touching a machine-wide setting.
+#
+#   Expand-Archive's rollback - on any failure it deletes what it already
+#   wrote, and that rollback can itself throw, leaving a directory with a
+#   few hundred of the SDK's ~30k files. install.bat survived exactly that,
+#   which is why the cache check below counts files instead of trusting it.
+#
+# Extraction goes to a staging sibling and is moved into place only after it
+# fully succeeds, so an interrupted build never leaves a half-extracted tree.
+function Get-LongPath {
+    param([string]$Path)
+    # UNC paths take a different prefix; this build only ever uses local ones.
+    if ($Path.StartsWith("\\?\")) { return $Path }
+    return "\\?\" + $Path
+}
+
+function Remove-TreeLong {
+    param([string]$Path)
+    if ([string]::IsNullOrEmpty($Path)) { return }
+    try {
+        if ([System.IO.Directory]::Exists((Get-LongPath $Path))) {
+            [System.IO.Directory]::Delete((Get-LongPath $Path), $true)
+        }
+    } catch {
+        throw "could not remove $Path : $($_.Exception.Message)"
+    }
+}
+
+function Expand-ZipTo {
+    param([string]$Zip, [string]$Destination)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $staging = "$Destination.stage"
+    Remove-TreeLong $staging
+    [System.IO.Directory]::CreateDirectory((Get-LongPath $staging)) | Out-Null
+
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+        foreach ($entry in $archive.Entries) {
+            # A directory entry has an empty Name; files carry their own.
+            $target = Join-Path $staging $entry.FullName.Replace("/", "\")
+            if ([string]::IsNullOrEmpty($entry.Name)) {
+                [System.IO.Directory]::CreateDirectory((Get-LongPath $target)) | Out-Null
+                continue
+            }
+            $parent = [System.IO.Path]::GetDirectoryName($target)
+            [System.IO.Directory]::CreateDirectory((Get-LongPath $parent)) | Out-Null
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+                $entry, (Get-LongPath $target), $true)
+        }
+    } catch {
+        if ($archive) { $archive.Dispose(); $archive = $null }
+        Remove-TreeLong $staging
+        throw "extracting $Zip failed: $($_.Exception.Message)"
+    } finally {
+        if ($archive) { $archive.Dispose() }
+    }
+
+    Remove-TreeLong $Destination
+    [System.IO.Directory]::Move((Get-LongPath $staging), (Get-LongPath $Destination))
+}
+
+# The WiX 3.14 tools are .NET Framework programs with no long-path support:
+# heat/light simply report a file as "cannot be found" when its path passes
+# 260 characters. Extraction here is \\?\-safe, but that only gets the files
+# onto disk - WiX still has to read them. The Google Cloud SDK's deepest
+# entry sits ~172 characters below the repo root, so a checkout deeper than
+# roughly 85 characters cannot be built at all. Fail now, with the fix,
+# rather than after a 150 MB download and a full harvest.
+$deepestRelative = 172
+if ($repo.Length + $deepestRelative -gt 259) {
+    throw ("Checkout path is too long to build an MSI: '$repo' " +
+        "($($repo.Length) chars; the WiX tools cap total paths at 260 and the " +
+        "bundled SDK needs $deepestRelative more). Build from a shorter path - " +
+        "a junction needs no admin rights and no copying:`n" +
+        "    cmd /c mklink /J C:\mob `"$repo`"`n" +
+        "    powershell -File C:\mob\packaging\msi\build_msi.ps1")
+}
+
 $payloadExe = Join-Path $payload "myoverlay.exe"
 if (-not (Test-Path $payloadExe)) {
     throw "Payload missing: $payloadExe - run packaging\build_exe.ps1 first."
@@ -56,7 +142,7 @@ if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
     New-Item -ItemType Directory -Force $vendor | Out-Null
     $zip = Join-Path $vendor "wix314-binaries.zip"
     Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix314rtm/wix314-binaries.zip" -OutFile $zip
-    Expand-Archive -Path $zip -DestinationPath $wix -Force
+    Expand-ZipTo -Zip $zip -Destination $wix
     Remove-Item $zip
 }
 
@@ -66,15 +152,34 @@ if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
 #     SDK - it downloaded it and ran its own wizard.
 $gcloudDir = Join-Path $vendor "gcloud-sdk"          # holds google-cloud-sdk\
 $gcloudSdk = Join-Path $gcloudDir "google-cloud-sdk"
-if (-not (Test-Path (Join-Path $gcloudSdk "install.bat"))) {
+# install.bat alone is NOT proof of a good cache: a failed extraction once
+# left exactly that file plus a few hundred of the SDK's ~30k, which this
+# guard would have accepted - bundling a hollow SDK into the MSI. Check the
+# file count too, cheaply.
+# -First N caps the count at N, so the comparison has to be -ge: with -gt the
+# cache always looked incomplete and every build re-downloaded 150 MB.
+$gcloudFileProbe = 20000
+$gcloudCached = (Test-Path (Join-Path $gcloudSdk "install.bat")) -and
+    ((Get-ChildItem $gcloudSdk -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Select-Object -First $gcloudFileProbe).Count -ge $gcloudFileProbe)
+if (-not $gcloudCached) {
+    if (Test-Path $gcloudDir) {
+        Write-Host "Google Cloud SDK cache is incomplete - re-extracting."
+        Remove-TreeLong $gcloudDir
+    }
     Write-Host "Downloading the offline Google Cloud SDK archive (~150 MB)..."
-    New-Item -ItemType Directory -Force $gcloudDir | Out-Null
     $zip = Join-Path $vendor "google-cloud-cli-windows.zip"
-    Invoke-WebRequest -UseBasicParsing -OutFile $zip `
-        -Uri "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+    if (-not (Test-Path $zip)) {
+        New-Item -ItemType Directory -Force $vendor | Out-Null
+        Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+            -Uri "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+    }
     Write-Host "Extracting..."
-    Expand-Archive -Path $zip -DestinationPath $gcloudDir -Force
+    Expand-ZipTo -Zip $zip -Destination $gcloudDir
     Remove-Item $zip
+}
+if (-not (Test-Path (Join-Path $gcloudSdk "install.bat"))) {
+    throw "Google Cloud SDK extraction did not produce $gcloudSdk\install.bat"
 }
 
 New-Item -ItemType Directory -Force $build | Out-Null
