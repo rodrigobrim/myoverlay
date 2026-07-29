@@ -1073,7 +1073,10 @@ def _connect_over_wifi(
             _close_available_devices(dlg, report)
 
     device = _wait_for_connected_device(
-        window, timeout_s=cfg.rs3.wifi_connect_timeout_s, report=report
+        window,
+        timeout_s=cfg.rs3.wifi_connect_timeout_s,
+        report=report,
+        settle_s=cfg.rs3.wifi_settle_s,
     )
     # The handshake is over (either way) - now it is safe to tidy the dialog.
     _close_available_devices(dlg, report)
@@ -1515,24 +1518,28 @@ def disconnect_wifi_device(window, report: list[str]) -> bool:
 # negotiating with the logger over its own access point on the same thread
 # that serves its UI. Every UIA query is a synchronous COM call into that
 # thread, and starving it there is what leaves the MyChron reporting "Can't
-# communicate". So the wait is passive: a long settle with the UI untouched,
-# then coarse polls - never the tight loop that would feel more responsive.
-_WIFI_SETTLE_S = 25.0
+# communicate". So the wait is passive: a settle with the UI untouched
+# (rs3.wifi_settle_s), then coarse polls - never a tight loop.
 _WIFI_POLL_S = 20.0
 
 
 def _wait_for_connected_device(
-    window, timeout_s: float = 120.0, report: list[str] | None = None
+    window,
+    timeout_s: float = 120.0,
+    report: list[str] | None = None,
+    settle_s: float = 25.0,
 ) -> str | None:
     """Wait for the device to appear in Connected Devices, touching nothing.
 
-    See _WIFI_SETTLE_S: the link is left strictly alone while it comes up.
+    The link is left strictly alone for settle_s while it comes up.
     """
     start = time.monotonic()
     deadline = start + timeout_s
     if report is not None:
-        report.append("waiting for the WiFi link (leaving RS3 alone while it connects)...")
-    time.sleep(min(_WIFI_SETTLE_S, timeout_s))
+        report.append(
+            f"waiting for the WiFi link (hands off RS3 for {settle_s:.0f}s)..."
+        )
+    time.sleep(min(settle_s, timeout_s))
 
     last_beat = time.monotonic()
     while time.monotonic() < deadline:

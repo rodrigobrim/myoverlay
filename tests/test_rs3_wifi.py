@@ -192,7 +192,7 @@ def _run_connect(monkeypatch, entry_count, ask, report=None):
     monkeypatch.setattr(
         rs3,
         "_wait_for_connected_device",
-        lambda win, timeout_s=0, report=None: "MyChron6 Brim (WiFi)",
+        lambda win, timeout_s=0, report=None, settle_s=0: "MyChron6 Brim (WiFi)",
     )
     return rs3._connect_over_wifi(Config(), object(), report, None, ask)
 

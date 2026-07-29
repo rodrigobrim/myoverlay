@@ -94,6 +94,12 @@ class Rs3Config(BaseModel):
     # How long to wait for a WiFi-connected device to show up in RS3 after
     # clicking Connect (the handshake goes over the device's own AP).
     wifi_connect_timeout_s: float = 120.0
+    # Hands-off settle right after clicking Connect, before the first UIA
+    # poll. The handshake runs on RS3's UI thread, so during this window the
+    # UI is left completely alone. 25 is the validated-safe default; lower
+    # values speed the flow up but have not been proven against a real
+    # handshake.
+    wifi_settle_s: float = 25.0
     # SSID prefix AiM devices broadcast; also the search filter that isolates
     # them from house networks in the Available devices list.
     wifi_device_prefix: str = "AiM-"
