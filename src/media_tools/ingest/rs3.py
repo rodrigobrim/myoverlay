@@ -146,24 +146,19 @@ def version_from_title(title: str) -> str | None:
     return m.group(1) if m else None
 
 
-def rs3_installed_version(cfg: Config) -> str | None:
-    """Version of the installed RS3, or None.
+def rs3_installed_version(cfg: Config | None = None) -> str | None:
+    """Version of the installed RS3 per Windows, or None.
 
-    The exe's own file metadata comes first: it describes the binary that
-    will actually be launched. Windows' installed-programs record is the
-    fallback - it is authoritative about what was *installed*, but can be
-    stale (or describe a different copy) if the exe was replaced by hand.
+    THE single source of truth for "which RS3 is installed", for the CLI and
+    for the MSI wizard alike (packaging/msi/detect_deps.js reads the very
+    same Uninstall keys and normalises the same way - see
+    tests/test_rs3_registry.py). Deliberately not the exe's file metadata or
+    the window title: three ways to answer one question is three ways to
+    disagree, and the gate that decides whether to drive the UI at all must
+    not depend on which one was asked.
+
+    cfg is accepted for call-site symmetry and is unused.
     """
-    exe = find_rs3_exe(cfg)
-    if exe is not None:
-        try:
-            import win32api
-
-            info = win32api.GetFileVersionInfo(str(exe), "\\")
-            ms, ls = info["FileVersionMS"], info["FileVersionLS"]
-            return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}"
-        except Exception:  # noqa: BLE001 - metadata may be absent
-            pass
     for entry in rs3_registry_entries():
         if entry.version:
             return entry.version
@@ -437,15 +432,28 @@ def _attempt_download(
             report.append("RS3 window is up")
 
         window = app.top_window()
-        # Gate on the RUNNING instance's version (title carries it): only
-        # layouts validated against real UI snapshots are ever driven.
-        running = version_from_title(window.window_text() or "")
-        if not rs3_version_supported(running, cfg):
+        # Gate again for the attach path (RS3 was already running, so the
+        # launch-time gate above never ran) - on the SAME registry version,
+        # never on a second opinion.
+        installed = rs3_installed_version(cfg)
+        if not rs3_version_supported(installed, cfg):
             report.append(
-                f"! running RS3 version {running or 'unknown'} is not validated for "
+                f"! installed RS3 version {installed or 'unknown'} is not validated for "
                 f"automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
                 "refusing to drive an unvalidated UI - update RS3 or set "
                 "[rs3] validated_versions"
+            )
+            return
+        # The title is NOT a second source of truth for the gate; it is only
+        # used to notice that the window we attached to is not the install
+        # Windows told us about (a portable copy, a second install). That
+        # disagreement means we cannot know which layout we are driving.
+        running = version_from_title(window.window_text() or "")
+        if running and installed and running != installed:
+            report.append(
+                f"! the running RS3 reports version {running} but Windows has "
+                f"{installed} installed - refusing to drive it, as it is not the "
+                "install that was validated (close the other copy)"
             )
             return
         try:

@@ -40,25 +40,48 @@ someone validates it and adds the version.
   running window title and the exe file version; mismatch = refuse + clear
   message.
 
-### Where the version and the exe come from
+### Where the version comes from - ONE source
 
-Three sources, in order of authority:
+Windows' installed-programs record (the Uninstall keys that Add/Remove
+Programs and PowerShell `Get-Package` read) is the SINGLE source of truth
+for "which RS3 is installed", for the CLI and the MSI wizard alike. AiM
+registers RS3 twice (MSI product code + a plain `RaceStudio 3 <version>`
+key), both carrying `DisplayVersion` and `InstallLocation`. Windows writes
+four parts (`3.83.39.0`); both sides trim to the three-part form the
+validated list uses.
 
-1. `rs3.exe_path` in config.toml - explicit user choice, always wins.
-2. The exe's own file-version metadata - describes the binary that will
-   actually be launched.
-3. Windows' installed-programs record (`rs3_registry_entries()`) - the
-   Uninstall keys that Add/Remove Programs and PowerShell `Get-Package`
-   read. AiM registers RS3 twice (MSI product code + a plain
-   `RaceStudio 3 <version>` key), both with `DisplayVersion` and
-   `InstallLocation`. Used to find the exe when it is NOT in the default
-   place, and as the version fallback when no exe/metadata is readable.
-   Windows writes four-part versions (`3.83.39.0`), so `normalise_version`
-   trims them to the three-part form the title and the gate use.
+- CLI: `rs3_registry_entries()` / `rs3_installed_version()` via stdlib
+  `winreg`. Both gates (before launching, and when attaching to an
+  already-running RS3) validate this one number.
+- Wizard: `detectRs3FromRegistry()` in `packaging/msi/detect_deps.js`,
+  reading the same three key paths.
+- `tests/test_rs3_registry.py` asserts the two sides share key paths,
+  hives and normalisation, and that neither grows a second detection path.
 
-`winget` is not used: on this machine it demands accepting the msstore
-source agreements before it will list anything, and stdlib `winreg` reads
-the same data with no subprocess.
+Removed on purpose (each was a way for the two to disagree): the exe's
+file-version metadata, the wizard's MSI product enumeration, and its
+`C:\AIM_SPORT` folder-exists check. A hand-copied install Windows has no
+record of therefore counts as ABSENT in the wizard - which is honest, since
+the CLI would refuse to drive it anyway.
+
+The window title is not a version source either; it is only compared
+against the registry to notice that the window we attached to belongs to a
+different install (portable copy, second install), which is refused.
+
+`rs3.exe_path` (config.toml) still decides WHICH BINARY runs - that is a
+separate question from which version is installed; the recorded
+`InstallLocation` is used to find it when it is not in the default place.
+
+`winget` is not used: it demands accepting the msstore source agreements
+before listing anything, and reads this same registry data anyway.
+
+Gotcha for the wizard: JScript cannot receive WMI `[out]` parameters from a
+plain `reg.EnumKey(...)` call - it gets the bare return code, so every hive
+looks empty and RS3 reads as missing on a machine that has it.
+`Methods_.Item(...).InParameters.SpawnInstance_()` + `ExecMethod` is the
+pattern that works, and the returned SAFEARRAY only iterates through
+`VBArray`. Verify changes with
+`cscript //nologo` against the real registry, not just unit tests.
 - Wizard: `VALIDATED_RS3_VERSIONS` in `packaging/msi/detect_deps.js` - an
   unsupported version blocks setup with the version named on the deps page.
 - `tests/test_rs3_dialogs.py` asserts both lists match.

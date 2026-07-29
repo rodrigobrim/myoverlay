@@ -90,6 +90,87 @@ def test_no_registry_entries_is_not_an_error(monkeypatch):
     assert rs3.rs3_installed_version(Config()) is None
 
 
+def _detect_deps_js() -> str:
+    from pathlib import Path
+
+    return (
+        Path(__file__).resolve().parents[1] / "packaging" / "msi" / "detect_deps.js"
+    ).read_text(encoding="ascii")
+
+
+def test_wizard_reads_the_same_registry_keys_as_the_cli():
+    """Single source of truth: the wizard must look exactly where rs3.py
+    looks. A wizard that admits an install the CLI then refuses to drive is
+    the mismatch this shared source exists to prevent."""
+    js = _detect_deps_js()
+    for _hive, path in rs3._UNINSTALL_KEYS:
+        assert path.replace("\\", "\\\\") in js, f"{path} missing from detect_deps.js"
+    # ...and both consider the same hives.
+    assert "0x80000002" in js  # HKLM
+    assert "0x80000001" in js  # HKCU
+
+
+def test_wizard_has_no_second_detection_path():
+    """The MSI-product / folder-exists / exe-file-version fallbacks were
+    removed on purpose - each was a way for the wizard to disagree with the
+    CLI about which RS3 is installed."""
+    js = _detect_deps_js()
+    assert "Session.Installer" not in js
+    assert "FolderExists" not in js
+    assert "GetFileVersion" not in js
+
+
+def test_cli_has_no_second_detection_path():
+    """Same rule on the Python side: the exe's file metadata is no longer a
+    version source."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "media_tools" / "ingest" / "rs3.py"
+    ).read_text(encoding="utf-8")
+    assert "GetFileVersionInfo" not in src
+
+
+def test_wizard_reads_wmi_through_execmethod():
+    """JScript cannot receive WMI [out] parameters from a direct
+    reg.EnumKey(...) call - it gets the bare return code, so every hive
+    looks empty and RS3 is reported missing on a machine that has it.
+    ExecMethod + SpawnInstance_ is the only pattern that works, and the
+    SAFEARRAY needs VBArray. Verified live with cscript."""
+    js = _detect_deps_js()
+    assert "ExecMethod" in js
+    assert "SpawnInstance_" in js
+    assert "VBArray" in js
+
+
+def test_detect_deps_js_stays_pure_ascii():
+    """The file promises ASCII (it is embedded in the MSI); non-ASCII would
+    break the build that reads it with an ascii codec."""
+    from pathlib import Path
+
+    raw = (
+        Path(__file__).resolve().parents[1] / "packaging" / "msi" / "detect_deps.js"
+    ).read_bytes()
+    raw.decode("ascii")
+
+
+def test_both_sides_normalise_versions_the_same_way():
+    """Windows stores four parts, the gate compares three."""
+    js = _detect_deps_js()
+    assert r"/(\d+)\.(\d+)\.(\d+)/" in js
+    assert normalise_version("3.83.39.0") == "3.83.39"
+
+
+def test_race_studio_2_is_not_mistaken_for_3():
+    """Both sides must reject the sibling product; the JS regex needs the
+    non-digit boundary so 'Race Studio 3' matches but 'Race Studio 2' does
+    not, and 'RaceStudio 3 3.83.39.0' still does."""
+    js = _detect_deps_js()
+    assert r"race\s*studio\s*3(\D|$)" in js
+    assert not rs3._looks_like_rs3("Race Studio 2")
+
+
 def test_registry_read_never_raises():
     """Reading the live registry must be safe on any machine (including a
     non-Windows CI box, where winreg does not import)."""
