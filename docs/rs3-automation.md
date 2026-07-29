@@ -30,12 +30,35 @@ Fixes on this branch:
 
 ## Version gate (wizard + runtime)
 
-Only RS3 versions validated against real UI snapshots are ever driven.
-Current list: `3.83.39`.
+Only RS3 versions validated against real UI snapshots are ever driven, and
+the match is EXACT - `3.83.40` is refused just like `3.72.27`. An unknown
+version is refused too. Current list: `3.83.39`. Note RS3 auto-updates, so
+a new AiM release turns the automation off with a clear message until
+someone validates it and adds the version.
 
 - Runtime: `Rs3Config.validated_versions` (config.py) - checked against the
   running window title and the exe file version; mismatch = refuse + clear
   message.
+
+### Where the version and the exe come from
+
+Three sources, in order of authority:
+
+1. `rs3.exe_path` in config.toml - explicit user choice, always wins.
+2. The exe's own file-version metadata - describes the binary that will
+   actually be launched.
+3. Windows' installed-programs record (`rs3_registry_entries()`) - the
+   Uninstall keys that Add/Remove Programs and PowerShell `Get-Package`
+   read. AiM registers RS3 twice (MSI product code + a plain
+   `RaceStudio 3 <version>` key), both with `DisplayVersion` and
+   `InstallLocation`. Used to find the exe when it is NOT in the default
+   place, and as the version fallback when no exe/metadata is readable.
+   Windows writes four-part versions (`3.83.39.0`), so `normalise_version`
+   trims them to the three-part form the title and the gate use.
+
+`winget` is not used: on this machine it demands accepting the msstore
+source agreements before it will list anything, and stdlib `winreg` reads
+the same data with no subprocess.
 - Wizard: `VALIDATED_RS3_VERSIONS` in `packaging/msi/detect_deps.js` - an
   unsupported version blocks setup with the version named on the deps page.
 - `tests/test_rs3_dialogs.py` asserts both lists match.

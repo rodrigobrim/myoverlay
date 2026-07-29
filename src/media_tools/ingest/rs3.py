@@ -29,18 +29,115 @@ _RS3_EXE_CANDIDATES = (
 
 
 def find_rs3_exe(cfg: Config) -> Path | None:
-    """The RS3 executable: configured path first, then known install spots."""
+    """The RS3 executable: configured path, then Windows' installed-programs
+    record, then the known default install spots."""
     if cfg.rs3.exe_path and cfg.rs3.exe_path.is_file():
         return cfg.rs3.exe_path
     for candidate in _RS3_EXE_CANDIDATES:
         if candidate.is_file():
             return candidate
-    root = Path("C:/AIM_SPORT/RaceStudio3")
-    if root.is_dir():
-        for hit in sorted(root.glob("**/AiMRS3*.exe")):
-            if hit.is_file():
-                return hit
+    # Windows knows where it was installed even when that is not the default
+    # location - ask it before falling back to guessing.
+    roots = [Path(entry.install_location) for entry in rs3_registry_entries()
+             if entry.install_location]
+    roots.append(Path("C:/AIM_SPORT/RaceStudio3"))
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            for hit in sorted(root.glob("**/AiMRS3*.exe")):
+                if hit.is_file():
+                    return hit
+        except OSError:
+            continue
     return None
+
+
+class Rs3Install:
+    """One RS3 entry in Windows' installed-programs database."""
+
+    def __init__(self, name: str, version: str | None, install_location: str | None):
+        self.name = name
+        self.version = version
+        self.install_location = install_location
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Rs3Install({self.name!r}, {self.version!r}, {self.install_location!r})"
+
+
+# Where Windows records installed programs - the same data Add/Remove
+# Programs and PowerShell's Get-Package ("Programs"/"msi" providers) show.
+# AiM registers RS3 twice: once under its MSI product code, once under a
+# plain "RaceStudio 3 <version>" key; both carry DisplayVersion and
+# InstallLocation.
+_UNINSTALL_KEYS = (
+    ("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ("HKLM", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+)
+
+
+def rs3_registry_entries() -> list[Rs3Install]:
+    """RS3 entries Windows has on record. Empty off-Windows or on any error."""
+    try:
+        import winreg
+    except ImportError:  # not Windows
+        return []
+
+    roots = {"HKLM": winreg.HKEY_LOCAL_MACHINE, "HKCU": winreg.HKEY_CURRENT_USER}
+    found: list[Rs3Install] = []
+    for root_name, path in _UNINSTALL_KEYS:
+        try:
+            root = winreg.OpenKey(roots[root_name], path)
+        except OSError:
+            continue
+        with root:
+            try:
+                count = winreg.QueryInfoKey(root)[0]
+            except OSError:
+                continue
+            for i in range(count):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
+                        name = _reg_value(sub, "DisplayName", winreg)
+                        if not name or not _looks_like_rs3(name):
+                            continue
+                        found.append(
+                            Rs3Install(
+                                name,
+                                normalise_version(_reg_value(sub, "DisplayVersion", winreg)),
+                                _reg_value(sub, "InstallLocation", winreg),
+                            )
+                        )
+                except OSError:
+                    continue
+    return found
+
+
+def _reg_value(key, name: str, winreg) -> str | None:
+    try:
+        value, _ = winreg.QueryValueEx(key, name)
+    except OSError:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _looks_like_rs3(display_name: str) -> bool:
+    low = display_name.lower().replace(" ", "")
+    return "racestudio3" in low
+
+
+def normalise_version(version: str | None) -> str | None:
+    """'3.83.39.0' -> '3.83.39'; None stays None.
+
+    Windows records a four-part version while RS3's own title (and therefore
+    validated_versions) uses three - they must be comparable.
+    """
+    if not version:
+        return None
+    m = re.match(r"\s*(\d+\.\d+\.\d+)", version)
+    return m.group(1) if m else version.strip() or None
 
 
 def version_from_title(title: str) -> str | None:
@@ -50,18 +147,27 @@ def version_from_title(title: str) -> str | None:
 
 
 def rs3_installed_version(cfg: Config) -> str | None:
-    """Version of the installed RS3 exe (file metadata), or None."""
-    exe = find_rs3_exe(cfg)
-    if exe is None:
-        return None
-    try:
-        import win32api
+    """Version of the installed RS3, or None.
 
-        info = win32api.GetFileVersionInfo(str(exe), "\\")
-        ms, ls = info["FileVersionMS"], info["FileVersionLS"]
-        return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}"
-    except Exception:  # noqa: BLE001 - metadata may be absent
-        return None
+    The exe's own file metadata comes first: it describes the binary that
+    will actually be launched. Windows' installed-programs record is the
+    fallback - it is authoritative about what was *installed*, but can be
+    stale (or describe a different copy) if the exe was replaced by hand.
+    """
+    exe = find_rs3_exe(cfg)
+    if exe is not None:
+        try:
+            import win32api
+
+            info = win32api.GetFileVersionInfo(str(exe), "\\")
+            ms, ls = info["FileVersionMS"], info["FileVersionLS"]
+            return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}"
+        except Exception:  # noqa: BLE001 - metadata may be absent
+            pass
+    for entry in rs3_registry_entries():
+        if entry.version:
+            return entry.version
+    return None
 
 
 def rs3_version_supported(version: str | None, cfg: Config) -> bool:
