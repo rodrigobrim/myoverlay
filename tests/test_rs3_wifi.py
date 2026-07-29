@@ -220,6 +220,32 @@ def test_wifi_connect_can_be_turned_off():
     assert cfg.rs3.wifi_connect is False
 
 
+def test_wlan_ssid_parser_skips_bssid(monkeypatch):
+    """`AP BSSID :` also ends in SSID - only the exact SSID line counts, and
+    the label is matched even though the rest of netsh output is localised."""
+    import subprocess as sp
+
+    netsh = (
+        "    Estado                  : Conectado\n"
+        "    SSID                   : Sissilandia\n"
+        "    AP BSSID               : 78:8c:b5:a9:39:0f\n"
+    )
+
+    class R:
+        stdout = netsh
+
+    monkeypatch.setattr(rs3.subprocess, "run", lambda *a, **k: R())
+    assert rs3._current_wlan_ssid() == "Sissilandia"
+
+
+def test_wlan_ssid_none_when_disconnected(monkeypatch):
+    class R:
+        stdout = "    Estado                  : Desconectado\n"
+
+    monkeypatch.setattr(rs3.subprocess, "run", lambda *a, **k: R())
+    assert rs3._current_wlan_ssid() is None
+
+
 def test_aim_prefix_is_the_search_filter():
     """The prefix both identifies AiM SSIDs and is what isolates them from
     house networks in the list."""

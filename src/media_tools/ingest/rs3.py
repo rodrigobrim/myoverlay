@@ -1052,6 +1052,11 @@ def _connect_over_wifi(
             chosen = devices[idx]
 
         report.append(f"connecting to {chosen.label} over WiFi...")
+        # Remember the network the PC is on NOW: connecting to the MyChron
+        # replaces it with the logger's AP, and Windows does not always
+        # reassociate by itself after the disconnect.
+        global _wlan_before_connect
+        _wlan_before_connect = _current_wlan_ssid()
         if ts:
             ts.snap(dlg, "wifi_before_connect")
         if not _click_row_and_connect(dlg, chosen, report):
@@ -1402,13 +1407,64 @@ def _close_available_devices(dlg, report: list[str]) -> None:
         pass
 
 
+# The house network the PC was on before the MyChron connect replaced it,
+# so the disconnect can hand it back (see disconnect_wifi_device).
+_wlan_before_connect: str | None = None
+
+
+def _current_wlan_ssid() -> str | None:
+    """SSID Windows' WLAN interface is associated to, or None.
+
+    Only the `SSID :` line is matched (never `AP BSSID`); the label itself is
+    not localised even though the rest of netsh's output is.
+    """
+    try:
+        proc = subprocess.run(
+            ["netsh", "wlan", "show", "interfaces"],
+            capture_output=True, text=True, timeout=15,
+        )
+        for line in proc.stdout.splitlines():
+            key, _, value = line.partition(":")
+            if key.strip().upper() == "SSID" and value.strip():
+                return value.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _restore_wlan(report: list[str]) -> None:
+    """Reassociate Windows to the pre-connect network if it did not itself."""
+    wanted = _wlan_before_connect
+    if not wanted:
+        return
+    try:
+        if _current_wlan_ssid() == wanted:
+            return
+        subprocess.run(
+            ["netsh", "wlan", "connect", f"name={wanted}"],
+            capture_output=True, text=True, timeout=20,
+        )
+        time.sleep(6)
+        if _current_wlan_ssid() == wanted:
+            report.append(f"Windows WiFi back on '{wanted}'")
+        else:
+            report.append(
+                f"~ could not rejoin WiFi network '{wanted}' - reconnect it "
+                "by hand if the internet is down"
+            )
+    except Exception:  # noqa: BLE001 - restoring is best-effort cleanup
+        pass
+
+
 def disconnect_wifi_device(window, report: list[str]) -> bool:
-    """Drop the WiFi link to the MyChron.
+    """Drop the WiFi link to the MyChron and hand the WiFi adapter back.
 
     While RS3 holds a WiFi device the PC's adapter is tied up with the
     logger's own network, so the machine has no internet - the rest of the
     pipeline (YouTube upload, updates) cannot run until this happens. Every
-    path that connects must therefore also disconnect, success or not.
+    path that connects must therefore also disconnect, success or not. After
+    the RS3-side disconnect, Windows is pointed back at the network it was on
+    before the connect (it does not always reassociate on its own).
     """
     dlg = _open_available_devices(window, report)
     if dlg is None:
@@ -1450,6 +1506,9 @@ def disconnect_wifi_device(window, report: list[str]) -> bool:
         return False
     finally:
         _close_available_devices(dlg, report)
+        # Whatever happened above, the link may already be down with Windows
+        # left associated to nothing - always offer the old network back.
+        _restore_wlan(report)
 
 
 # The WiFi handshake is the most fragile moment in the whole flow: RS3 is
