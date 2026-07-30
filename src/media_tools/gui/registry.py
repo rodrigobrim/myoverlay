@@ -35,9 +35,13 @@ CLI_ONLY: dict[str, str] = {
 # GUI backlog: should eventually be reachable from the GUI but is not yet.
 # Moving an entry from here into GUI_COMMANDS is the TDD loop for GUI work.
 PLANNED: dict[str, str] = {
-    "camera list": "pick videos to download from the card",
-    "camera get": "selective video download",
-    "telemetry list": "pick MyChron sessions to download",
+    "video list remote": "pick videos to download from the card",
+    "video list local": "browse videos already in the library",
+    "video list all": "full card + library video overview",
+    "video get": "selective video download (by file or day)",
+    "telemetry list remote": "pick MyChron sessions to download",
+    "telemetry list local": "pick already-downloaded MyChron sessions",
+    "telemetry list all": "full device + disk session overview",
     "telemetry get": "telemetry-only download",
     "best-lap": "show best lap per session",
     "correlate": "re-run session grouping for a day",

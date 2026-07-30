@@ -69,11 +69,24 @@ class CameraListResult(BaseModel):
     videos: list[CameraVideo] = []
 
 
+class LibraryVideo(BaseModel):
+    source_name: str
+    size_bytes: int
+    start_utc: datetime
+    day: str  # library day folder (YYYY-MM-DD)
+    file: str  # path relative to the day dir
+
+
+class LibraryVideoListResult(BaseModel):
+    videos: list[LibraryVideo] = []
+
+
 class TelemetryFileEntry(BaseModel):
     source_name: str
     size_bytes: int
     source_path: str
     status: str  # "new" | "ingested"
+    start_utc: datetime | None = None
 
 
 class TelemetryListResult(BaseModel):
@@ -98,19 +111,56 @@ def list_camera_videos(cfg: Config, include_ingested: bool = False) -> CameraLis
     return CameraListResult(sources=[str(s) for s in sources], videos=videos)
 
 
+def list_library_videos(cfg: Config) -> LibraryVideoListResult:
+    """Read-only listing of every video already ingested into the library."""
+    lib = Library(cfg.library_root)
+    videos: list[LibraryVideo] = []
+    for d in lib.day_dates():
+        manifest = lib.load_day(d)
+        for v in manifest.videos:
+            videos.append(
+                LibraryVideo(
+                    source_name=v.source_name,
+                    size_bytes=v.size_bytes,
+                    start_utc=v.start_utc_estimate,
+                    day=d.isoformat(),
+                    file=v.file,
+                )
+            )
+    return LibraryVideoListResult(videos=videos)
+
+
 def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> TelemetryListResult:
-    """Read-only listing of .xrk files in RS3's data dir (default: only new)."""
+    """Read-only listing of .xrk files in RS3's data dir (default: only new).
+
+    Parses each file's header for its session date (the same clock-corrected
+    start_utc ingest/scan use) - slower than a bare directory scan, but this
+    is a preview a human reads, not a hot path. A corrupt/unparseable file
+    still gets listed, just with no date.
+    """
     sources, files = _my.enumerate_telemetry_files(cfg)
-    entries = [
-        TelemetryFileEntry(
-            source_name=f.name,
-            size_bytes=f.size,
-            source_path=str(f.path),
-            status="ingested" if f.ingested else "new",
+    logger_tz = cfg.mychron.tzinfo()
+    entries: list[TelemetryFileEntry] = []
+    for f in files:
+        if not (include_ingested or not f.ingested):
+            continue
+        try:
+            _info, start, _end = _telemetry_window(cfg, f.path, logger_tz)
+        except Exception:  # noqa: BLE001 - a corrupt .xrk must not break the listing
+            # The decoder rejected the file; its raw GPS records can still
+            # date the session (approximate: first-fix time, not log start).
+            from .gps_time import gps_log_start_utc
+
+            start = gps_log_start_utc(f.path)
+        entries.append(
+            TelemetryFileEntry(
+                source_name=f.name,
+                size_bytes=f.size,
+                source_path=str(f.path),
+                status="ingested" if f.ingested else "new",
+                start_utc=start,
+            )
         )
-        for f in files
-        if include_ingested or not f.ingested
-    ]
     return TelemetryListResult(sources=[str(s) for s in sources], files=entries)
 
 

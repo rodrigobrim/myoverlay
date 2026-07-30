@@ -112,11 +112,11 @@ def _walk(cmd, path: list[str], out: list[str]) -> None:
 
 
 def iter_command_paths() -> list[str]:
-    """Every runnable command path, e.g. ['ingest', ..., 'camera list', ...].
+    """Every runnable command path, e.g. ['ingest', ..., 'video list remote', ...].
 
     The machine-readable twin of docs/CLI.md: both walk the same command tree,
     so anything asserted against this list is asserted against the documented
-    CLI surface. Groups (`camera`, `telemetry`) are not themselves runnable and
+    CLI surface. Groups (`video`, `telemetry`) are not themselves runnable and
     are not included - only their leaf sub-commands are.
     """
     import typer.main

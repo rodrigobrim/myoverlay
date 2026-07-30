@@ -25,35 +25,6 @@ Best lap (the single source of truth) per session, S/F-relap-aware.
 | `--session` |  | Session id; default all |
 | `--json` | false |  |
 
-## mt camera
-
-Camera SD-card utilities (list / selective download).
-
-## mt camera get
-
-    mt camera get [OPTIONS] [NAMES]...
-
-Download videos from the camera into the library (all new, or only the named ones).
-
-| Argument | Required | Description |
-| --- | --- | --- |
-| `NAMES` | no | Video filenames from `mt camera list` (omit to download all new) |
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `--force` | false | Re-download and refresh files already ingested |
-
-## mt camera list
-
-    mt camera list [OPTIONS]
-
-List videos on the connected camera. Copies nothing.
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `--all` | false | Include videos already downloaded (default: only new) |
-| `--json` | false | Machine-readable JSON (for the review GUI) |
-
 ## mt correlate
 
     mt correlate [DAY]
@@ -266,7 +237,7 @@ Download MyChron sessions via Race Studio 3 and ingest them. No camera involveme
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `NAMES` | no | Session filenames from `mt telemetry list` (omit to download all new) |
+| `NAMES` | no | Session filenames from `mt telemetry list local` (omit to download all new) |
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -276,13 +247,91 @@ Download MyChron sessions via Race Studio 3 and ingest them. No camera involveme
 
 ## mt telemetry list
 
-    mt telemetry list [OPTIONS]
+List MyChron sessions - remote (on the device via RS3, default), local (downloaded to disk), or all (both, including already handled).
 
-List MyChron .xrk sessions in Race Studio 3's data dir. Copies nothing.
+## mt telemetry list all
+
+    mt telemetry list all [OPTIONS]
+
+List everything: device sessions (including already-downloaded) and
+local files (including already-ingested).
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--all` | false | Include sessions already ingested (default: only new) |
+| `--json` | false | Machine-readable JSON (for the review GUI) |
+
+## mt telemetry list local
+
+    mt telemetry list local [OPTIONS]
+
+List new MyChron .xrk sessions already downloaded to RS3's data dir. Copies nothing.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--json` | false | Machine-readable JSON (for the review GUI) |
+
+## mt telemetry list remote
+
+    mt telemetry list remote [OPTIONS]
+
+List MyChron sessions in Race Studio 3's app, on the connected device. Downloads nothing.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--json` | false | Machine-readable JSON (for the review GUI) |
+
+## mt video
+
+Camera video utilities (list / selective download).
+
+## mt video get
+
+    mt video get [OPTIONS] [NAMES]...
+
+Download videos from the camera into the library - all new, the named
+files, or every file of the named days.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `NAMES` | no | Video filenames from `mt video list`, or days (YYYY-MM-DD) to download every file captured that day (omit to download all new) |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--force` | false | Re-download and refresh files already ingested |
+
+## mt video list
+
+List videos - remote (on the camera card, default), local (in the library), or all (both, including already downloaded).
+
+## mt video list all
+
+    mt video list all [OPTIONS]
+
+List everything: camera-card videos (including already-downloaded) and
+the library's downloaded videos.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--json` | false | Machine-readable JSON (for the review GUI) |
+
+## mt video list local
+
+    mt video list local [OPTIONS]
+
+List videos already downloaded into the library.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--json` | false | Machine-readable JSON (for the review GUI) |
+
+## mt video list remote
+
+    mt video list remote [OPTIONS]
+
+List new videos on the connected camera. Copies nothing.
+
+| Option | Default | Description |
+| --- | --- | --- |
 | `--json` | false | Machine-readable JSON (for the review GUI) |
 
 ## mt watch

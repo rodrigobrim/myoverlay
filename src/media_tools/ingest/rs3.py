@@ -17,6 +17,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from ..config import Config
 
 # Known RS3 install locations, tried when rs3.exe_path is not set. The real
@@ -367,6 +369,109 @@ def _connect_when_ready(cfg: Config, deadline_s: float = 180.0, report: list[str
     return None
 
 
+def _connect_or_launch_rs3(cfg: Config, report: list[str]):
+    """Connect to the RS3 window, launching it if it is not running, and gate
+    on the installed version being one this automation was validated against.
+
+    Shared by the download flow and the read-only remote-list flow: both need
+    a live, focused, maximized, version-gated RS3 window before doing anything
+    UIA-specific. Returns (app, window), or None (with a reason appended to
+    report).
+    """
+    try:
+        from pywinauto import Application
+        from pywinauto.findwindows import ElementNotFoundError
+        from pywinauto.timings import TimeoutError as UIATimeoutError
+    except ImportError:
+        report.append("! pywinauto not installed; run: uv sync")
+        return None
+
+    try:
+        app = Application(backend="uia").connect(
+            title_re=cfg.rs3.window_title_re, timeout=5
+        )
+    # connect raises TimeoutError (not ElementNotFoundError) when no
+    # window exists - both must route to the launch branch, otherwise a
+    # crashed RS3 is never restarted.
+    except (ElementNotFoundError, UIATimeoutError):
+        if _rs3_process_running(cfg):
+            # Process exists but the window didn't match: never launch a
+            # duplicate instance; surface the mismatch instead.
+            report.append(
+                "! RS3 process is running but no window matches "
+                f"rs3.window_title_re={cfg.rs3.window_title_re!r} - fix the pattern"
+            )
+            return None
+        exe = find_rs3_exe(cfg)
+        if exe is None:
+            report.append(
+                "! Race Studio 3 is not running and no RS3 executable was "
+                "found (set rs3.exe_path); cannot proceed"
+            )
+            return None
+        installed = rs3_installed_version(cfg)
+        if not rs3_version_supported(installed, cfg):
+            report.append(
+                f"! installed RS3 version {installed or 'unknown'} is not validated "
+                f"for automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
+                "refusing to drive an unvalidated UI - update RS3 or set "
+                "[rs3] validated_versions"
+            )
+            return None
+        subprocess.Popen([str(exe)])
+        report.append(f"launched {exe}; waiting for its window")
+        # Poll instead of a fixed sleep+connect: RS3 cold start varies from
+        # ~15s to well over a minute under load, so `sleep(30);
+        # connect(timeout=60)` is exactly what produced the intermittent
+        # TimeoutError twice. Keep trying short connects until the window
+        # really exists or a generous deadline passes.
+        app = _connect_when_ready(cfg, deadline_s=180.0, report=report)
+        if app is None:
+            report.append(
+                "! RS3 launched but no matching window appeared within 180s "
+                f"(rs3.window_title_re={cfg.rs3.window_title_re!r})"
+            )
+            return None
+        report.append("RS3 window is up")
+
+    window = app.top_window()
+    # Gate again for the attach path (RS3 was already running, so the
+    # launch-time gate above never ran) - on the SAME registry version,
+    # never on a second opinion.
+    installed = rs3_installed_version(cfg)
+    if not rs3_version_supported(installed, cfg):
+        report.append(
+            f"! installed RS3 version {installed or 'unknown'} is not validated for "
+            f"automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
+            "refusing to drive an unvalidated UI - update RS3 or set "
+            "[rs3] validated_versions"
+        )
+        return None
+    # The title is NOT a second source of truth for the gate; it is only
+    # used to notice that the window we attached to is not the install
+    # Windows told us about (a portable copy, a second install). That
+    # disagreement means we cannot know which layout we are driving.
+    running = version_from_title(window.window_text() or "")
+    if running and installed and running != installed:
+        report.append(
+            f"! the running RS3 reports version {running} but Windows has "
+            f"{installed} installed - refusing to drive it, as it is not the "
+            "install that was validated (close the other copy)"
+        )
+        return None
+    try:
+        if window.is_minimized():
+            window.restore()
+        # Maximize for a deterministic layout on ANY screen resolution:
+        # controls are found by NAME (not pixel positions), but a small
+        # window can collapse toolbars and hide the buttons entirely.
+        window.maximize()
+    except Exception:  # noqa: BLE001 - restore/maximize are best-effort
+        pass
+    window.set_focus()
+    return app, window
+
+
 def _attempt_download(
     cfg: Config,
     report: list[str],
@@ -374,98 +479,12 @@ def _attempt_download(
     ask=None,
     link: dict | None = None,
 ) -> None:
-    try:
-        from pywinauto import Application, Desktop
-        from pywinauto.findwindows import ElementNotFoundError
-        from pywinauto.timings import TimeoutError as UIATimeoutError
-    except ImportError:
-        report.append("! pywinauto not installed; run: uv sync")
+    connected = _connect_or_launch_rs3(cfg, report)
+    if connected is None:
         return
+    app, window = connected
 
     if True:  # keep the original indentation/structure below
-        try:
-            app = Application(backend="uia").connect(
-                title_re=cfg.rs3.window_title_re, timeout=5
-            )
-        # connect raises TimeoutError (not ElementNotFoundError) when no
-        # window exists - both must route to the launch branch, otherwise a
-        # crashed RS3 is never restarted.
-        except (ElementNotFoundError, UIATimeoutError):
-            if _rs3_process_running(cfg):
-                # Process exists but the window didn't match: never launch a
-                # duplicate instance; surface the mismatch instead.
-                report.append(
-                    "! RS3 process is running but no window matches "
-                    f"rs3.window_title_re={cfg.rs3.window_title_re!r} - fix the pattern"
-                )
-                return
-            exe = find_rs3_exe(cfg)
-            if exe is None:
-                report.append(
-                    "! Race Studio 3 is not running and no RS3 executable was "
-                    "found (set rs3.exe_path); cannot trigger download"
-                )
-                return
-            installed = rs3_installed_version(cfg)
-            if not rs3_version_supported(installed, cfg):
-                report.append(
-                    f"! installed RS3 version {installed or 'unknown'} is not validated "
-                    f"for automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
-                    "refusing to drive an unvalidated UI - update RS3 or set "
-                    "[rs3] validated_versions"
-                )
-                return
-            subprocess.Popen([str(exe)])
-            report.append(f"launched {exe}; waiting for its window")
-            # Poll instead of a fixed sleep+connect: RS3 cold start varies from
-            # ~15s to well over a minute under load, so `sleep(30);
-            # connect(timeout=60)` is exactly what produced the intermittent
-            # TimeoutError twice. Keep trying short connects until the window
-            # really exists or a generous deadline passes.
-            app = _connect_when_ready(cfg, deadline_s=180.0, report=report)
-            if app is None:
-                report.append(
-                    "! RS3 launched but no matching window appeared within 180s "
-                    f"(rs3.window_title_re={cfg.rs3.window_title_re!r})"
-                )
-                return
-            report.append("RS3 window is up")
-
-        window = app.top_window()
-        # Gate again for the attach path (RS3 was already running, so the
-        # launch-time gate above never ran) - on the SAME registry version,
-        # never on a second opinion.
-        installed = rs3_installed_version(cfg)
-        if not rs3_version_supported(installed, cfg):
-            report.append(
-                f"! installed RS3 version {installed or 'unknown'} is not validated for "
-                f"automation (validated: {', '.join(cfg.rs3.validated_versions)}); "
-                "refusing to drive an unvalidated UI - update RS3 or set "
-                "[rs3] validated_versions"
-            )
-            return
-        # The title is NOT a second source of truth for the gate; it is only
-        # used to notice that the window we attached to is not the install
-        # Windows told us about (a portable copy, a second install). That
-        # disagreement means we cannot know which layout we are driving.
-        running = version_from_title(window.window_text() or "")
-        if running and installed and running != installed:
-            report.append(
-                f"! the running RS3 reports version {running} but Windows has "
-                f"{installed} installed - refusing to drive it, as it is not the "
-                "install that was validated (close the other copy)"
-            )
-            return
-        try:
-            if window.is_minimized():
-                window.restore()
-            # Maximize for a deterministic layout on ANY screen resolution:
-            # controls are found by NAME (not pixel positions), but a small
-            # window can collapse toolbars and hide the buttons entirely.
-            window.maximize()
-        except Exception:  # noqa: BLE001 - restore/maximize are best-effort
-            pass
-        window.set_focus()
         if ts:
             ts.snap(window, "window")
 
@@ -765,13 +784,13 @@ def _select_all_sessions(window) -> None:
 
 
 def _unhide_downloaded(window, report: list[str]) -> None:
-    """Troubleshooting only: reveal already-downloaded sessions.
+    """Reveal already-downloaded sessions (used by --troubleshoot and by
+    `telemetry list remote --all`).
 
     RS3 hides sessions it has already downloaded behind a Hide/Unhide toggle,
-    so the download list can look empty even when the device is full. The
-    production flow must never touch it (the 'hide' guard in _FORBIDDEN_WORDS);
-    while troubleshooting we want the full list visible. Click toward the SHOWN
-    state only, never toward hiding.
+    so the download list can look empty even when the device is full. This
+    only ever clicks toward the SHOWN state, never toward hiding (the 'hide'
+    guard in _FORBIDDEN_WORDS still protects every other click path).
     """
     try:
         controls = window.descendants()
@@ -804,6 +823,116 @@ def _unhide_downloaded(window, report: list[str]) -> None:
         except Exception:  # noqa: BLE001 - a vanished control is fine
             continue
     report.append("~ no unhide/show-downloaded control found (see control dump)")
+
+
+class RemoteSession(BaseModel):
+    """One row from RS3's own session list, read-only. RS3's list is
+    custom-drawn (see _session_list) and exposes no stable per-field data -
+    `label` is OCR'd from the row's pixels, the same technique the WiFi
+    device picker's _row_label uses."""
+
+    label: str
+
+
+class RemoteListResult(BaseModel):
+    device: str | None = None
+    sessions: list[RemoteSession] = []
+    # Diagnostics: RS3 not running, no device connected, nothing new, etc.
+    notes: list[str] = []
+
+
+def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> RemoteListResult:
+    """Read-only listing of sessions RS3 shows for the connected MyChron - i.e.
+    what's still on the device, before anything is downloaded to disk. Never
+    selects rows or clicks Data Download; like trigger_rs3_download, any
+    failure is reported as text, never raised.
+
+    USB only: unlike the download flow, this never initiates a WiFi connect -
+    that takes over the PC's WiFi link, a side effect too heavy for a passive
+    listing.
+
+    include_downloaded=True also reveals sessions RS3 already downloaded
+    (mirrors `telemetry list all` / `video list all`).
+    """
+    result = RemoteListResult()
+    if not cfg.rs3.enabled:
+        result.notes.append("rs3 automation disabled (set [rs3] enabled = true)")
+        return result
+    try:
+        _attempt_list_remote(cfg, result, include_downloaded=include_downloaded)
+    except Exception as exc:  # noqa: BLE001 - never kill the pipeline
+        result.notes.append(f"! rs3 automation failed: {exc!r}")
+    return result
+
+
+def _attempt_list_remote(cfg: Config, result: RemoteListResult, include_downloaded: bool) -> None:
+    connected = _connect_or_launch_rs3(cfg, result.notes)
+    if connected is None:
+        return
+    _app, window = connected
+
+    _dismiss_blocking_dialogs(window, result.notes)
+
+    device = _connected_device_name(window)
+    if not device:
+        result.notes.append("? no AiM device connected (USB) - nothing to list")
+        return
+    result.device = device
+
+    _open_device_download_view(window, device)
+    _dismiss_blocking_dialogs(window, result.notes)
+
+    if _transfer_in_progress(window):
+        result.notes.append(
+            f"{device}: a transfer is in progress - showing whatever the list "
+            "currently displays"
+        )
+
+    if include_downloaded:
+        _unhide_downloaded(window, result.notes)
+
+    _click_named_button(window, "refresh list")
+    time.sleep(4)
+    _dismiss_blocking_dialogs(window, result.notes)
+
+    _, rows = _session_list(window)
+    seen: set[str] = set()
+    for i, row in enumerate(rows):
+        label = _session_row_label(row, i)
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        result.sessions.append(RemoteSession(label=label))
+    if not result.sessions:
+        result.notes.append(f"{device} connected: no sessions visible in the download list")
+
+
+def _session_row_label(row, index: int) -> str:
+    """Human-readable label for one custom-drawn session row.
+
+    Same OCR technique as the WiFi device picker's _row_label: these rows are
+    owner-drawn pixels, not accessible text (see _session_list). A row we
+    cannot read is still listed, just under a positional fallback name.
+    """
+    fallback = f"session #{index + 1}"
+    try:
+        import tempfile
+
+        from PIL import ImageGrab
+
+        rect = row.rectangle()
+        shot = ImageGrab.grab(
+            bbox=(rect.left, rect.top, rect.right, rect.bottom), all_screens=True
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "row.png"
+            shot.save(path)
+            text = _windows_ocr(path)
+        if not text:
+            return fallback
+        return " | ".join(line.strip() for line in text.splitlines() if line.strip()) or fallback
+    except Exception:  # noqa: BLE001
+        return fallback
 
 
 def _scroll_capture(window, ts: "_Troubleshoot") -> None:

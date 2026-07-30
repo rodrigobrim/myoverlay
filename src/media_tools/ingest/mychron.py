@@ -34,6 +34,10 @@ class XrkInfo:
     venue: str | None
     driver: str | None
     channels: list[str]
+    # Where start_utc came from: "gps" (authoritative - recovered from the
+    # session's own GPS records), "logger" (the MyChron clock, which wanders),
+    # or None when there was neither.
+    time_source: str | None = None
 
 
 @dataclass
@@ -105,14 +109,48 @@ def parse_xrk(path: Path, logger_tz: tzinfo) -> XrkInfo:
     ]
 
     meta = log.metadata or {}
+    start_utc = _parse_log_datetime(meta, logger_tz)
+    time_source = "logger" if start_utc is not None else None
+
+    # The MyChron clock wanders (2047 dates; days-off dates after a reset),
+    # so prefer the session's own GPS records: absolute GPS time minus the
+    # first GPS sample's session-relative timecode = true logging start.
+    gps_start = _gps_start_utc(path, log)
+    if gps_start is not None:
+        start_utc = gps_start
+        time_source = "gps"
+
     return XrkInfo(
-        start_utc=_parse_log_datetime(meta, logger_tz),
+        start_utc=start_utc,
         duration_s=duration_ms / 1000.0,
         laps=laps,
         venue=meta.get("Venue"),
         driver=meta.get("Driver"),
         channels=sorted(log.channels.keys()),
+        time_source=time_source,
     )
+
+
+def _gps_start_utc(path: Path, log) -> datetime | None:
+    """Logging-start UTC per the file's GPS records, or None without a fix."""
+    from ..gps_time import gps_first_fix_utc
+
+    try:
+        result = gps_first_fix_utc(path.read_bytes())
+    except OSError:
+        return None
+    if result is None:
+        return None
+    first_fix_utc, _aim_tc = result
+    # The first GPS record sits some seconds into the log (receiver warm-up):
+    # its session-relative timecode is the first entry of any GPS channel.
+    offset_ms = 0
+    for name in ("GPS Latitude", "GPS Longitude", "GPS Speed"):
+        table = log.channels.get(name)
+        if table is not None and len(table):
+            offset_ms = table.column("timecodes")[0].as_py()
+            break
+    return first_fix_utc - timedelta(milliseconds=offset_ms)
 
 
 def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[Path]:
