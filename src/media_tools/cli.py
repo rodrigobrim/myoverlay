@@ -14,9 +14,9 @@ from .config import Config, load_config
 from .library import Library
 
 app = typer.Typer(help="Zero-touch karting video + telemetry pipeline.", no_args_is_help=True)
-camera_app = typer.Typer(help="Camera SD-card utilities (list / selective download).", no_args_is_help=True)
+video_app = typer.Typer(help="Camera video utilities (list / selective download).", no_args_is_help=True)
 telemetry_app = typer.Typer(help="MyChron telemetry utilities (list / download).", no_args_is_help=True)
-app.add_typer(camera_app, name="camera")
+app.add_typer(video_app, name="video")
 app.add_typer(telemetry_app, name="telemetry")
 console = Console()
 
@@ -200,20 +200,72 @@ def _fmt_size(n: int) -> str:
     return f"{mb / 1000:.2f} GB" if mb >= 1000 else f"{mb:.1f} MB"
 
 
-@camera_app.command("list")
-def camera_list(
-    all_: Annotated[
-        bool, typer.Option("--all", help="Include videos already downloaded (default: only new)")
+video_list_app = typer.Typer(
+    help="List videos - remote (on the camera card, default), local (in the "
+    "library), or all (both, including already downloaded).",
+    invoke_without_command=True,
+)
+video_app.add_typer(video_list_app, name="list")
+
+
+@video_list_app.callback()
+def video_list_default(
+    ctx: typer.Context,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _video_list_remote(include_ingested=False, json_out=json_out)
+
+
+@video_list_app.command("remote")
+def video_list_remote(
     json_out: Annotated[
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List videos on the connected camera. Copies nothing."""
+    """List new videos on the connected camera. Copies nothing."""
+    _video_list_remote(include_ingested=False, json_out=json_out)
+
+
+@video_list_app.command("local")
+def video_list_local(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List videos already downloaded into the library."""
+    _video_list_local(json_out=json_out)
+
+
+@video_list_app.command("all")
+def video_list_all(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List everything: camera-card videos (including already-downloaded) and
+    the library's downloaded videos."""
+    if json_out:
+        from .scan import list_camera_videos, list_library_videos
+
+        cfg = get_config()
+        remote = list_camera_videos(cfg, include_ingested=True)
+        local = list_library_videos(cfg)
+        typer.echo(
+            f'{{"remote":{remote.model_dump_json()},"local":{local.model_dump_json()}}}'
+        )
+        return
+    _video_list_remote(include_ingested=True, json_out=False)
+    _video_list_local(json_out=False)
+
+
+def _video_list_remote(include_ingested: bool, json_out: bool) -> None:
     from .scan import list_camera_videos
 
     cfg = get_config()
-    result = list_camera_videos(cfg, include_ingested=all_)
+    result = list_camera_videos(cfg, include_ingested=include_ingested)
     if json_out:
         typer.echo(result.model_dump_json())
         return
@@ -222,7 +274,9 @@ def camera_list(
         console.print("[dim]no camera volume found[/dim]")
         return
     if not result.videos:
-        console.print("[dim]no new videos[/dim]" if not all_ else "[dim]no videos on camera[/dim]")
+        console.print(
+            "[dim]no videos on camera[/dim]" if include_ingested else "[dim]no new videos[/dim]"
+        )
         return
 
     camera_tz = cfg.camera.tzinfo()
@@ -242,55 +296,208 @@ def camera_list(
     console.print(table)
 
 
-@camera_app.command("get")
-def camera_get(
+def _video_list_local(json_out: bool) -> None:
+    from .scan import list_library_videos
+
+    cfg = get_config()
+    result = list_library_videos(cfg)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.videos:
+        console.print("[dim]no videos in the library[/dim]")
+        return
+
+    camera_tz = cfg.camera.tzinfo()
+    table = Table(title="library videos (local)")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("captured (local)")
+    table.add_column("day")
+    for v in result.videos:
+        table.add_row(
+            v.source_name,
+            _fmt_size(v.size_bytes),
+            v.start_utc.astimezone(camera_tz).strftime("%Y-%m-%d %H:%M:%S"),
+            v.day,
+        )
+    console.print(table)
+
+
+@video_app.command("get")
+def video_get(
     names: Annotated[
         Optional[list[str]],
-        typer.Argument(help="Video filenames from `mt camera list` (omit to download all new)"),
+        typer.Argument(
+            help="Video filenames from `mt video list`, or days (YYYY-MM-DD) to "
+            "download every file captured that day (omit to download all new)"
+        ),
     ] = None,
     force: Annotated[
         bool, typer.Option("--force", help="Re-download and refresh files already ingested")
     ] = False,
 ):
-    """Download videos from the camera into the library (all new, or only the named ones)."""
+    """Download videos from the camera into the library - all new, the named
+    files, or every file of the named days."""
     from .ingest.camera import ingest_camera
 
-    report = ingest_camera(get_config(), only_names=names or None, force=force)
+    cfg = get_config()
+    only_names, missing_days = _expand_video_days(cfg, names)
+    if missing_days:
+        console.print(f"[red]no videos on the camera for: {', '.join(missing_days)}[/red]")
+        raise typer.Exit(1)
+    report = ingest_camera(cfg, only_names=only_names, force=force)
     _print_ingest_report("camera", report)
     if report.requested_missing:
         console.print(f"[red]not found on camera: {', '.join(report.requested_missing)}[/red]")
         raise typer.Exit(1)
 
 
-@telemetry_app.command("list")
-def telemetry_list(
-    all_: Annotated[
-        bool, typer.Option("--all", help="Include sessions already ingested (default: only new)")
+def _expand_video_days(cfg: Config, names: list[str] | None):
+    """Expand day-shaped args (YYYY-MM-DD) into that day's camera filenames.
+
+    Returns (only_names_or_None, days_that_matched_nothing). Non-day args pass
+    through untouched; no args at all means "all new" (None).
+    """
+    if not names:
+        return None, []
+    from .scan import list_camera_videos
+
+    expanded: list[str] = []
+    days: list[date] = []
+    for n in names:
+        try:
+            days.append(date.fromisoformat(n))
+        except ValueError:
+            expanded.append(n)
+    missing: list[str] = []
+    if days:
+        camera_tz = cfg.camera.tzinfo()
+        on_card = list_camera_videos(cfg, include_ingested=True).videos
+        for d in days:
+            hits = [
+                v.source_name for v in on_card if v.start_utc.astimezone(camera_tz).date() == d
+            ]
+            if hits:
+                expanded.extend(hits)
+            else:
+                missing.append(d.isoformat())
+    return expanded, missing
+
+
+telemetry_list_app = typer.Typer(
+    help="List MyChron sessions - remote (on the device via RS3, default), "
+    "local (downloaded to disk), or all (both, including already handled).",
+    invoke_without_command=True,
+)
+telemetry_app.add_typer(telemetry_list_app, name="list")
+
+
+@telemetry_list_app.callback()
+def telemetry_list_default(
+    ctx: typer.Context,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+
+
+@telemetry_list_app.command("remote")
+def telemetry_list_remote(
     json_out: Annotated[
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List MyChron .xrk sessions in Race Studio 3's data dir. Copies nothing."""
+    """List MyChron sessions in Race Studio 3's app, on the connected device. Downloads nothing."""
+    _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+
+
+@telemetry_list_app.command("local")
+def telemetry_list_local(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List new MyChron .xrk sessions already downloaded to RS3's data dir. Copies nothing."""
+    _telemetry_list_local(include_ingested=False, json_out=json_out)
+
+
+@telemetry_list_app.command("all")
+def telemetry_list_all(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List everything: device sessions (including already-downloaded) and
+    local files (including already-ingested)."""
+    if json_out:
+        from .ingest.rs3 import list_remote_sessions
+        from .scan import list_telemetry_files
+
+        cfg = get_config()
+        remote = list_remote_sessions(cfg, include_downloaded=True)
+        local = list_telemetry_files(cfg, include_ingested=True)
+        typer.echo(
+            f'{{"remote":{remote.model_dump_json()},"local":{local.model_dump_json()}}}'
+        )
+        return
+    _telemetry_list_remote(include_downloaded=True, json_out=False)
+    _telemetry_list_local(include_ingested=True, json_out=False)
+
+
+def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
+    from .ingest.rs3 import list_remote_sessions
+
+    cfg = get_config()
+    result = list_remote_sessions(cfg, include_downloaded=include_downloaded)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    for note in result.notes:
+        style = "red" if note.startswith("!") else "dim"
+        console.print(note, style=style, markup=False)
+    if not result.sessions:
+        return
+
+    title = f"RS3 sessions ({result.device})" if result.device else "RS3 sessions"
+    table = Table(title=title)
+    table.add_column("session")
+    for s in result.sessions:
+        table.add_row(s.label)
+    console.print(table)
+
+
+def _telemetry_list_local(include_ingested: bool, json_out: bool) -> None:
     from .scan import list_telemetry_files
 
     cfg = get_config()
-    result = list_telemetry_files(cfg, include_ingested=all_)
+    result = list_telemetry_files(cfg, include_ingested=include_ingested)
     if json_out:
         typer.echo(result.model_dump_json())
         return
 
     if not result.files:
-        console.print("[dim]no new sessions[/dim]" if not all_ else "[dim]no sessions found[/dim]")
+        console.print(
+            "[dim]no sessions found[/dim]" if include_ingested else "[dim]no new sessions[/dim]"
+        )
         return
 
-    table = Table(title="mychron sessions")
+    mychron_tz = cfg.mychron.tzinfo()
+    table = Table(title="mychron sessions (local)")
     table.add_column("name")
     table.add_column("size", justify="right")
+    table.add_column("captured (local)")
     table.add_column("status")
     for f in result.files:
         status = "[green]new[/green]" if f.status == "new" else "[dim]ingested[/dim]"
-        table.add_row(f.source_name, _fmt_size(f.size_bytes), status)
+        captured = (
+            f.start_utc.astimezone(mychron_tz).strftime("%Y-%m-%d %H:%M:%S") if f.start_utc else "?"
+        )
+        table.add_row(f.source_name, _fmt_size(f.size_bytes), captured, status)
     console.print(table)
 
 
@@ -298,7 +505,7 @@ def telemetry_list(
 def telemetry_get(
     names: Annotated[
         Optional[list[str]],
-        typer.Argument(help="Session filenames from `mt telemetry list` (omit to download all new)"),
+        typer.Argument(help="Session filenames from `mt telemetry list local` (omit to download all new)"),
     ] = None,
     rs3: Annotated[
         bool,

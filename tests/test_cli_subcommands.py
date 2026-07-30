@@ -33,28 +33,50 @@ def cfg_with_card(tmp_path, monkeypatch):
     return cfg
 
 
-def test_camera_list_default_and_all(cfg_with_card):
-    r = runner.invoke(cli.app, ["camera", "list", "--json"])
+def test_video_list_remote_local_and_all(cfg_with_card):
+    r = runner.invoke(cli.app, ["video", "list", "--json"])
     assert r.exit_code == 0
     data = json.loads(r.stdout)
     assert len(data["videos"]) == 2
     assert all(v["status"] == "new" for v in data["videos"])
+    # Bare `video list` and `video list remote` are the same view.
+    remote = json.loads(runner.invoke(cli.app, ["video", "list", "remote", "--json"]).stdout)
+    assert remote == data
 
-    # Ingest one, then default listing hides it but --all shows it.
+    # Ingest one: default/remote hides it, `local` shows it, `all` shows both.
     camera.ingest_camera(cfg_with_card, only_names=["DJI_20260712141530_0001_D.MP4"])
-    default = json.loads(runner.invoke(cli.app, ["camera", "list", "--json"]).stdout)
+    default = json.loads(runner.invoke(cli.app, ["video", "list", "--json"]).stdout)
     assert [v["source_name"] for v in default["videos"]] == ["DJI_20260712145010_0002_D.MP4"]
-    everything = json.loads(runner.invoke(cli.app, ["camera", "list", "--all", "--json"]).stdout)
-    assert len(everything["videos"]) == 2
+    local = json.loads(runner.invoke(cli.app, ["video", "list", "local", "--json"]).stdout)
+    assert [v["source_name"] for v in local["videos"]] == ["DJI_20260712141530_0001_D.MP4"]
+    assert local["videos"][0]["day"] == "2026-07-12"
+    everything = json.loads(runner.invoke(cli.app, ["video", "list", "all", "--json"]).stdout)
+    assert len(everything["remote"]["videos"]) == 2
+    assert len(everything["local"]["videos"]) == 1
 
 
-def test_camera_get_all_then_missing(cfg_with_card):
-    r = runner.invoke(cli.app, ["camera", "get"])
+def test_video_get_all_then_missing(cfg_with_card):
+    r = runner.invoke(cli.app, ["video", "get"])
     assert r.exit_code == 0
 
-    r2 = runner.invoke(cli.app, ["camera", "get", "MISSING.MP4"])
+    r2 = runner.invoke(cli.app, ["video", "get", "MISSING.MP4"])
     assert r2.exit_code == 1
     assert "not found on camera" in r2.stdout
+
+
+def test_video_get_by_day(cfg_with_card):
+    # A day arg expands to every file captured that day.
+    r = runner.invoke(cli.app, ["video", "get", "2026-07-12"])
+    assert r.exit_code == 0
+    from media_tools.library import Library
+
+    lib = Library(cfg_with_card.library_root)
+    assert len(lib.known_videos()) == 2
+
+    # A day with nothing on the card is an explicit error, not a silent no-op.
+    r2 = runner.invoke(cli.app, ["video", "get", "1999-01-01"])
+    assert r2.exit_code == 1
+    assert "no videos on the camera for" in r2.stdout
 
 
 def test_telemetry_get_drives_rs3_and_ingests(cfg_with_card, monkeypatch):
