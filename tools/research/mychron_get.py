@@ -104,10 +104,10 @@ class Downloader(MyChron):
             if progress and size:
                 progress(written, size, time.monotonic() - started)
 
-            # The ack is what asks for the next chunk, so the completing
-            # chunk must NOT be acked - otherwise the device keeps sending
-            # and the connection is left mid-transfer, which resets the
-            # next getFile. RS3 goes straight to its next command here.
+            # The 4-byte frame is not an acknowledgement - it is a cursor
+            # saying how many bytes we already hold, and the device resumes
+            # from there. Sending zero every time leaves it guessing, so it
+            # pads the final chunk instead of sending the true remainder.
             if size is not None and written >= size:
                 break
             if size is None and written > MAX_UNANNOUNCED:
@@ -115,7 +115,7 @@ class Downloader(MyChron):
                     "no size header seen and the stream keeps going - "
                     "aborting instead of writing an unbounded file")
 
-            self._send(b"STCP", ACK4)
+            self._send(b"STCP", struct.pack("<I", written))
 
         return size, written
 
