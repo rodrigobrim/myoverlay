@@ -11,6 +11,8 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ("vendor/git", "git"),
     ("vendor/ffmpeg", "ffmpeg"),
+    # GPL-3.0 requires every recipient of a binary to get the license text.
+    ("../LICENSE", "."),
 ]
 binaries = []
 hiddenimports = []
