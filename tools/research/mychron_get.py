@@ -93,18 +93,21 @@ class Downloader(MyChron):
             if len(body) <= 4:
                 continue
 
-            # Payload chunk: 4-byte prefix, then data. The device pads the
-            # final chunk out to the full chunk size, so trim it to the
-            # announced length or the file ends up a chunk-boundary too long.
+            # Payload chunk: 4-byte prefix, then data. The final chunk is
+            # short rather than padded. Trim anyway as a guard.
             data = body[4:]
             if size is not None:
                 data = data[:max(0, size - written)]
             fh.write(data)
             written += len(data)
-            self._send(b"STCP", ACK4)
 
             if progress and size:
                 progress(written, size, time.monotonic() - started)
+
+            # The ack is what asks for the next chunk, so the completing
+            # chunk must NOT be acked - otherwise the device keeps sending
+            # and the connection is left mid-transfer, which resets the
+            # next getFile. RS3 goes straight to its next command here.
             if size is not None and written >= size:
                 break
             if size is None and written > MAX_UNANNOUNCED:
@@ -112,9 +115,8 @@ class Downloader(MyChron):
                     "no size header seen and the stream keeps going - "
                     "aborting instead of writing an unbounded file")
 
-        # Leave the connection clean so the next fetch starts on a frame
-        # boundary rather than mid-transfer.
-        self._drain()
+            self._send(b"STCP", ACK4)
+
         return size, written
 
 
