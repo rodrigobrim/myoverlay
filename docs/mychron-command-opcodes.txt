@@ -1,0 +1,112 @@
+﻿634 candidate command call sites
+109 distinct opcodes
+
+  0x00000001 (       1)  x  9  
+  0x00000002 (       2)  x  9  CStrumentoMXL2::DbgReset
+  0x00000003 (       3)  x  6  CStrumentoMXL2::DbgCommand
+  0x00000004 (       4)  x  1  CStrumentoMXL2::DbgPolling
+  0x00000005 (       5)  x  3  CStrumento2G::DbgProvaTimeout
+  0x00000008 (       8)  x  1  CStrumento2G::DbgDisplayDump
+  0x00000009 (       9)  x  1  CStrumentoMXL2::showLogo
+  0x00000020 (      32)  x  1  CStrumento2G::DbgRemoveDemo
+  0x00000030 (      48)  x  1  
+  0x00000400 (    1024)  x  7  IAiMHTTPv1::ScaricaFile, IAiMHTTPv1::ScaricaStringa, IAiMHTTPv1::doPOST, IAiMHTTPv1::doPUT
+  0x0000ffff (   65535)  x  4  
+  0x00010001 (   65537)  x  1  CStrumentoDaIdentificare::SetIdentificazione
+  0x00010002 (   65538)  x  4  CConnessioneTcp::IdentificaRete, CConnessioneUSB::IdentificaRete, CStrumento2G::GetIdentificazioneDevice, CStrumento2G::SetIdentificazioneDevice
+  0x00010006 (   65542)  x  2  CConnessione::impostaDataOra, CConnessione::leggiDataOra
+  0x00010008 (   65544)  x  1  CStrumentoDaIdentificare::GetIdentificazioneHwInfo
+  0x00010009 (   65545)  x  1  CStrumentoDaIdentificare::SetIdentificazioneHwInfo
+  0x00010010 (   65552)  x  1  CConnessione::InviaCmdLcyIdentitissima
+  0x00010012 (   65554)  x  1  CStrumento2G::DbgTrovaDevice
+  0x00020002 (  131074)  x  1  CStrumento2G::getLiveMeasuresAvailable
+  0x00020003 (  131075)  x  1  CStrumento2G::getLiveMeasuresValori
+  0x00020004 (  131076)  x  1  CStrumento2G::getLiveMeasuresValoriRaw
+  0x00020005 (  131077)  x  1  CStrumento2G::getMediaStatus
+  0x00020009 (  131081)  x  1  CStrumento2G::getLiveMeasuresAvailable
+  0x00020020 (  131104)  x  2  CStrumentoMXL2::DbgStartMeasuresRecording, CStrumentoSmarty3::DbgStartMeasuresRecording
+  0x00020021 (  131105)  x  2  CStrumentoMXL2::DbgStopMeasuresRecording, CStrumentoSmarty3::DbgStopMeasuresRecording
+  0x00020024 (  131108)  x  1  CStrumentoMXL2::leggiSummaryFilesRegistrati
+  0x00020040 (  131136)  x  2  CStrumentoMXL2::setBusyPerSw, CStrumentoMXL2::setFreePerSw
+  0x00020051 (  131153)  x  2  CStrumentoMXL2::suLiveMeasuresFine, CStrumentoSmarty3::suLiveMeasuresFine
+  0x00020052 (  131154)  x  4  CStrumentoMXL2::suLiveMeasuresSetVal, CStrumentoSmarty3::suLiveMeasuresSetVal
+  0x00020053 (  131155)  x  2  CStrumentoMXL2::suLiveMeasuresGetList, CStrumentoSmarty3::suLiveMeasuresGetList
+  0x00020054 (  131156)  x  4  CStrumentoMXL2::suLiveMeasuresSetAllVal, CStrumentoSmarty3::suLiveMeasuresSetAllVal
+  0x00020055 (  131157)  x  2  CStrumentoMXL2::suLiveMeasuresSetGPS, CStrumentoSmarty3::suLiveMeasuresSetGPS
+  0x00020056 (  131158)  x  1  CStrumento2G::getLiveMeasuresValoriSats
+  0x00020110 (  131344)  x  1  CStrumento2G::getCanSnifferCfg
+  0x00020111 (  131345)  x  1  CStrumento2G::getCanSnifferFrames
+  0x00020112 (  131346)  x  1  CStrumento2G::getCanSnifferStatsAndInfo
+  0x00030020 (  196640)  x  1  CStrumentoMXL2::attualizzaPisteTkk
+  0x00040001 (  262145)  x  1  CStrumentoMXL2::DbgSetFileForSlave
+  0x00040002 (  262146)  x  1  CStrumentoMXL2::DbgGetFileForSlave
+  0x00040003 (  262147)  x  2  CStrumentoMXL2::caricaMulti, CStrumentoMXL2::scriviPisteTkk_v2
+  0x00040004 (  262148)  x  3  CStrumentoMXL2::caricaMulti, CStrumentoMXL2::scriviPisteTkk_v2
+  0x00040005 (  262149)  x  1  CStrumentoMXL2::leggiPropFiles
+  0x00040006 (  262150)  x  2  CStrumento2G::DbgDelFile
+  0x00040007 (  262151)  x  2  CStrumentoMXL2::DbgDelDir, CStrumentoMXL2::removeDir
+  0x00040008 (  262152)  x  2  CStrumentoMXL2::delDirContent, CStrumentoMXL2::delDirContentPerFirmup
+  0x00040009 (  262153)  x  1  CStrumentoMXL2::DbgFormatMedia
+  0x0004000d (  262157)  x  1  CStrumentoMXL2::DbgFormatDati
+  0x0004000e (  262158)  x  1  CStrumentoMXL2::leggiPropFilesAbsTree
+  0x00040017 (  262167)  x  1  CStrumentoMXL2::DbgDelDir
+  0x00040018 (  262168)  x  1  CStrumentoMXL2::DbgDelDir
+  0x00040019 (  262169)  x  2  CStrumentoMXL2::leggiPropFiles, CStrumentoMXL2::leggiPropFilesAbsTree
+  0x0004001a (  262170)  x  2  CStrumentoMXL2::leggiPropFiles, CStrumentoMXL2::leggiPropFilesAbsTree
+  0x00040140 (  262464)  x  2  CStrumentoMXL2::getPath, CStrumentoSmarty3::getPath
+  0x00050001 (  327681)  x  1  CStrumentoMXL2::Firmup1stCore
+  0x00050002 (  327682)  x  1  CStrumentoMXL2::Firmup1stCore
+  0x00050003 (  327683)  x  1  
+  0x00050011 (  327697)  x  2  CStrumentoMXL2::Firmup2ndCoreDfu, CStrumentoMXL2::Firmup2ndCoreMhx
+  0x00050012 (  327698)  x  2  CStrumentoMXL2::Firmup2ndCoreDfu, CStrumentoMXL2::Firmup2ndCoreMhx
+  0x00050023 (  327715)  x  1  
+  0x00050024 (  327716)  x  1  
+  0x00050025 (  327717)  x  1  
+  0x00051000 (  331776)  x  3  CStrumentoMXL2::Firmup1stCore, CStrumentoMXL2::eraseFirmware, CStrumentoSmarty3::firmup
+  0x00051002 (  331778)  x  2  CStrumentoMXL2::Firmup2ndCoreDfu, CStrumentoMXL2::Firmup2ndCoreMhx
+  0x00051003 (  331779)  x  1  
+  0x00060002 (  393218)  x  1  CStrumentoMXL2::scriviCfgECUstream
+  0x00060007 (  393223)  x  1  CStrumentoMXL2::scriviCfgECUstream
+  0x00060020 (  393248)  x  1  CStrumentoMXL2::DbgLeggiInfoECU
+  0x00060023 (  393251)  x  3  
+  0x00060024 (  393252)  x  1  CStrumentoMXL2::leggiOdometers
+  0x00060025 (  393253)  x  1  
+  0x00060027 (  393255)  x  4  CStrumentoMXL2::scriviUserInfo
+  0x00060028 (  393256)  x  1  CStrumentoMXL2::leggiOdometers_Extra
+  0x00060029 (  393257)  x  1  
+  0x00060100 (  393472)  x  1  CStrumentoMXL2::attualizzaFeatureScritte
+  0x00060101 (  393473)  x  1  CStrumentoMXL2::attualizzaLogo
+  0x00060102 (  393474)  x  2  CStrumentoSmarty3::attualizzaPisteTkk
+  0x00060104 (  393476)  x  1  CStrumentoSpansionNoFileSystem::leggiCfgSoftware
+  0x00060106 (  393478)  x  1  CStrumentoSpansionNoFileSystem::leggiCfgSoftware
+  0x0006010a (  393482)  x  1  CStrumentoSpansionNoFileSystem::leggiCfgSoftware
+  0x0006010c (  393484)  x  1  CStrumentoSpansionNoFileSystem::leggiCfgSoftware
+  0x00080001 (  524289)  x  1  CStrumentoMXL2::calibrationStart
+  0x00080002 (  524290)  x  1  CStrumentoMXL2::calibrationGetVal
+  0x00080003 (  524291)  x  1  CStrumentoMXL2::calibrationReverse
+  0x00080004 (  524292)  x  1  CStrumentoMXL2::calibrationStartGear
+  0x00080005 (  524293)  x  1  CStrumentoMXL2::calibrationGetValGear
+  0x00080006 (  524294)  x  1  CStrumentoMXL2::calibrationSetValGear
+  0x00080007 (  524295)  x  1  CStrumentoMXL2::calibrationEndOK
+  0x00080008 (  524296)  x  1  CStrumentoMXL2::calibrationAbort
+  0x00080010 (  524304)  x  1  CStrumentoMXL2::calibrationUseOldGears
+  0x0008001a (  524314)  x  1  CStrumentoMXL2::calibrationSetMin
+  0x0008001b (  524315)  x  1  CStrumentoMXL2::calibrationSetMax
+  0x0008001c (  524316)  x  1  CStrumentoMXL2::calibrationReverseGiaCalibrato
+  0x0008001e (  524318)  x  1  CStrumentoMXL2::calibrationSetMin
+  0x0008001f (  524319)  x  1  CStrumentoMXL2::calibrationSetMax
+  0x00080021 (  524321)  x  2  CStrumentoMXL2::calibrationAutoCalVal
+  0x00080022 (  524322)  x  1  CStrumentoMXL2::calibrationAutoCalVal
+  0x00080023 (  524323)  x  1  
+  0x00090011 (  589841)  x  2  CStrumentoMXL2::suLiveMeasuresTriggerLap, CStrumentoSmarty3::suLiveMeasuresTriggerLap
+  0x000b0007 (  720903)  x  3  CStrumentoMXL2::attualizzaLogo, CStrumentoMXL2::showLogo, CStrumentoSpansionNoFileSystem_Remoted::TxComandoForwardato
+  0x000b0008 (  720904)  x  1  CStrumentoMXL2::DbgSetFileForSlave
+  0x000b0022 (  720930)  x  1  CStrumentoMXL2::DbgGetFileForSlave
+  0x000c0005 (  786437)  x  1  CStrumentoMXL2::DbgResetWiFi
+  0x000f0002 (  983042)  x  1  
+  0x000f0003 (  983043)  x  1  
+  0x00110002 ( 1114114)  x  1  CStrumentoSmarty3::firmup
+  0x00110008 ( 1114120)  x  1  
+  0x00120003 ( 1179651)  x  1  CStrumentoDaIdentificare::DbgEseguiSetBluetoothSerialID
+  0x00120004 ( 1179652)  x  1  CStrumentoDaIdentificare::DbgEseguiScansioneBluetooth
+  0x00120005 ( 1179653)  x  1  CStrumentoDaIdentificare::DbgEseguiScansioneBluetooth
