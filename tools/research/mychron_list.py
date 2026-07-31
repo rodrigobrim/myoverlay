@@ -40,7 +40,7 @@ import socket
 import struct
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 DEFAULT_HOST = "10.0.0.1"
 DEFAULT_PORT = 2000
@@ -79,12 +79,20 @@ def command_body(opcode: int, arg: bytes = b"", f16: int = 0, f24: int = 1) -> b
 
 
 def timestamp_body() -> bytes:
-    """68-byte frame carrying the PC clock; the device waits for it."""
-    now = datetime.now()
+    """68-byte frame carrying the PC clock; the device waits for it.
+
+    It holds TWO y/m/d/h/m records and they are not the same clock. In the
+    captured RS3 exchange they were 14:38 at +12 and 11:38 at +44 - exactly
+    the UTC-3 offset of the machine that produced it. So +12 is UTC and +44
+    is local. Writing local time into both (as an earlier version did) puts
+    a wrong UTC in front of a device that may discipline its clock from it.
+    """
+    utc = datetime.now(timezone.utc)
+    local = datetime.now()
     body = bytearray(68)
-    for base in (12, 44):
+    for base, t in ((12, utc), (44, local)):
         struct.pack_into("<IIIII", body, base,
-                         now.year, now.month, now.day, now.hour, now.minute)
+                         t.year, t.month, t.day, t.hour, t.minute)
     return bytes(body)
 
 
