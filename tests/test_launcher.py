@@ -197,6 +197,68 @@ def test_branch_option_runs_local_only_branch_untouched(tmp_path, origin):
     assert (repo / "file.txt").read_text() == "unmerged work\n"
 
 
+def test_bare_run_returns_a_branched_clone_to_the_default_branch(tmp_path, origin):
+    """--branch is sticky, so a later run WITHOUT it must come back to main -
+    otherwise the clone pulls that branch forever while reporting itself up to
+    date, which is staleness that announces itself as current."""
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    git(["checkout", "-qb", "feature"], origin)
+    (origin / "file.txt").write_text("feature\n")
+    git(["commit", "-qam", "feature"], origin)
+    git(["checkout", "-q", "main"], origin)
+
+    repo = tmp_path / "clone"
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="feature")
+    assert (repo / "file.txt").read_text() == "feature\n"
+
+    # main moves on; a bare run must land there, not on the stale branch.
+    (origin / "file.txt").write_text("v2\n")
+    git(["commit", "-qam", "v2"], origin)
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False)
+    assert git(["branch", "--show-current"], repo).stdout.strip() == "main"
+    assert (repo / "file.txt").read_text() == "v2\n"
+
+
+def test_returning_to_default_branch_stashes_local_edits(tmp_path, origin):
+    """Local edits that block the switch are stashed, not destroyed."""
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    git(["checkout", "-qb", "feature"], origin)
+    (origin / "file.txt").write_text("feature\n")
+    git(["commit", "-qam", "feature"], origin)
+    git(["checkout", "-q", "main"], origin)
+
+    repo = tmp_path / "clone"
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="feature")
+    # A dirty file that differs between the branches: checkout main refuses.
+    (repo / "file.txt").write_text("precious local edit\n")
+
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False)
+
+    assert git(["branch", "--show-current"], repo).stdout.strip() == "main"
+    assert (repo / "file.txt").read_text() == "v1\n"
+    # The edit is recoverable, which is the whole point of stashing over reset.
+    assert "myoverlay" in git(["stash", "list"], repo).stdout
+    git(["checkout", "-q", "feature"], repo)
+    git(["stash", "pop"], repo)
+    assert (repo / "file.txt").read_text() == "precious local edit\n"
+
+
+def test_dev_checkout_branch_is_never_switched(tmp_path, origin):
+    """The branch of an unmanaged checkout is the developer's business."""
+    mod = load_launcher()
+    git_exe = Path(shutil.which("git"))
+    repo = tmp_path / "devcheckout"
+    git(["clone", "-q", str(origin), str(repo)], tmp_path)
+    git(["config", "user.email", "t@t"], repo)
+    git(["config", "user.name", "t"], repo)
+    git(["checkout", "-qb", "my-feature"], repo)
+
+    mod.ensure_repo(git_exe, repo, str(origin), skip_update=False)
+    assert git(["branch", "--show-current"], repo).stdout.strip() == "my-feature"
+
+
 def test_branch_option_unknown_branch_exits(tmp_path, origin):
     mod = load_launcher()
     git_exe = Path(shutil.which("git"))
