@@ -278,10 +278,21 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
                     _automated_pass(pw, cfg, project, profile_dir, report, ts)
                     break
                 except _NeedsLogin:
-                    if attempt == 2 or not _manual_login(profile_dir, report):
+                    # Two distinct dead ends, two distinct messages: after the
+                    # second bounce NO window opens, so the old "sign in once in
+                    # the window that opens" read as an instruction about a
+                    # window that was never coming.
+                    if attempt == 2:
                         report.append(
-                            "! still not signed in - sign in once in the window that "
-                            "opens, close it, then re-run `mt google-setup`"
+                            "! the Console still bounces to sign-in after the login "
+                            "handoff - re-run `mt google-setup` and finish the sign-in "
+                            "in the window it opens (it closes itself once the Cloud "
+                            "Console loads)"
+                        )
+                        break
+                    if not _manual_login(profile_dir, report):
+                        report.append(
+                            "! sign-in did not complete - re-run `mt google-setup`"
                         )
                         break
     except Exception as exc:  # noqa: BLE001 - never kill the caller
@@ -489,7 +500,12 @@ def _console_window_open(profile_dir: Path) -> bool:
         if n:
             buf = ctypes.create_unicode_buffer(n + 1)
             user32.GetWindowTextW(hwnd, buf, n + 1)
-            if "google cloud" in buf.value.lower():
+            # Match the CONSOLE title exactly ("... - Google Cloud console"),
+            # never a bare "google cloud": the sign-in page carries the
+            # destination's branding ("Google Cloud Platform"), so the loose
+            # match fired mid-login and killed the window before the password
+            # step - leaving a profile with __Host-GAPS and no session cookie.
+            if "google cloud console" in buf.value.lower():
                 hit = True
                 return False  # stop enumerating
         return True
