@@ -169,10 +169,6 @@
         <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_DEPB_DESC]" />
         <Control Id="MissingList" Type="Text" X="40" Y="60" Width="305" Height="48" NoPrefix="yes" Text="[DEPS_BLOCKING_LIST]" />
         <Control Id="Explain" Type="Text" X="25" Y="116" Width="320" Height="56" NoPrefix="yes" Text="[P_DEPB_EXPLAIN]" />
-        <Control Id="Rs3Note" Type="Text" X="25" Y="176" Width="320" Height="40" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_DEPS_RS3_NOTE]">
-          <Condition Action="hide">DEP_RS3_FOUND</Condition>
-          <Condition Action="show">NOT DEP_RS3_FOUND</Condition>
-        </Control>
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Default="yes" Text="[P_BACK]" />
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="[P_CANCELB]">

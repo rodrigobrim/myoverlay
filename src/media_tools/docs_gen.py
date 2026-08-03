@@ -59,7 +59,7 @@ def _options_table(options: list) -> list[str]:
     lines = ["| Option | Default | Description |", "| --- | --- | --- |"]
     for p in options:
         names = ", ".join(f"`{o}`" for o in p.opts)
-        if p.secondary_opts:  # boolean flag pair, e.g. --rs3 / --no-rs3
+        if p.secondary_opts:  # boolean flag pair, e.g. --download / --no-download
             names += " / " + ", ".join(f"`{o}`" for o in p.secondary_opts)
         lines.append(f"| {names} | {_cell(_format_default(p))} | {_cell(p.help)} |")
     return lines

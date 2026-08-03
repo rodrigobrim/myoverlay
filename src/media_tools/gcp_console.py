@@ -3,9 +3,8 @@
 Google exposes no API to configure an OAuth consent screen or create a
 Desktop OAuth client for a personal (no-organization) account - the
 `iap oauth-brands` API is org-only and the shared gcloud/ADC client blocks
-the YouTube scope. So, exactly like the Race Studio 3 situation (rs3.py),
-the only zero-touch path is driving the vendor's own UI. This module drives
-the Cloud Console with Playwright and mirrors rs3.py's philosophy: every
+the YouTube scope. So the only zero-touch path is driving the vendor's own
+UI. This module drives the Cloud Console with Playwright; every
 step is defensive, any failure is reported as text (never raised), and a
 troubleshoot mode snapshots each step so the procedure can be refined when
 Google shifts the UI.
@@ -62,7 +61,7 @@ class _NeedsLogin(Exception):
 
 class _Shoot:
     """Numbered per-step screenshots into <library_root>/gcp_troubleshoot/,
-    same contract as rs3._Troubleshoot: capture everything, break nothing."""
+    contract: capture everything, break nothing."""
 
     def __init__(self, cfg: Config, enabled: bool) -> None:
         self.enabled = enabled
@@ -86,7 +85,7 @@ class _Shoot:
             pass
 
     def dump_html(self, page, name: str) -> None:
-        """The web equivalent of rs3's control-tree dump: the live DOM, for
+        """A control-tree dump, web edition: the live DOM, for
         working out the real element behind a control a screenshot can't
         disambiguate."""
         if not self.enabled:
@@ -828,7 +827,7 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
     return False
 
 
-# --- small defensive helpers (the rs3.py "click named control" idiom) -------
+# --- small defensive helpers (the "click named control" idiom) --------------
 
 
 def _dismiss_overlays(page) -> None:

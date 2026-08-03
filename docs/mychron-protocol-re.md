@@ -1,12 +1,13 @@
 # MyChron6 direct download — protocol reverse-engineering notes
 
-Goal: pull session data off the MyChron6 without driving the Race Studio 3 GUI,
-replacing `src/media_tools/ingest/rs3.py` with a direct client.
+Goal: pull session data off the MyChron6 without driving the Race Studio 3 GUI.
 
-Status: **done for the MyChron6, over both transports.** A working client
-lives in `tools/research/aim/`; run it with `tools/research/mychron.py`. It
-lists sessions and downloads them with no AiM software involved, over USB or
-WiFi, without admin rights.
+Status: **done for the MyChron6, over both transports — and shipped.** The
+client lives in `src/media_tools/aim/` and backs `mt telemetry list` /
+`mt telemetry get` (via `src/media_tools/ingest/aim.py`). It lists sessions
+and downloads them with no AiM software involved, over USB or WiFi, without
+admin rights. The RS3 GUI automation it replaced has been removed from the
+repo.
 
 The protocol was recovered from three sources: static analysis of
 `C:\AIM_SPORT\RaceStudio3\64\AiMRS3-64-ReleaseU.exe`, a Wireshark/Npcap
@@ -143,4 +144,4 @@ access point.
 The clean way to extend this is to identify the device first —
 `CStrumentoDaIdentificare` is literally RS3's "device to be identified" class,
 and the `aim-ka` descriptor already carries a family field — then dispatch to a
-per-model package under `tools/research/aim/`.
+per-model package under `src/media_tools/aim/`.

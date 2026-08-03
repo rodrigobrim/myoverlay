@@ -60,33 +60,6 @@ def get_config() -> Config:
         raise typer.Exit(2)
 
 
-def _console_ask(question: str, options: list[str]) -> int | None:
-    """Ask the operator to pick one of `options`; None when they decline.
-
-    Returns None immediately when stdin is not a console - the pipeline also
-    runs from a scheduled task, where a prompt would hang the run forever.
-    """
-    import sys
-
-    if not sys.stdin or not sys.stdin.isatty():
-        return None
-    console.print(f"  [bold]{question}[/bold]")
-    for i, option in enumerate(options, 1):
-        console.print(f"    {i}) {option}")
-    try:
-        answer = typer.prompt("  choice (empty to skip)", default="", show_default=False)
-    # isatty() can still be True with nothing on stdin (a background/detached
-    # run): click then raises Abort on EOF, which must read as "no answer",
-    # not as a failed RS3 attempt.
-    except (EOFError, KeyboardInterrupt, typer.Abort):
-        return None
-    answer = (answer or "").strip()
-    if not answer.isdigit():
-        return None
-    idx = int(answer) - 1
-    return idx if 0 <= idx < len(options) else None
-
-
 def _print_ingest_report(name: str, report) -> None:
     console.print(f"[bold]{name}[/bold]: scanned {len(report.sources_scanned)} source(s)")
     for line in report.copied:
@@ -104,24 +77,9 @@ def ingest(
     source: Annotated[
         str, typer.Option(help="Which sources to ingest: all, camera, mychron")
     ] = "all",
-    rs3: Annotated[
+    device: Annotated[
         bool,
-        typer.Option("--rs3", help="First drive Race Studio 3 to download from the MyChron"),
-    ] = False,
-    rs3_only: Annotated[
-        bool,
-        typer.Option(
-            "--rs3-only",
-            help="Only drive the Race Studio 3 download; skip camera/mychron file ingest",
-        ),
-    ] = False,
-    troubleshoot: Annotated[
-        bool,
-        typer.Option(
-            "--troubleshoot",
-            help="RS3 diagnostics (implies --rs3-only): snapshot every step, dump the "
-            "control tree, unhide already-downloaded sessions, scroll the list, 30s waits",
-        ),
+        typer.Option("--device", help="First download new sessions off the MyChron (USB or WiFi)"),
     ] = False,
     force: Annotated[
         bool,
@@ -130,22 +88,8 @@ def ingest(
 ):
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
-    if rs3 or rs3_only or troubleshoot:
-        from .ingest.rs3 import trigger_rs3_download
-
-        console.print("[bold]rs3[/bold]:")
-        # echo streams each line the moment it happens - the flow can run for
-        # many minutes (app cold start, device transfer) and buffered output
-        # reads as a silent hang.
-        trigger_rs3_download(
-            cfg,
-            troubleshoot=troubleshoot,
-            echo=lambda line: console.print(f"  {line}", markup=False),
-            ask=_console_ask,
-        )
-    if rs3_only or troubleshoot:
-        # RS-download-only: never touch camera/mychron ingest (and never render).
-        return
+    if device:
+        _device_download(cfg, names=None, force=False)
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 
@@ -387,7 +331,7 @@ def _expand_video_days(cfg: Config, names: list[str] | None):
 
 
 telemetry_list_app = typer.Typer(
-    help="List MyChron sessions - remote (on the device via RS3, default), "
+    help="List MyChron sessions - remote (on the device, over USB/WiFi, default), "
     "local (downloaded to disk), or all (both, including already handled).",
     invoke_without_command=True,
 )
@@ -411,7 +355,7 @@ def telemetry_list_remote(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List MyChron sessions in Race Studio 3's app, on the connected device. Downloads nothing."""
+    """List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing."""
     _telemetry_list_remote(include_downloaded=False, json_out=json_out)
 
 
@@ -421,7 +365,7 @@ def telemetry_list_local(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List new MyChron .xrk sessions already downloaded to RS3's data dir. Copies nothing."""
+    """List new MyChron .xrk sessions already downloaded to disk. Copies nothing."""
     _telemetry_list_local(include_ingested=False, json_out=json_out)
 
 
@@ -434,7 +378,7 @@ def telemetry_list_all(
     """List everything: device sessions (including already-downloaded) and
     local files (including already-ingested)."""
     if json_out:
-        from .ingest.rs3 import list_remote_sessions
+        from .ingest.aim import list_remote_sessions
         from .scan import list_telemetry_files
 
         cfg = get_config()
@@ -449,7 +393,7 @@ def telemetry_list_all(
 
 
 def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
-    from .ingest.rs3 import list_remote_sessions
+    from .ingest.aim import list_remote_sessions
 
     cfg = get_config()
     result = list_remote_sessions(cfg, include_downloaded=include_downloaded)
@@ -461,13 +405,21 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
         style = "red" if note.startswith("!") else "dim"
         console.print(note, style=style, markup=False)
     if not result.sessions:
+        if result.transport:
+            console.print("[dim]no new sessions on the device[/dim]")
         return
 
-    title = f"RS3 sessions ({result.device})" if result.device else "RS3 sessions"
+    title = f"MyChron sessions ({result.transport})" if result.transport else "MyChron sessions"
     table = Table(title=title)
     table.add_column("session")
+    table.add_column("size", justify="right")
+    if include_downloaded:
+        table.add_column("status")
     for s in result.sessions:
-        table.add_row(s.label)
+        row = [s.name, _fmt_size(s.size_bytes) if s.size_bytes is not None else "?"]
+        if include_downloaded:
+            row.append("[dim]downloaded[/dim]" if s.downloaded else "[green]new[/green]")
+        table.add_row(*row)
     console.print(table)
 
 
@@ -501,49 +453,90 @@ def _telemetry_list_local(include_ingested: bool, json_out: bool) -> None:
     console.print(table)
 
 
+def _device_download(cfg, names: Optional[list[str]], force: bool):
+    """Pull sessions off the MyChron, streaming per-file progress lines."""
+    import sys
+
+    from .ingest.aim import download_sessions
+
+    console.print("[bold]mychron[/bold] (device):")
+
+    def progress(name: str, done: int, total: int) -> None:
+        # In-flight progress only where a human is watching; a scheduled run
+        # must not fill the log with carriage returns.
+        if sys.stderr.isatty():
+            sys.stderr.write(f"\r  {name}  {done:>10,} / {total:,}")
+            sys.stderr.flush()
+            if done >= total:
+                sys.stderr.write("\n")
+
+    report = download_sessions(
+        cfg,
+        names=names,
+        force=force,
+        echo=lambda line: console.print(f"  {line}", markup=False),
+        progress=progress,
+    )
+    if report.skipped_existing:
+        console.print(f"  [dim]{report.skipped_existing} session(s) already downloaded[/dim]")
+    for n in report.missing:
+        console.print(f"  [red]not on the device: {n}[/red]")
+    for e in report.errors:
+        console.print(f"  [red]! {e}[/red]", markup=False)
+    return report
+
+
 @telemetry_app.command("get")
 def telemetry_get(
     names: Annotated[
         Optional[list[str]],
-        typer.Argument(help="Session filenames from `mt telemetry list local` (omit to download all new)"),
+        typer.Argument(
+            help="Session names from `mt telemetry list` (omit to download all new sessions)"
+        ),
     ] = None,
-    rs3: Annotated[
-        bool,
-        typer.Option("--rs3/--no-rs3", help="First drive Race Studio 3 to pull sessions off the MyChron"),
-    ] = True,
-    troubleshoot: Annotated[
-        bool, typer.Option("--troubleshoot", help="RS3 diagnostics; skips the file ingest step")
-    ] = False,
-    force: Annotated[
+    download: Annotated[
         bool,
         typer.Option(
-            "--force",
-            help="Re-ingest files already downloaded (only files already on disk; RS3 hides "
-            "sessions already pulled off the device)",
+            "--download/--no-download",
+            help="Pull sessions off the MyChron (USB or WiFi) before ingesting; "
+            "--no-download only ingests files already on disk",
         ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Re-download and re-ingest sessions already handled"),
     ] = False,
 ):
-    """Download MyChron sessions via Race Studio 3 and ingest them. No camera involvement."""
-    cfg = get_config()
-    if rs3 or troubleshoot:
-        from .ingest.rs3 import trigger_rs3_download
+    """Download MyChron sessions off the device and ingest them. No camera involvement."""
+    from pathlib import Path as P
 
-        console.print("[bold]rs3[/bold]:")
-        trigger_rs3_download(
-            cfg,
-            troubleshoot=troubleshoot,
-            echo=lambda line: console.print(f"  {line}", markup=False),
-            ask=_console_ask,
-        )
-    if troubleshoot:
-        return
+    cfg = get_config()
+    only_names = names or None
+    failed = False
+    if download:
+        report = _device_download(cfg, names=names or None, force=force)
+        failed = bool(report.errors or report.missing)
+        if names:
+            # Device names (a_0186.xrz) become local .xrk files on download;
+            # ingest filters by the on-disk names.
+            only_names = [P(p).name for p in report.downloaded] or None
+            if only_names is None:
+                # Nothing newly downloaded for the requested names (already on
+                # disk, or all failed): fall back to the local-name filter so
+                # `telemetry get <name>` still re-ingests with --force. A
+                # device name (.xrz) maps to the .xrk its download produced.
+                only_names = [
+                    P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in names
+                ]
 
     from .ingest.mychron import ingest_mychron
 
-    report = ingest_mychron(cfg, only_names=names or None, force=force)
+    report = ingest_mychron(cfg, only_names=only_names, force=force)
     _print_ingest_report("mychron", report)
     if report.requested_missing:
         console.print(f"[red]not found: {', '.join(report.requested_missing)}[/red]")
+        raise typer.Exit(1)
+    if failed:
         raise typer.Exit(1)
 
 
@@ -1121,9 +1114,12 @@ def publish(
 @app.command()
 def run(
     publish: Annotated[bool, typer.Option(help="Also upload to YouTube")] = False,
-    rs3: Annotated[
+    download: Annotated[
         Optional[bool],
-        typer.Option("--rs3/--no-rs3", help="Trigger Race Studio 3 download (default: [rs3] enabled)"),
+        typer.Option(
+            "--download/--no-download",
+            help="Pull new sessions off the MyChron first (default: [mychron] auto_download)",
+        ),
     ] = None,
     resolution: Annotated[
         Optional[str],
@@ -1140,7 +1136,7 @@ def run(
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(2)
-    report = run_pipeline(cfg, publish=publish, trigger_rs3=rs3)
+    report = run_pipeline(cfg, publish=publish, download=download)
     for line in report.lines:
         console.print(line, markup=False)
     attention = report.needs_attention()

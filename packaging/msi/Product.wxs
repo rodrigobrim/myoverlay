@@ -2,8 +2,8 @@
 <!--
   MyOverlay MSI. Payload = the PyInstaller onedir build (dist\myoverlay,
   harvested by heat into HarvestedFiles.wxs at build time). The setup wizard
-  (WizardUI.wxs) collects: output language, a dependency check (Race Studio 3
-  presence), install destination, shortcut choices, Google API client secret
+  (WizardUI.wxs) collects: output language, a dependency check (none
+  currently registered), install destination, shortcut choices, Google API client secret
   (validated, skippable with a warning) and default render resolution; a deferred CA writes them to
   install_settings.yaml, which the launcher applies when it creates config.toml
   on first run (the chosen destination is also recorded there as
@@ -238,7 +238,7 @@
     <CustomAction Id="DetectLanguage" BinaryKey="WriteSettingsJs"
                   JScriptCall="DetectLanguage" Execute="immediate" Return="ignore" />
     <!-- Dependency-detection phase (detect_deps.js): silently checks the
-         machine for software MyOverlay needs (currently Race Studio 3) and
+         machine for software MyOverlay needs (none currently registered) and
          fills the DEP_*/DEPS_* properties. No page appears when everything
          is present; a missing blocking dependency detours the wizard to the
          DepsBlockedDlg dead end. Registering another dependency is a new

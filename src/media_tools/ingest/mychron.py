@@ -1,9 +1,9 @@
-"""MyChron ingestion: pick up new .xrk sessions from Race Studio 3's data dir.
+"""MyChron ingestion: pick up new .xrk sessions from the download dir(s).
 
-Race Studio 3 downloads sessions from the MyChron over WiFi into its data
-directory. We scan that directory (plus any extras), parse each new file with
-libxrk, and copy it into the library day folder derived from the session's
-log date. Identity = filename + size, so re-running is a no-op.
+`mt telemetry get` (ingest/aim.py) downloads sessions off the MyChron into
+mychron.data_dirs. We scan those directories (plus any extras), parse each
+new file with libxrk, and copy it into the library day folder derived from
+the session's log date. Identity = filename + size, so re-running is a no-op.
 """
 
 from __future__ import annotations
@@ -19,10 +19,12 @@ from dateutil import parser as dtparser
 from ..config import Config
 from ..library import Lap, Library, TelemetryLog
 
-# Race Studio 3 writes a compressed .xrz twin alongside every .xrk session. It
-# carries no extra information (the .xrk is the real telemetry libxrk reads), so
-# it is never a session in its own right - always skip it, even if a config
-# lists it in `extensions`. Mirrors camera.SKIP_SUFFIXES for .lrf/.thm proxies.
+# Legacy Race Studio 3 data dirs hold a compressed .xrz twin alongside every
+# .xrk session. It carries no extra information (the .xrk is the real telemetry
+# libxrk reads), so it is never a session in its own right - always skip it,
+# even if a config lists it in `extensions`. (Device downloads via ingest/aim.py
+# are decompressed to .xrk on arrival, so new files never hit this.) Mirrors
+# camera.SKIP_SUFFIXES for .lrf/.thm proxies.
 SKIP_SUFFIXES = {".xrz"}
 
 
@@ -52,7 +54,7 @@ class IngestReport:
 
 @dataclass
 class TelemetryFile:
-    """One .xrk present in RS3's data dir, with its already-ingested status."""
+    """One .xrk present in the download dir(s), with its already-ingested status."""
 
     path: Path
     name: str
@@ -156,7 +158,7 @@ def _gps_start_utc(path: Path, log) -> datetime | None:
 def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[Path]:
     exts = {e.lower() for e in cfg.mychron.extensions} - SKIP_SUFFIXES
     files: list[Path] = []
-    for src in list(cfg.mychron.rs3_data_dirs) + list(extra_sources or []):
+    for src in list(cfg.mychron.data_dirs) + list(extra_sources or []):
         if not src.is_dir():
             continue
         files.extend(
@@ -170,13 +172,13 @@ def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[P
 def enumerate_telemetry_files(
     cfg: Config, extra_sources: list[Path] | None = None
 ) -> tuple[list[Path], list[TelemetryFile]]:
-    """List every .xrk in RS3's data dir(s), with ingested status.
+    """List every .xrk in the download dir(s), with ingested status.
 
     Read-only: does not parse the .xrk (parsing is the slow/fragile part, done
     only on ingest). Returns (sources, files).
     """
     lib = Library(cfg.library_root)
-    sources = list(cfg.mychron.rs3_data_dirs) + list(extra_sources or [])
+    sources = list(cfg.mychron.data_dirs) + list(extra_sources or [])
     known = lib.known_telemetry()
 
     files: list[TelemetryFile] = []

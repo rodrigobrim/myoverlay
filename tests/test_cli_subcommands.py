@@ -5,9 +5,9 @@ import pytest
 from typer.testing import CliRunner
 
 import media_tools.cli as cli
+import media_tools.ingest.aim as aim
 import media_tools.ingest.camera as camera
 import media_tools.ingest.mychron as mychron
-import media_tools.ingest.rs3 as rs3
 from media_tools.config import CameraConfig, Config, MychronConfig
 
 runner = CliRunner()
@@ -27,7 +27,7 @@ def cfg_with_card(tmp_path, monkeypatch):
     cfg = Config(
         library_root=tmp_path / "library",
         camera=CameraConfig(source_dirs=[card], timezone="America/Sao_Paulo"),
-        mychron=MychronConfig(rs3_data_dirs=[], timezone="America/Sao_Paulo"),
+        mychron=MychronConfig(data_dirs=[], timezone="America/Sao_Paulo"),
     )
     monkeypatch.setattr(cli, "get_config", lambda: cfg)
     return cfg
@@ -79,9 +79,15 @@ def test_video_get_by_day(cfg_with_card):
     assert "no videos on the camera for" in r2.stdout
 
 
-def test_telemetry_get_drives_rs3_and_ingests(cfg_with_card, monkeypatch):
-    calls = {"rs3": 0}
-    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False, echo=None, ask=None: (calls.__setitem__("rs3", calls["rs3"] + 1) or ["ok"]))
+def test_telemetry_get_downloads_from_device_and_ingests(cfg_with_card, monkeypatch):
+    calls = {"download": 0}
+
+    def fake_download(cfg, names=None, force=False, echo=None, progress=None):
+        calls["download"] += 1
+        assert names is None
+        return aim.DownloadReport()
+
+    monkeypatch.setattr(aim, "download_sessions", fake_download)
 
     seen = {}
 
@@ -95,15 +101,53 @@ def test_telemetry_get_drives_rs3_and_ingests(cfg_with_card, monkeypatch):
 
     r = runner.invoke(cli.app, ["telemetry", "get"])
     assert r.exit_code == 0
-    assert calls["rs3"] == 1
+    assert calls["download"] == 1
     assert seen["kw"] == {"only_names": None, "force": False}
 
 
-def test_telemetry_get_no_rs3_skips_pull(cfg_with_card, monkeypatch):
-    monkeypatch.setattr(rs3, "trigger_rs3_download", lambda cfg, troubleshoot=False, echo=None, ask=None: (_ for _ in ()).throw(AssertionError("rs3 driven")))
-    monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
-    r = runner.invoke(cli.app, ["telemetry", "get", "--no-rs3"])
+def test_telemetry_get_named_sessions_ingest_their_downloads(cfg_with_card, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        aim,
+        "download_sessions",
+        lambda cfg, names=None, force=False, echo=None, progress=None: aim.DownloadReport(
+            downloaded=[str(tmp_path / "a_0186.xrk")]
+        ),
+    )
+    seen = {}
+
+    def fake_ingest(cfg, **kw):
+        seen["kw"] = kw
+        return mychron.IngestReport()
+
+    monkeypatch.setattr(mychron, "ingest_mychron", fake_ingest)
+    r = runner.invoke(cli.app, ["telemetry", "get", "a_0186.xrz"])
     assert r.exit_code == 0
+    # The device name maps to the .xrk the download produced.
+    assert seen["kw"] == {"only_names": ["a_0186.xrk"], "force": False}
+
+
+def test_telemetry_get_no_download_skips_device(cfg_with_card, monkeypatch):
+    monkeypatch.setattr(
+        aim,
+        "download_sessions",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("device driven")),
+    )
+    monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
+    r = runner.invoke(cli.app, ["telemetry", "get", "--no-download"])
+    assert r.exit_code == 0
+
+
+def test_telemetry_get_device_error_fails(cfg_with_card, monkeypatch):
+    monkeypatch.setattr(
+        aim,
+        "download_sessions",
+        lambda cfg, names=None, force=False, echo=None, progress=None: aim.DownloadReport(
+            errors=["No MyChron found."]
+        ),
+    )
+    monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
+    r = runner.invoke(cli.app, ["telemetry", "get"])
+    assert r.exit_code == 1
 
 
 def test_ingest_force_threads_through(cfg_with_card, monkeypatch):
