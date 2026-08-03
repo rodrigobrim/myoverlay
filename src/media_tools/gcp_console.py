@@ -622,16 +622,24 @@ def _run_flow(cfg: Config, page, project: str, report: list[str], ts: _Shoot) ->
 
     # -- 3. desktop client + JSON -------------------------------------------
     if cfg.youtube.client_secret_file.is_file():
-        report.append(f"client secret already present at {cfg.youtube.client_secret_file}")
         other = _secret_project(cfg.youtube.client_secret_file)
         if other and other != project:
-            # Existing file belongs to a different project. Never overwrite it
-            # silently - surface the mismatch and let the human decide.
+            # A secret for another project cannot authorize this one, and a
+            # project can be deleted out from under it - so stopping here just
+            # asked the human to do a rename we can do safely ourselves. Never
+            # overwrite it though: Google reveals a secret once, so the file is
+            # unrecoverable and moves aside under a name that records its
+            # project (the run then mints a client for the configured one).
+            kept = _rotate_secret_aside(cfg.youtube.client_secret_file, other)
             report.append(
-                f"? but it belongs to project '{other}', not '{project}' - move/rename it "
-                "and re-run google-setup to mint one for this project"
+                f"client secret at {cfg.youtube.client_secret_file} belongs to project "
+                f"'{other}', not '{project}' - kept as {kept.name}"
             )
-        return
+        else:
+            report.append(
+                f"client secret already present at {cfg.youtube.client_secret_file}"
+            )
+            return
     # Google only reveals a client's secret ONCE, in the creation dialog
     # ("viewing and downloading client secrets is no longer available" on the
     # client page afterwards). So when the secret file is missing, an existing
@@ -989,6 +997,20 @@ def _secret_project(path: Path) -> str | None:
         return json.loads(path.read_text(encoding="utf-8-sig"))["installed"]["project_id"]
     except Exception:  # noqa: BLE001 - unreadable/foreign file is fine
         return None
+
+
+def _rotate_secret_aside(path: Path, project: str) -> Path:
+    """Move a client secret belonging to another project out of the way,
+    recording that project in the name (client_secret.<project>.bak.json, the
+    convention already on disk). Never deletes and never clobbers an earlier
+    backup: a client secret is shown once by Google and cannot be re-read."""
+    for n in range(100):
+        suffix = "" if n == 0 else f".{n}"
+        kept = path.with_name(f"{path.stem}.{project}{suffix}.bak{path.suffix}")
+        if not kept.exists():
+            path.rename(kept)
+            return kept
+    raise OSError(f"could not find a free backup name beside {path}")
 
 
 def _account_email(page) -> str | None:
