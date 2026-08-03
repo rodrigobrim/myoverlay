@@ -98,6 +98,36 @@ def test_list_remote_sessions_no_device(dl_cfg, monkeypatch):
     assert result.notes and result.notes[0].startswith("!")
 
 
+class MuteTransport(FakeTransport):
+    """Enumerates (constructs) but never answers - a MyChron charging while off."""
+
+    def session_csv(self):
+        raise RuntimeError("no reply to opcode 0x10010")
+
+
+def test_list_remote_sessions_mute_device_is_a_note(dl_cfg, monkeypatch):
+    cfg, _d = dl_cfg
+    dev = MuteTransport()
+    monkeypatch.setattr("media_tools.aim.connect", lambda prefer=None, verbose=True: dev)
+
+    result = aim.list_remote_sessions(cfg)
+    assert result.transport == "USB"
+    assert not result.sessions
+    assert result.notes == ["! USB: no reply to opcode 0x10010"]
+    assert dev.closed
+
+
+def test_download_mute_device_is_an_error(dl_cfg, monkeypatch):
+    cfg, _d = dl_cfg
+    dev = MuteTransport()
+    monkeypatch.setattr("media_tools.aim.connect", lambda prefer=None, verbose=True: dev)
+
+    report = aim.download_sessions(cfg)
+    assert report.errors == ["USB: no reply to opcode 0x10010"]
+    assert not report.downloaded
+    assert dev.closed
+
+
 def test_download_decompresses_xrz_to_xrk(dl_cfg, monkeypatch):
     cfg, d = dl_cfg
     dev = FakeTransport()

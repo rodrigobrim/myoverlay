@@ -404,8 +404,10 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     for note in result.notes:
         style = "red" if note.startswith("!") else "dim"
         console.print(note, style=style, markup=False)
+    failed = any(n.startswith("!") for n in result.notes)
     if not result.sessions:
-        if result.transport:
+        # Only claim an empty device when the listing actually succeeded.
+        if result.transport and not failed:
             console.print("[dim]no new sessions on the device[/dim]")
         return
 
