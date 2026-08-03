@@ -133,7 +133,7 @@
          when the machine already has gcloud (Level 0 = not installed). When it
          IS installed, uninstalling MyOverlay removes it automatically. -->
     <Feature Id="GCloudSdk" Level="1" Absent="disallow" Display="hidden">
-      <ComponentGroupRef Id="GCloudFiles" />
+      <ComponentRef Id="GCloudArchive" />
       <ComponentRef Id="GCloudPath" />
       <!-- Skip when already on the machine, or when the user unticked it on
            the component page. First install only: feature conditions re-run
@@ -143,9 +143,12 @@
       <Condition Level="0">NOT Installed AND (GCLOUD_PRESENT OR INSTALL_GCLOUD &lt;&gt; "1")</Condition>
     </Feature>
 
-    <!-- The offline SDK is bundled as MSI files (GCloudFiles component group,
-         installed under GCLOUDDIR) and set up with install.bat in quiet mode.
-         No download, no wizard, no clicks - the progress bar carries it. -->
+    <!-- The offline SDK ships as Google's own archive - ONE file - and is
+         expanded into GCLOUDDIR on the target machine by ExpandGCloud. It is
+         not harvested into ~30k MSI components because the SDK's deepest
+         entry pushes a build checkout past Windows' 260-character path limit,
+         which the WiX 3.14 tools cannot read at all; under the install folder
+         the same path is short. See gcloud_payload.js. -->
     <!-- Set by AppSearch when the SDK is already on this machine: the SDK
          feature is then not installed and the wizard skips its page. Checks
          the per-user and per-machine uninstall registrations. -->
@@ -173,6 +176,41 @@
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
+
+    <!-- The archive itself: the only SDK file MSI tracks. ExpandGCloud
+         unpacks it beside itself and then deletes it, so it costs nothing on
+         disk after setup; the component stays registered, which is what makes
+         a repair re-copy and re-expand it. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="GCloudArchive" Guid="B7C1E5D4-2A93-4F16-8E7B-5D0A9C34F812" Win64="yes">
+        <File Id="GCloudZip" Source="$(var.GCloudZip)"
+              Name="google-cloud-cli-windows.zip" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Expansion + its cleanup. Deferred and NOT impersonated: the target is
+         under Program Files, which the installing user need not be able to
+         write. Deferred actions cannot read properties, hence the paired
+         SetProperty actions carrying INSTALLFOLDER in CustomActionData. -->
+    <Binary Id="GCloudPayloadJs" SourceFile="gcloud_payload.js" />
+    <CustomAction Id="SetExpandGCloudData" Property="ExpandGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="ExpandGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="ExpandGCloud" Execute="deferred"
+                  Impersonate="no" Return="check" />
+    <!-- Rollback runs if the transaction fails LATER: without it a failed
+         install would leave the expanded SDK behind. Scheduled before the
+         expansion it undoes, as rollback actions run in reverse. -->
+    <CustomAction Id="SetRollbackGCloudData" Property="RollbackGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="RollbackGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="RemoveBundledGCloud" Execute="rollback"
+                  Impersonate="no" Return="ignore" />
+    <CustomAction Id="SetRemoveBundledGCloudData" Property="RemoveBundledGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="RemoveBundledGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="RemoveBundledGCloud" Execute="deferred"
+                  Impersonate="no" Return="ignore" />
 
     <!-- Google API config runs DURING the wizard as an IMMEDIATE action in
          the interactive UI session - the only context where the sign-in
@@ -265,6 +303,16 @@
       <Custom Action="DetectLanguage" After="AppSearch">NOT Installed AND UILevel &lt; 5</Custom>
       <Custom Action="WriteSettings.SetData" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="WriteSettings" After="WriteSettings.SetData">NOT Installed</Custom>
+      <!-- Expand the bundled SDK once its archive is on disk (InstallFiles).
+           &amp;GCloudSdk=3 means "this transaction installs that feature", so
+           the work is skipped when the user unticked it or gcloud was already
+           present, and on uninstall. The rollback pair is scheduled first:
+           rollback actions replay in reverse, so it must be queued before the
+           action whose effect it undoes. -->
+      <Custom Action="SetRollbackGCloudData" After="WriteSettings">&amp;GCloudSdk=3</Custom>
+      <Custom Action="RollbackGCloud" After="SetRollbackGCloudData">&amp;GCloudSdk=3</Custom>
+      <Custom Action="SetExpandGCloudData" After="RollbackGCloud">&amp;GCloudSdk=3</Custom>
+      <Custom Action="ExpandGCloud" After="SetExpandGCloudData">&amp;GCloudSdk=3</Custom>
       <!-- "Uninstall" is matched two ways: REMOVE="ALL" (true product
            uninstall) OR the core feature installed-and-requested-absent
            (feature-wise removal, which is what the wizard's Remove event
@@ -272,6 +320,12 @@
            uninstall stripped the product but never ran these cleanups. -->
       <Custom Action="RemoveGCloud" After="InstallInitialize">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="RemoveAppData" After="RemoveGCloud">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <!-- The expanded SDK has no MSI components, so the installer's own file
+           removal never touches it - this is the only thing that deletes it.
+           Runs whenever the SDK feature goes away, including on a major
+           upgrade (where the new version expands its own copy). -->
+      <Custom Action="SetRemoveBundledGCloudData" After="RemoveAppData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
+      <Custom Action="RemoveBundledGCloud" After="SetRemoveBundledGCloudData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
     </InstallExecuteSequence>
 
     <UIRef Id="MyOverlayWizard" />

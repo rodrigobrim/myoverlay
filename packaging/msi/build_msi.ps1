@@ -97,23 +97,6 @@ function Expand-ZipTo {
     [System.IO.Directory]::Move((Get-LongPath $staging), (Get-LongPath $Destination))
 }
 
-# The WiX 3.14 tools are .NET Framework programs with no long-path support:
-# heat/light simply report a file as "cannot be found" when its path passes
-# 260 characters. Extraction here is \\?\-safe, but that only gets the files
-# onto disk - WiX still has to read them. The Google Cloud SDK's deepest
-# entry sits ~172 characters below the repo root, so a checkout deeper than
-# roughly 85 characters cannot be built at all. Fail now, with the fix,
-# rather than after a 150 MB download and a full harvest.
-$deepestRelative = 172
-if ($repo.Length + $deepestRelative -gt 259) {
-    throw ("Checkout path is too long to build an MSI: '$repo' " +
-        "($($repo.Length) chars; the WiX tools cap total paths at 260 and the " +
-        "bundled SDK needs $deepestRelative more). Build from a shorter path - " +
-        "a junction needs no admin rights and no copying:`n" +
-        "    cmd /c mklink /J C:\mob `"$repo`"`n" +
-        "    powershell -File C:\mob\packaging\msi\build_msi.ps1")
-}
-
 $payloadExe = Join-Path $payload "myoverlay.exe"
 if (-not (Test-Path $payloadExe)) {
     throw "Payload missing: $payloadExe - run packaging\build_exe.ps1 first."
@@ -147,40 +130,72 @@ if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
 }
 
 # --- Google Cloud SDK, bundled OFFLINE (the full versioned archive with
-#     bundled Python, ~150 MB extracted) so the install is self-contained and
-#     truly silent via install.bat --quiet. The 267 KB online stub was NOT the
-#     SDK - it downloaded it and ran its own wizard.
-$gcloudDir = Join-Path $vendor "gcloud-sdk"          # holds google-cloud-sdk\
-$gcloudSdk = Join-Path $gcloudDir "google-cloud-sdk"
-# install.bat alone is NOT proof of a good cache: a failed extraction once
-# left exactly that file plus a few hundred of the SDK's ~30k, which this
-# guard would have accepted - bundling a hollow SDK into the MSI. Check the
-# file count too, cheaply.
-# -First N caps the count at N, so the comparison has to be -ge: with -gt the
-# cache always looked incomplete and every build re-downloaded 150 MB.
-$gcloudFileProbe = 20000
-$gcloudCached = (Test-Path (Join-Path $gcloudSdk "install.bat")) -and
-    ((Get-ChildItem $gcloudSdk -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Select-Object -First $gcloudFileProbe).Count -ge $gcloudFileProbe)
-if (-not $gcloudCached) {
-    if (Test-Path $gcloudDir) {
-        Write-Host "Google Cloud SDK cache is incomplete - re-extracting."
-        Remove-TreeLong $gcloudDir
+#     bundled Python) so the install is self-contained - no download, no
+#     wizard. The 267 KB online stub was NOT the SDK; it downloaded it and ran
+#     its own wizard.
+#
+# Google's archive ships INTO the MSI as a single file and is expanded on the
+# target machine (see ExpandGCloud in gcloud_payload.js). It is deliberately
+# never extracted here:
+#
+#   * The SDK's deepest entry sits 189 characters below the repo root. The
+#     WiX 3.14 tools are .NET Framework programs with no long-path support,
+#     so heat reports such a file as "cannot be found" and the build dies -
+#     from any checkout deeper than ~70 characters. Installed, the same file
+#     is only ~189 characters from the drive root, comfortably inside the
+#     limit, so expanding on the target is the one place the path is short.
+#   * It also removes ~30k files from the harvest, which is most of the MSI
+#     build time.
+$gcloudZip = Join-Path $vendor "google-cloud-cli-windows.zip"
+if (-not (Test-Path $gcloudZip)) {
+    New-Item -ItemType Directory -Force $vendor | Out-Null
+    # Download to a staging name and rename only on success: a connection
+    # dropped mid-transfer (which happens on this 110 MB file) would otherwise
+    # leave a truncated archive that the Test-Path above reads as "cached".
+    # Retried, because one reset connection should not fail a whole build.
+    $part = "$gcloudZip.part"
+    $uri = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+    $attempts = 3
+    for ($try = 1; $try -le $attempts; $try++) {
+        Write-Host "Downloading the offline Google Cloud SDK archive (~110 MB), attempt $try/$attempts..."
+        Remove-Item $part -Force -ErrorAction SilentlyContinue
+        try {
+            Invoke-WebRequest -UseBasicParsing -OutFile $part -Uri $uri
+            Move-Item $part $gcloudZip -Force
+            break
+        } catch {
+            Write-Host "  download failed: $($_.Exception.Message)"
+            Remove-Item $part -Force -ErrorAction SilentlyContinue
+            if ($try -eq $attempts) {
+                throw "Could not download the Google Cloud SDK archive after $attempts attempts."
+            }
+            Start-Sleep -Seconds (5 * $try)
+        }
     }
-    Write-Host "Downloading the offline Google Cloud SDK archive (~150 MB)..."
-    $zip = Join-Path $vendor "google-cloud-cli-windows.zip"
-    if (-not (Test-Path $zip)) {
-        New-Item -ItemType Directory -Force $vendor | Out-Null
-        Invoke-WebRequest -UseBasicParsing -OutFile $zip `
-            -Uri "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+}
+# A truncated download would ship as a corrupt payload that only fails on the
+# user's machine, so the archive is opened (not extracted) and checked here.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$gcloudVersion = "unknown"
+$archive = $null
+try {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($gcloudZip)
+    $versionEntry = $archive.GetEntry("google-cloud-sdk/VERSION")
+    if (-not $archive.GetEntry("google-cloud-sdk/install.bat") -or -not $versionEntry) {
+        throw "google-cloud-sdk/install.bat or /VERSION missing"
     }
-    Write-Host "Extracting..."
-    Expand-ZipTo -Zip $zip -Destination $gcloudDir
-    Remove-Item $zip
+    $reader = New-Object System.IO.StreamReader($versionEntry.Open())
+    $gcloudVersion = $reader.ReadLine()
+    $reader.Close()
+} catch {
+    if ($archive) { $archive.Dispose(); $archive = $null }
+    Remove-Item $gcloudZip -Force -ErrorAction SilentlyContinue
+    throw ("The Google Cloud SDK archive is not usable ($($_.Exception.Message)). " +
+        "It has been deleted - re-run the build to download it again.")
+} finally {
+    if ($archive) { $archive.Dispose() }
 }
-if (-not (Test-Path (Join-Path $gcloudSdk "install.bat"))) {
-    throw "Google Cloud SDK extraction did not produce $gcloudSdk\install.bat"
-}
+if ([string]::IsNullOrWhiteSpace($gcloudVersion)) { $gcloudVersion = "unknown" }
 
 New-Item -ItemType Directory -Force $build | Out-Null
 
@@ -209,11 +224,26 @@ if ($gitExe) {
     $line = (& $gitExe --version 2>$null | Select-Object -First 1)
     if ($line -match 'git version (\d+\.\d+\.\d+)') { $gitVersion = $Matches[1] }
 }
-$gcloudVersion = (Get-Content (Join-Path $gcloudSdk "VERSION") -ErrorAction SilentlyContinue |
-    Select-Object -First 1)
-if ([string]::IsNullOrWhiteSpace($gcloudVersion)) { $gcloudVersion = "unknown" }
 Write-Host "Bundled versions -> ffmpeg $ffmpegVersion | git $gitVersion | gcloud $gcloudVersion"
 Write-Host "Product version  -> $Version"
+
+# The WiX 3.14 tools are .NET Framework programs with no long-path support:
+# heat/light report a file whose path passes 260 characters as "cannot be
+# found" and the build dies. Nothing here can widen that, so check the actual
+# tree about to be harvested and fail with the fix instead of a puzzle. This
+# measures rather than assuming a worst case: the bundled Cloud SDK used to
+# blow the limit from any normal checkout, which is exactly why it now ships
+# as an archive expanded on the target machine.
+$longest = Get-ChildItem $payload -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Sort-Object { $_.FullName.Length } -Descending | Select-Object -First 1
+if ($longest -and $longest.FullName.Length -gt 259) {
+    throw ("Payload paths are too long for the WiX tools (limit 260): " +
+        "$($longest.FullName.Length) chars at`n    $($longest.FullName)`n" +
+        "Build from a shorter directory - a junction needs no admin rights " +
+        "and no copying:`n" +
+        "    cmd /c mklink /J C:\mob `"$repo`"`n" +
+        "    powershell -File C:\mob\packaging\msi\build_msi.ps1")
+}
 
 # --- harvest the onedir payload ---
 & (Join-Path $wix "heat.exe") dir $payload `
@@ -221,21 +251,17 @@ Write-Host "Product version  -> $Version"
     -var var.PayloadDir -out (Join-Path $build "HarvestedFiles.wxs")
 if ($LASTEXITCODE -ne 0) { throw "heat failed" }
 
-# --- harvest the offline SDK into its own component group / feature ---
-& (Join-Path $wix "heat.exe") dir $gcloudSdk `
-    -cg GCloudFiles -dr GCLOUDDIR -srd -sreg -scom -gg `
-    -var var.GCloudDir -out (Join-Path $build "GCloudFiles.wxs")
-if ($LASTEXITCODE -ne 0) { throw "heat (gcloud) failed" }
+# The SDK is NOT harvested - it ships as the single archive file referenced
+# by var.GCloudZip and is expanded on the target machine.
 
 # --- compile ---
-& (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudDir=$gcloudSdk" `
+& (Join-Path $wix "candle.exe") -nologo -arch x64 "-dPayloadDir=$payload" "-dGCloudZip=$gcloudZip" `
     "-dProductVersion=$Version" `
     "-dFfmpegVersion=$ffmpegVersion" "-dGitVersion=$gitVersion" "-dGcloudVersion=$gcloudVersion" `
     -ext WixUIExtension -out "$build\" `
     (Join-Path $msiDir "Product.wxs") `
     (Join-Path $msiDir "WizardUI.wxs") `
-    (Join-Path $build "HarvestedFiles.wxs") `
-    (Join-Path $build "GCloudFiles.wxs")
+    (Join-Path $build "HarvestedFiles.wxs")
 if ($LASTEXITCODE -ne 0) { throw "candle failed" }
 
 # --- link ---
@@ -245,8 +271,7 @@ if ($LASTEXITCODE -ne 0) { throw "candle failed" }
     -b $msiDir -out $out `
     (Join-Path $build "Product.wixobj") `
     (Join-Path $build "WizardUI.wixobj") `
-    (Join-Path $build "HarvestedFiles.wixobj") `
-    (Join-Path $build "GCloudFiles.wixobj")
+    (Join-Path $build "HarvestedFiles.wixobj")
 if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
 Write-Host "MSI ready: $out"
