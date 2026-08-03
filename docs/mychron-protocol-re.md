@@ -3,10 +3,19 @@
 Goal: pull session data off the MyChron6 without driving the Race Studio 3 GUI,
 replacing `src/media_tools/ingest/rs3.py` with a direct client.
 
-Status: **recon complete, no wire capture yet.** Everything below comes from
-static analysis of `C:\AIM_SPORT\RaceStudio3\64\AiMRS3-64-ReleaseU.exe` and from
-RS3's own logs in `C:\AIM_SPORT\RaceStudio3\logs\`. Nothing here has been
-confirmed against live traffic.
+Status: **done for the MyChron6, over both transports.** A working client
+lives in `tools/research/aim/`; run it with `tools/research/mychron.py`. It
+lists sessions and downloads them with no AiM software involved, over USB or
+WiFi, without admin rights.
+
+The protocol was recovered from three sources: static analysis of
+`C:\AIM_SPORT\RaceStudio3\64\AiMRS3-64-ReleaseU.exe`, a Wireshark/Npcap
+capture of one RS3 WiFi session, and a Frida trace of RS3's `DeviceIoControl`
+calls for the USB side. Everything below has been confirmed against the live
+device unless it says otherwise.
+
+The full wire format is in [mychron-wifi-protocol.md](mychron-wifi-protocol.md);
+the opcode table is [mychron-command-opcodes.txt](mychron-command-opcodes.txt).
 
 ## Why the device is not a USB drive
 
@@ -22,9 +31,14 @@ RS3 pulls raw session data over a custom protocol and *writes* the `.xrk` on the
 PC side. That is why `libxrk`, `xdrk` and every other public tool only read
 `.xrk` files that RS3 already produced; none of them talk to hardware.
 
-There is no public SDK or protocol documentation. The only existence proof that
-the protocol is reverse-engineerable is the LapSnap phone app, which syncs AiM
-devices over WiFi but publishes nothing about how.
+Confirmed: the driver is `AIM_USBdrv_11CC_0110_64a.sys` (service
+`AIM_USBdriver_0110`, provider `AIM_srl`) and the device is USB **Class FF**,
+vendor-specific. Device Manager files it under the HID *setup class*, which is
+only a grouping — it speaks no HID protocol, and `hidapi` cannot see it. Reach
+it through `DeviceIoControl` on the driver's own device interface instead.
+
+There is no public SDK or protocol documentation, and no public reverse
+engineering of it that a web search can find.
 
 ## Architecture
 
@@ -40,20 +54,18 @@ and log-format strings:
 
 All four implement the same primitives — `InviaCmdStdGenerico` (send generic
 standard command), `IdentificaRete`, `LeggiInfoDevice`. **The command layer is
-transport-independent**, which is the single most useful fact here: traffic
-captured over *any* transport teaches the same protocol, and a WiFi client and a
-USB client differ only in framing.
+transport-independent.**
 
-Discovery is a UDP subnet sweep plus multicast, with a keepalive that has at
-least two versions:
+Confirmed from the RTTI-resolved vtables: `InviaCmdLcyIdentitissima` is one
+shared implementation at slot `+0x48` across every transport, and only
+`InviaCmdStdGenerico` at `+0x70` differs (TCP `0x141ad0340`, USB
+`0x141a5d450`). In practice USB and WiFi carry byte-identical 64-byte command
+bodies with the same opcodes, and a file fetched over either hashes the same.
 
-- `CInterfacciaReteWin32::CreaAndBindSocketUDP`, `BindSocketUDP_multicast`
-- `CThreadGatherDeviceSuReteMultiCast`, `CInterfacciaReteWin32::lookForDevices`
-- `ValidaKeepAliveV2`, `ValidaKeepAliveV3`, `aliveDevice`
-- `CInterfacciaReteWiFi::RispondeUnDevAiM` ("does an AiM device answer")
-
-Logs confirm the sweep is brute force over the whole /24 — `253 probes in
-~3.94 s`, repeating every ~7 s.
+Discovery is UDP port **36002**. The probe is the literal ASCII string
+`aim-ka`; the device replies with a 236-byte descriptor carrying its name, IP
+and serial. A second probe form, `aim-kb` + version + byte + `0x01`, exists in
+the binary but the device did not answer it.
 
 ## The device is a remote filesystem
 
@@ -68,48 +80,67 @@ method list reads like a file-server API rather than a bespoke telemetry stream:
 - **upload / mutate**: `caricaFile`, `delFile`, `removeDir`, `scriviCfg*`
 - **status**: `isReadyForComm`, `isMediaInserita`, `getMediaStatus`
 
-Transfer engine: `CTrasferitoreClassico::Scarica` and
-`CTrasferitoreConCallback::Scarica` (the callback variant is what drives the
-progress bar).
+Sessions live at `1:/mem/<name>`; volume `0:/` holds configuration, firmware
+and track data. Two extensions appear — `.xrz` and `.hrz` — so do not filter on
+one of them.
 
-This is very good news for the effort estimate: the job is reversing a handful
-of generic primitives — *identify*, *list directory*, *get file* — not an
-opaque telemetry format. `leggiPropFilesRegistrati` + `scaricaFileRegistrato`
-is the entire path we need.
+In practice only two commands are needed:
+`leggiSummaryFilesRegistrati` (`0x00020024`) returns the listing as CSV with a
+27-column header, and `getFile` (`0x00040002`) with a path streams the file.
+The CSV carries lap counts, best lap in milliseconds, track name and
+coordinates, so listing needs no `.xrk` parsing at all.
 
-Known command name from the logs: `IDENTITISSIMA` (device identification,
-`CConnessione::InviaCmdLcyIdentitissima`). It is the natural first packet to
-capture and the natural first packet to replay.
+## Network details
 
-## What is still unknown
+The logger runs its own access point and DHCP server. It is **`10.0.0.1`** and
+hands the PC `10.0.0.2/24` — not the `192.168.4.1` this document previously
+guessed. The only open TCP port is **2000**. The device emits no ICMP at all,
+so UDP port scanning cannot distinguish open from closed on it.
 
-Static strings give function names, never wire format. Still needed:
+On this unit the access point is **open**, with no password. Note the profile
+the AiM software leaves in Windows specifies WPA2, and that mismatch makes
+connection attempts fail silently; the client writes its own throwaway open
+profile rather than reusing it.
 
-1. TCP port the device listens on, and the UDP discovery port / multicast group.
-2. Frame layout: magic, length, opcode, sequence, checksum.
-3. Opcode values for identify / list / get-file.
-4. Whether there is any authentication or obfuscation beyond the framing.
+## What was still unknown, and how it was answered
 
-All four fall out of one captured download.
+1. **Ports** — TCP 2000, UDP 36002. From a port scan and `htons(0x8ca2)` in
+   the binary.
+2. **Frame layout** — from the WiFi capture. Frames are ASCII-tagged, which is
+   why every plain length-prefixed guess was ignored: with no `<h` marker the
+   device never sees a frame begin, accepts the connection and waits forever
+   instead of resetting.
+3. **Opcodes** — 109 of them, recovered by scanning all 634 command sites for
+   the immediate loaded into `r8d`. Layout is `(group << 16) | command`.
+4. **Authentication** — there is none, and no obfuscation beyond the framing.
 
-## Capture plan
+## Capture tooling
 
-`tools/research/capture_mychron.ps1` wraps `pktmon` (built into Windows 10 —
-nothing to install, no download needed) and emits a `.pcapng`.
+`tools/research/capture_mychron.ps1` wraps `pktmon` and needs admin. In
+practice Wireshark's bundled **Npcap** was easier: installed with the
+admin-only restriction unchecked, `dumpcap` captures without elevation.
 
-Note the *only* blocking dependency is physical: **no RS3 log on this machine
-has ever shown a network device connection** (`CConnessioneTcp` /
-`RispondeUnDevAiM` hits: 0 across all 11 logs). Every download so far was USB,
-so there is no historical WiFi traffic to mine — one live WiFi download has to
-be performed and captured.
+For USB, **USBPcap** ships with Wireshark and captures URBs — but it sits
+*below* AiM's driver, so it shows the wire protocol and not the
+`DeviceIoControl` interface needed to drive it. That gap was closed with a
+Frida script hooking `DeviceIoControl` inside RS3
+(`tools/research/trace_ioctl.py`), which is what revealed the mandatory
+descriptor preamble and the chunk handshake.
 
-Steps:
+## Beyond the MyChron6
 
-1. On the MyChron6: enable WiFi and note the `AiM-…` SSID.
-2. Join that network from the PC (or put both on the same LAN).
-3. Start the capture script.
-4. In RS3, do one normal session download.
-5. Stop the capture; analyse the pcapng.
+None of the command layer here is known to generalise. RS3 splits devices
+across `CStrumentoMXL2` (2G, has a filesystem — what we implement) and the
+`CStrumentoSpansionNoFileSystem` family, which is older hardware with no
+filesystem and a different download path entirely. An AiM Solo or an older
+MyChron may well fall in the second group.
 
-Prefer a session with a **small** `.xrk` so the payload does not bury the
-control messages.
+What should carry over is everything below the instrument class: the framing,
+the `aim-ka` discovery, the driver IOCTLs. What will not: the `1:/mem/` paths,
+the CSV listing, the hardcoded USB PID `0110`, and the assumption of an open
+access point.
+
+The clean way to extend this is to identify the device first —
+`CStrumentoDaIdentificare` is literally RS3's "device to be identified" class,
+and the `aim-ka` descriptor already carries a family field — then dispatch to a
+per-model package under `tools/research/aim/`.

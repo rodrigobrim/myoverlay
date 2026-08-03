@@ -1,5 +1,11 @@
 # AiM MyChron6 — confirmed wire findings (live device, 2026-07-31)
 
+> **Status.** This is the investigation log, kept because the dead ends are
+> worth knowing. The parts it lists as unknown were solved afterwards: the TCP
+> framing is ASCII-tagged (see *TCP command framing* below), and a working
+> client for both transports lives in `tools/research/aim/`. The USB side is
+> written up in [mychron-protocol-re.md](mychron-protocol-re.md).
+
 Device: MyChron6 Brim, serial 35021763, AP `AiM-MYC6-021763-MyChron6 Brim` (open, no password).
 Device IP `10.0.0.1` (it is the DHCP server + gateway); PC gets `10.0.0.2/24`.
 
@@ -32,7 +38,24 @@ off ~0x5e c3 63 16 02   u32 LE  = 0x021663C3 = 35021763   SERIAL (matches doc)
 off ~0xab "Sissilandia"                 venue / track name
 ```
 
-## Still unknown: TCP command framing
+## TCP command framing
+
+**Solved** — the answer is at the end of this section. Everything immediately
+below is what failed first, and why.
+
+```
+header  '<h' + TAG(4) + u32 body_len + u8 flag + '>'
+body    body_len bytes
+trailer '<'  + TAG(4) + u16 checksum + '>'      checksum = sum(body) & 0xFFFF
+```
+
+`STNC` carries commands (opcode at +8, path argument at +32), `STCP` responses.
+The ASCII tagging is exactly why the probing below got nowhere: with no `<h`
+marker the device never sees a frame start, so it accepts the connection and
+waits rather than resetting. Each command is a six-step exchange including a
+68-byte client frame carrying the PC clock, without which the device stalls.
+
+### What was tried before that, and failed
 
 * Only open TCP port: **2000**. Device accepts the connection, never resets,
   never replies to malformed input.
@@ -45,7 +68,11 @@ off ~0xab "Sissilandia"                 venue / track name
   `CConnessioneTcp::InviaCmdStdGenerico` @ `0x141ad0340` (~2181 instructions,
   writes via virtual dispatch, almost no logging).
 
-## Serialization trace (attempted) — why the wire format is not in the call path
+## Serialization trace (attempted) — why static analysis alone did not get there
+
+This is why the framing above came from a packet capture rather than from
+reading the binary: the write is behind an async worker, so no amount of
+following calls from `InviaCmdStdGenerico` reaches a socket.
 
 * Socket abstraction identified by reverse RTTI: **`SocketRemote`**
   (`.?AVSocketRemote@@`), vtable `0x142d69e08` — `send` = slot[14] (`+0x70`,
