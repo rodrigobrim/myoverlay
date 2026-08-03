@@ -112,6 +112,54 @@ def _has_upstream(git: Path, repo: Path) -> bool:
     return proc.returncode == 0
 
 
+def _default_branch(git: Path, repo: Path) -> str:
+    """The clone's default branch (origin/HEAD), 'main' when unreadable."""
+    proc = run_git(git, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=repo)
+    ref = proc.stdout.strip() if proc.returncode == 0 else ""
+    return ref.split("/", 1)[1] if "/" in ref else "main"
+
+
+def _return_to_default_branch(git: Path, repo: Path) -> None:
+    """Put a managed clone back on the default branch before pulling.
+
+    `--branch NAME` is sticky - it checks the branch out and nothing ever
+    switches back - so a single old --branch run left the clone pulling that
+    branch forever. The pull succeeds ("Already up to date" for that branch),
+    the resync path never fires because nothing failed, and the launcher keeps
+    reporting "pipeline is up to date" while the code sits commits behind main:
+    the one stale state that announces itself as current.
+
+    Local edits that block the switch are stashed, never discarded - the clone
+    is disposable, but deciding that someone's uncommitted work is not is a
+    call this launcher does not get to make silently.
+    """
+    branch = _default_branch(git, repo)
+    if _current_branch(git, repo) == branch:
+        return
+    if run_git(git, ["checkout", branch], cwd=repo, timeout=120).returncode != 0:
+        stashed = run_git(
+            git,
+            # A stash writes commit objects, so it needs an identity. Supply
+            # one: a friend's clone may have no user.name/user.email at all,
+            # and "Please tell me who you are" must not be what stands between
+            # them and a current pipeline.
+            ["-c", "user.email=myoverlay@localhost", "-c", "user.name=myoverlay",
+             "stash", "push", "-u",
+             "-m", f"myoverlay: local edits before returning to {branch}"],
+            cwd=repo,
+            timeout=120,
+        )
+        if stashed.returncode != 0:
+            say(f"warning: could not return this copy to {branch}; running it as-is")
+            return
+        say(f"local changes in this copy were stashed to return to {branch}")
+        say("(recover them with: git stash list / git stash pop)")
+        if run_git(git, ["checkout", branch], cwd=repo, timeout=120).returncode != 0:
+            say(f"warning: could not return this copy to {branch}; running it as-is")
+            return
+    say(f"returned this copy to the {branch} branch")
+
+
 def _checkout_branch(git: Path, repo: Path, branch: str) -> None:
     if _current_branch(git, repo) == branch:
         return
@@ -160,6 +208,12 @@ def ensure_repo(
         return
     if skip_update:
         return
+
+    # No branch asked for means the default branch, not "whatever an old
+    # --branch run left checked out". Managed clones only: a dev checkout's
+    # branch is the developer's business.
+    if is_managed(repo):
+        _return_to_default_branch(git, repo)
 
     proc = run_git(git, ["pull", "--ff-only"], cwd=repo, timeout=120)
     if proc.returncode == 0:
