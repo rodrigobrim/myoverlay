@@ -93,7 +93,24 @@ def get_credentials(cfg: Config):
     if creds and _token_client_mismatch(cfg, creds):
         creds = None
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        from google.auth.exceptions import RefreshError
+
+        try:
+            creds.refresh(Request())
+        except RefreshError as exc:
+            # deleted_client/invalid_client: the OAuth client that issued this
+            # token no longer exists in Google Cloud (client or whole project
+            # deleted). Re-consent cannot fix that - only a new client can, so
+            # say so instead of dying on a raw traceback at the first upload.
+            if "deleted_client" in str(exc) or "invalid_client" in str(exc):
+                raise RuntimeError(
+                    "The Google OAuth client behind "
+                    f"{cfg.youtube.token_file} no longer exists in Google Cloud "
+                    f"(project {cfg.youtube.project_id}). Run `mt google-setup` "
+                    "to create a new one, then `mt google-auth`."
+                ) from exc
+            # Revoked or expired grant: a fresh interactive consent still works.
+            creds = None
     if not creds or not creds.valid:
         if not cfg.youtube.client_secret_file.is_file():
             raise FileNotFoundError(
