@@ -33,6 +33,15 @@ The pipeline working copy lives in `%LOCALAPPDATA%\myoverlay\repo`
 (override with `MYOVERLAY_REPO`; point `MYOVERLAY_REPO_URL` at a fork to
 test branches).
 
+`mt` and `uv` ship beside the exe as well. After an MSI install both are
+plain commands in any terminal — the installer already puts the install
+directory on the machine PATH — so `mt render 2026-07-13` is `myoverlay
+render 2026-07-13` (the shim forwards to the exe next to it, never to some
+other copy on PATH), and the bundled `uv` is there for working on the
+pipeline checkout without installing anything. The PATH entry is appended,
+so a `uv` the machine already has keeps winning; ours is what a clean
+machine resolves.
+
 ## Building the zip (maintainer)
 
 ```
@@ -41,6 +50,16 @@ powershell -File packaging\build_exe.ps1
 
 Downloads MinGit + ffmpeg into `packaging\vendor\` (cached), then produces
 `dist\myoverlay\` and `dist\myoverlay-win64.zip` with PyInstaller.
+
+`path_tools.ps1` then stages `uv.exe` and `mt.cmd` into the payload ROOT
+(uv is vendored into `packaging\vendor\uv`, cached like the others). The
+root is deliberate: PyInstaller 6 puts every bundled data file under
+`_internal\`, and only the payload root becomes the install directory —
+the one already on the machine PATH — so a file dropped there is a command
+after install with no extra PATH entry to add or to clean up on uninstall.
+`build_msi.ps1` runs the same script, so the zip and the installer cannot
+disagree, and a payload built before this existed still gets both without a
+full exe rebuild.
 
 **Rebuild needed only when** `pyproject.toml` gains a new dependency — the
 launcher imports the pulled source against the bundled packages, so pure
