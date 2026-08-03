@@ -11,9 +11,9 @@ from media_tools.pipeline import (
 
 
 def test_has_new_material():
-    a = SourcesSnapshot(dcim_volumes=frozenset(), rs3_files=frozenset())
-    b = SourcesSnapshot(dcim_volumes=frozenset({"E:\\DCIM"}), rs3_files=frozenset())
-    c = SourcesSnapshot(dcim_volumes=frozenset(), rs3_files=frozenset({("s.xrk", 10)}))
+    a = SourcesSnapshot(dcim_volumes=frozenset(), telemetry_files=frozenset())
+    b = SourcesSnapshot(dcim_volumes=frozenset({"E:\\DCIM"}), telemetry_files=frozenset())
+    c = SourcesSnapshot(dcim_volumes=frozenset(), telemetry_files=frozenset({("s.xrk", 10)}))
     assert has_new_material(a, b)
     assert has_new_material(a, c)
     assert not has_new_material(b, b)
@@ -21,14 +21,14 @@ def test_has_new_material():
     assert not has_new_material(b, a)
 
 
-def test_snapshot_sources_sees_rs3_files(cfg, tmp_path, monkeypatch):
-    rs3 = tmp_path / "rs3"
-    rs3.mkdir()
-    (rs3 / "a.xrk").write_bytes(b"12345")
-    cfg.mychron.rs3_data_dirs = [rs3]
+def test_snapshot_sources_sees_telemetry_files(cfg, tmp_path, monkeypatch):
+    tel = tmp_path / "tel"
+    tel.mkdir()
+    (tel / "a.xrk").write_bytes(b"12345")
+    cfg.mychron.data_dirs = [tel]
     monkeypatch.setattr("media_tools.ingest.camera.find_dcim_sources", lambda: [])
     snap = snapshot_sources(cfg)
-    assert snap.rs3_files == frozenset({("a.xrk", 5)})
+    assert snap.telemetry_files == frozenset({("a.xrk", 5)})
 
 
 def test_run_pipeline_stage_order_and_report(cfg, monkeypatch):

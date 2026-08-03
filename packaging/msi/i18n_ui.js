@@ -21,7 +21,6 @@ var STRINGS = {
     "P_LANG_DESC": "Choose the language of the video output.",
     "P_LANG_EXPLAIN": "The selected language applies to the delta overlay labels and to the YouTube video title and description. The configuration files stay in English.",
     "P_LANG_LABEL": "Language:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 is AiM's free program that downloads the telemetry from your MyChron - MyOverlay needs its data. Download it from www.aim-sportline.com.",
     "P_DEPB_TITLE": "Setup cannot continue",
     "P_DEPB_DESC": "The following software must be installed first:",
     "P_DEPB_EXPLAIN": "MyOverlay cannot work without it. Install it now (keep this window open), then click Back and Next to check again - or click Cancel to exit setup and run it again later.",
@@ -69,7 +68,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "Uninstalling removes MyOverlay: the application, its shortcuts, and its settings and saved sign-in.",
     "P_RO_GCLOUD": "Also uninstall the Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "Leave unchecked if other tools on this computer use it.",
-    "P_RO_DATA": "Your videos and telemetry are not touched: your media library and Race Studio 3 data stay exactly as they are."
+    "P_RO_DATA": "Your videos and telemetry are not touched: your media library and downloaded MyChron data stay exactly as they are."
   },
   "pt": {
     "P_BACK": "< &Voltar",
@@ -87,7 +86,6 @@ var STRINGS = {
     "P_LANG_DESC": "Escolha o idioma do v\u00eddeo final.",
     "P_LANG_EXPLAIN": "O idioma selecionado vale para os r\u00f3tulos do overlay (delta) e para o t\u00edtulo e a descri\u00e7\u00e3o do v\u00eddeo no YouTube. Os arquivos de configura\u00e7\u00e3o permanecem em ingl\u00eas.",
     "P_LANG_LABEL": "Idioma:",
-    "P_DEPS_RS3_NOTE": "O Race Studio 3 \u00e9 o programa gratuito da AiM que baixa a telemetria do seu MyChron - o MyOverlay precisa dos dados dele. Baixe-o em www.aim-sportline.com.",
     "P_DEPB_TITLE": "A instala\u00e7\u00e3o n\u00e3o pode continuar",
     "P_DEPB_DESC": "O software a seguir precisa ser instalado primeiro:",
     "P_DEPB_EXPLAIN": "O MyOverlay n\u00e3o funciona sem ele. Instale-o agora (mantenha esta janela aberta) e depois clique em Voltar e Avan\u00e7ar para verificar novamente - ou clique em Cancelar para sair da instala\u00e7\u00e3o e execut\u00e1-la de novo mais tarde.",
@@ -135,7 +133,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "A desinstala\u00e7\u00e3o remove o MyOverlay: o aplicativo, seus atalhos e suas configura\u00e7\u00f5es e o login salvo.",
     "P_RO_GCLOUD": "Desinstalar tamb\u00e9m o Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "Deixe desmarcado se outras ferramentas deste computador o utilizam.",
-    "P_RO_DATA": "Seus v\u00eddeos e telemetria n\u00e3o s\u00e3o afetados: sua biblioteca de m\u00eddia e os dados do Race Studio 3 permanecem exatamente como est\u00e3o."
+    "P_RO_DATA": "Seus v\u00eddeos e telemetria n\u00e3o s\u00e3o afetados: sua biblioteca de m\u00eddia e os dados baixados do MyChron permanecem exatamente como est\u00e3o."
   },
   "es": {
     "P_BACK": "< &Atr\u00e1s",
@@ -153,7 +151,6 @@ var STRINGS = {
     "P_LANG_DESC": "Elija el idioma del v\u00eddeo final.",
     "P_LANG_EXPLAIN": "El idioma seleccionado se aplica a las etiquetas del overlay (delta) y al t\u00edtulo y la descripci\u00f3n del v\u00eddeo en YouTube. Los archivos de configuraci\u00f3n permanecen en ingl\u00e9s.",
     "P_LANG_LABEL": "Idioma:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 es el programa gratuito de AiM que descarga la telemetr\u00eda de su MyChron - MyOverlay necesita sus datos. Desc\u00e1rguelo de www.aim-sportline.com.",
     "P_DEPB_TITLE": "La instalaci\u00f3n no puede continuar",
     "P_DEPB_DESC": "Primero debe instalarse el software siguiente:",
     "P_DEPB_EXPLAIN": "MyOverlay no puede funcionar sin \u00e9l. Inst\u00e1lelo ahora (mantenga esta ventana abierta) y luego haga clic en Atr\u00e1s y Siguiente para comprobar de nuevo - o haga clic en Cancelar para salir de la instalaci\u00f3n y ejecutarla de nuevo m\u00e1s tarde.",
@@ -201,7 +198,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "La desinstalaci\u00f3n elimina MyOverlay: la aplicaci\u00f3n, sus accesos directos y su configuraci\u00f3n e inicio de sesi\u00f3n guardado.",
     "P_RO_GCLOUD": "Desinstalar tambi\u00e9n el Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "D\u00e9jelo sin marcar si otras herramientas de este equipo lo usan.",
-    "P_RO_DATA": "Sus v\u00eddeos y telemetr\u00eda no se ven afectados: su biblioteca multimedia y los datos de Race Studio 3 quedan exactamente como est\u00e1n."
+    "P_RO_DATA": "Sus v\u00eddeos y telemetr\u00eda no se ven afectados: su biblioteca multimedia y los datos descargados del MyChron quedan exactamente como est\u00e1n."
   },
   "ja": {
     "P_BACK": "< \u623b\u308b(&B)",
@@ -219,7 +216,6 @@ var STRINGS = {
     "P_LANG_DESC": "\u51fa\u529b\u52d5\u753b\u306e\u8a00\u8a9e\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
     "P_LANG_EXPLAIN": "\u9078\u629e\u3057\u305f\u8a00\u8a9e\u306f\u3001\u30c7\u30eb\u30bf \u30aa\u30fc\u30d0\u30fc\u30ec\u30a4\u306e\u30e9\u30d9\u30eb\u3068 YouTube \u52d5\u753b\u306e\u30bf\u30a4\u30c8\u30eb/\u8aac\u660e\u306b\u9069\u7528\u3055\u308c\u307e\u3059\u3002\u8a2d\u5b9a\u30d5\u30a1\u30a4\u30eb\u306f\u82f1\u8a9e\u306e\u307e\u307e\u3067\u3059\u3002",
     "P_LANG_LABEL": "\u8a00\u8a9e:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 \u306f\u3001MyChron \u304b\u3089\u30c6\u30ec\u30e1\u30c8\u30ea\u3092\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u3059\u308b AiM \u306e\u7121\u6599\u30d7\u30ed\u30b0\u30e9\u30e0\u3067\u3001MyOverlay \u306f\u305d\u306e\u30c7\u30fc\u30bf\u3092\u5fc5\u8981\u3068\u3057\u307e\u3059\u3002www.aim-sportline.com \u304b\u3089\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
     "P_DEPB_TITLE": "\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u3092\u7d9a\u884c\u3067\u304d\u307e\u305b\u3093",
     "P_DEPB_DESC": "\u5148\u306b\u6b21\u306e\u30bd\u30d5\u30c8\u30a6\u30a7\u30a2\u3092\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3059\u308b\u5fc5\u8981\u304c\u3042\u308a\u307e\u3059:",
     "P_DEPB_EXPLAIN": "MyOverlay \u306f\u3053\u308c\u306a\u3057\u3067\u306f\u52d5\u4f5c\u3057\u307e\u305b\u3093\u3002\u4eca\u3059\u3050\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3057\uff08\u3053\u306e\u30a6\u30a3\u30f3\u30c9\u30a6\u306f\u958b\u3044\u305f\u307e\u307e\u306b\u3057\u3066\u304f\u3060\u3055\u3044\uff09\u3001[\u623b\u308b]\u3068[\u6b21\u3078]\u3092\u30af\u30ea\u30c3\u30af\u3057\u3066\u518d\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u307e\u305f\u306f[\u30ad\u30e3\u30f3\u30bb\u30eb]\u3092\u30af\u30ea\u30c3\u30af\u3057\u3066\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u3092\u7d42\u4e86\u3057\u3001\u5f8c\u3067\u518d\u5b9f\u884c\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
@@ -267,7 +263,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "\u30a2\u30f3\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3059\u308b\u3068 MyOverlay \u3092\u524a\u9664\u3057\u307e\u3059: \u30a2\u30d7\u30ea\u30b1\u30fc\u30b7\u30e7\u30f3\u3001\u30b7\u30e7\u30fc\u30c8\u30ab\u30c3\u30c8\u3001\u8a2d\u5b9a\u3001\u4fdd\u5b58\u3055\u308c\u305f\u30b5\u30a4\u30f3\u30a4\u30f3\u60c5\u5831\u3002",
     "P_RO_GCLOUD": "Google Cloud SDK \u3082\u30a2\u30f3\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3059\u308b",
     "P_RO_GCLOUD_NOTE": "\u3053\u306e\u30b3\u30f3\u30d4\u30e5\u30fc\u30bf\u30fc\u306e\u4ed6\u306e\u30c4\u30fc\u30eb\u304c\u4f7f\u7528\u3057\u3066\u3044\u308b\u5834\u5408\u306f\u30c1\u30a7\u30c3\u30af\u3092\u5916\u3057\u305f\u307e\u307e\u306b\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
-    "P_RO_DATA": "\u52d5\u753b\u3068\u30c6\u30ec\u30e1\u30c8\u30ea\u306b\u306f\u4e00\u5207\u89e6\u308c\u307e\u305b\u3093: \u30e1\u30c7\u30a3\u30a2 \u30e9\u30a4\u30d6\u30e9\u30ea\u3068 Race Studio 3 \u306e\u30c7\u30fc\u30bf\u306f\u305d\u306e\u307e\u307e\u6b8b\u308a\u307e\u3059\u3002"
+    "P_RO_DATA": "\u52d5\u753b\u3068\u30c6\u30ec\u30e1\u30c8\u30ea\u306b\u306f\u4e00\u5207\u89e6\u308c\u307e\u305b\u3093: \u30e1\u30c7\u30a3\u30a2 \u30e9\u30a4\u30d6\u30e9\u30ea\u3068\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u6e08\u307f\u306e MyChron \u30c7\u30fc\u30bf\u306f\u305d\u306e\u307e\u307e\u6b8b\u308a\u307e\u3059\u3002"
   },
   "ar": {
     "P_BACK": "< \u0627\u0644\u0633\u0627\u0628\u0642(&B)",
@@ -285,7 +281,6 @@ var STRINGS = {
     "P_LANG_DESC": "\u0627\u062e\u062a\u0631 \u0644\u063a\u0629 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0627\u0644\u0646\u0627\u062a\u062c.",
     "P_LANG_EXPLAIN": "\u062a\u0646\u0637\u0628\u0642 \u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0645\u062e\u062a\u0627\u0631\u0629 \u0639\u0644\u0649 \u062a\u0633\u0645\u064a\u0627\u062a \u0637\u0628\u0642\u0629 \u0627\u0644\u062f\u0644\u062a\u0627 \u0648\u0639\u0644\u0649 \u0639\u0646\u0648\u0627\u0646 \u0648\u0648\u0635\u0641 \u0641\u064a\u062f\u064a\u0648 YouTube. \u062a\u0628\u0642\u0649 \u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0625\u0646\u062c\u0644\u064a\u0632\u064a\u0629.",
     "P_LANG_LABEL": "\u0627\u0644\u0644\u063a\u0629:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 \u0647\u0648 \u0628\u0631\u0646\u0627\u0645\u062c AiM \u0627\u0644\u0645\u062c\u0627\u0646\u064a \u0627\u0644\u0630\u064a \u064a\u0646\u0632\u0644 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0642\u064a\u0627\u0633 \u0639\u0646 \u0628\u0639\u062f \u0645\u0646 \u062c\u0647\u0627\u0632 MyChron - \u0648\u064a\u062d\u062a\u0627\u062c MyOverlay \u0625\u0644\u0649 \u0628\u064a\u0627\u0646\u0627\u062a\u0647. \u0646\u0632\u0644\u0647 \u0645\u0646 www.aim-sportline.com.",
     "P_DEPB_TITLE": "\u0644\u0627 \u064a\u0645\u0643\u0646 \u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u0625\u0639\u062f\u0627\u062f",
     "P_DEPB_DESC": "\u064a\u062c\u0628 \u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0628\u0631\u0627\u0645\u062c \u0627\u0644\u062a\u0627\u0644\u064a\u0629 \u0623\u0648\u0644\u0627:",
     "P_DEPB_EXPLAIN": "\u0644\u0627 \u064a\u0645\u0643\u0646 \u0644\u0640 MyOverlay \u0627\u0644\u0639\u0645\u0644 \u0628\u062f\u0648\u0646\u0647. \u0642\u0645 \u0628\u062a\u062b\u0628\u064a\u062a\u0647 \u0627\u0644\u0622\u0646 (\u0623\u0628\u0642 \u0647\u0630\u0647 \u0627\u0644\u0646\u0627\u0641\u0630\u0629 \u0645\u0641\u062a\u0648\u062d\u0629)\u060c \u062b\u0645 \u0627\u0646\u0642\u0631 \u0641\u0648\u0642 \u0627\u0644\u0633\u0627\u0628\u0642 \u062b\u0645 \u0627\u0644\u062a\u0627\u0644\u064a \u0644\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u062d\u0642\u0642 - \u0623\u0648 \u0627\u0646\u0642\u0631 \u0641\u0648\u0642 \u0625\u0644\u063a\u0627\u0621 \u0644\u0644\u062e\u0631\u0648\u062c \u0645\u0646 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0648\u062a\u0634\u063a\u064a\u0644\u0647 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649 \u0644\u0627\u062d\u0642\u0627.",
@@ -333,7 +328,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "\u062a\u0624\u062f\u064a \u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0625\u0644\u0649 \u0625\u0632\u0627\u0644\u0629 MyOverlay: \u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0648\u0627\u062e\u062a\u0635\u0627\u0631\u0627\u062a\u0647 \u0648\u0625\u0639\u062f\u0627\u062f\u0627\u062a\u0647 \u0648\u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u062d\u0641\u0648\u0638.",
     "P_RO_GCLOUD": "\u0625\u0632\u0627\u0644\u0629 Google Cloud SDK \u0623\u064a\u0636\u0627",
     "P_RO_GCLOUD_NOTE": "\u0627\u062a\u0631\u0643\u0647 \u0628\u062f\u0648\u0646 \u062a\u062d\u062f\u064a\u062f \u0625\u0630\u0627 \u0643\u0627\u0646\u062a \u0623\u062f\u0648\u0627\u062a \u0623\u062e\u0631\u0649 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0643\u0645\u0628\u064a\u0648\u062a\u0631 \u062a\u0633\u062a\u062e\u062f\u0645\u0647.",
-    "P_RO_DATA": "\u0644\u0627 \u064a\u062a\u0645 \u0627\u0644\u0645\u0633\u0627\u0633 \u0628\u0641\u064a\u062f\u064a\u0648\u0647\u0627\u062a\u0643 \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0642\u064a\u0627\u0633 \u0639\u0646 \u0628\u0639\u062f: \u062a\u0628\u0642\u0649 \u0645\u0643\u062a\u0628\u0629 \u0627\u0644\u0648\u0633\u0627\u0626\u0637 \u0648\u0628\u064a\u0627\u0646\u0627\u062a Race Studio 3 \u0643\u0645\u0627 \u0647\u064a \u062a\u0645\u0627\u0645\u064b\u0627."
+    "P_RO_DATA": "\u0644\u0627 \u064a\u062a\u0645 \u0627\u0644\u0645\u0633\u0627\u0633 \u0628\u0641\u064a\u062f\u064a\u0648\u0647\u0627\u062a\u0643 \u0648\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0642\u064a\u0627\u0633 \u0639\u0646 \u0628\u0639\u062f: \u062a\u0628\u0642\u0649 \u0645\u0643\u062a\u0628\u0629 \u0627\u0644\u0648\u0633\u0627\u0626\u0637 \u0648\u0628\u064a\u0627\u0646\u0627\u062a MyChron \u0627\u0644\u0645\u0646\u0632\u0644\u0629 \u0643\u0645\u0627 \u0647\u064a \u062a\u0645\u0627\u0645\u064b\u0627."
   },
   "fr": {
     "P_BACK": "< &Pr\u00e9c\u00e9dent",
@@ -351,7 +346,6 @@ var STRINGS = {
     "P_LANG_DESC": "Choisissez la langue des vid\u00e9os produites.",
     "P_LANG_EXPLAIN": "La langue choisie s'applique aux libell\u00e9s de l'overlay (delta) ainsi qu'au titre et \u00e0 la description de la vid\u00e9o YouTube. Les fichiers de configuration restent en anglais.",
     "P_LANG_LABEL": "Langue :",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 est le programme gratuit d'AiM qui t\u00e9l\u00e9charge la t\u00e9l\u00e9m\u00e9trie de votre MyChron - MyOverlay a besoin de ses donn\u00e9es. T\u00e9l\u00e9chargez-le sur www.aim-sportline.com.",
     "P_DEPB_TITLE": "L'installation ne peut pas continuer",
     "P_DEPB_DESC": "Le logiciel suivant doit d'abord \u00eatre install\u00e9 :",
     "P_DEPB_EXPLAIN": "MyOverlay ne peut pas fonctionner sans lui. Installez-le maintenant (gardez cette fen\u00eatre ouverte), puis cliquez sur Pr\u00e9c\u00e9dent puis Suivant pour v\u00e9rifier \u00e0 nouveau - ou cliquez sur Annuler pour quitter l'installation et la relancer plus tard.",
@@ -399,7 +393,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "La d\u00e9sinstallation supprime MyOverlay : l'application, ses raccourcis, ses param\u00e8tres et la connexion enregistr\u00e9e.",
     "P_RO_GCLOUD": "D\u00e9sinstaller aussi le Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "Laissez d\u00e9coch\u00e9 si d'autres outils de cet ordinateur l'utilisent.",
-    "P_RO_DATA": "Vos vid\u00e9os et votre t\u00e9l\u00e9m\u00e9trie ne sont pas touch\u00e9es : votre m\u00e9diath\u00e8que et les donn\u00e9es Race Studio 3 restent telles quelles."
+    "P_RO_DATA": "Vos vid\u00e9os et votre t\u00e9l\u00e9m\u00e9trie ne sont pas touch\u00e9es : votre m\u00e9diath\u00e8que et les donn\u00e9es MyChron t\u00e9l\u00e9charg\u00e9es restent telles quelles."
   },
   "it": {
     "P_BACK": "< &Indietro",
@@ -417,7 +411,6 @@ var STRINGS = {
     "P_LANG_DESC": "Scegli la lingua dei video prodotti.",
     "P_LANG_EXPLAIN": "La lingua scelta vale per le etichette dell'overlay (delta) e per il titolo e la descrizione del video su YouTube. I file di configurazione restano in inglese.",
     "P_LANG_LABEL": "Lingua:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 \u00e8 il programma gratuito di AiM che scarica la telemetria dal tuo MyChron - MyOverlay ha bisogno dei suoi dati. Scaricalo da www.aim-sportline.com.",
     "P_DEPB_TITLE": "L'installazione non pu\u00f2 continuare",
     "P_DEPB_DESC": "Il software seguente deve prima essere installato:",
     "P_DEPB_EXPLAIN": "MyOverlay non pu\u00f2 funzionare senza. Installalo ora (tieni aperta questa finestra), poi fai clic su Indietro e Avanti per verificare di nuovo - oppure fai clic su Annulla per uscire dall'installazione ed eseguirla di nuovo pi\u00f9 tardi.",
@@ -465,7 +458,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "La disinstallazione rimuove MyOverlay: l'applicazione, i suoi collegamenti, le sue impostazioni e l'accesso salvato.",
     "P_RO_GCLOUD": "Disinstalla anche il Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "Lascia deselezionato se altri strumenti su questo computer lo usano.",
-    "P_RO_DATA": "I tuoi video e la telemetria non vengono toccati: la tua libreria multimediale e i dati di Race Studio 3 restano esattamente come sono."
+    "P_RO_DATA": "I tuoi video e la telemetria non vengono toccati: la tua libreria multimediale e i dati MyChron scaricati restano esattamente come sono."
   },
   "ru": {
     "P_BACK": "< &\u041d\u0430\u0437\u0430\u0434",
@@ -483,7 +476,6 @@ var STRINGS = {
     "P_LANG_DESC": "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u044f\u0437\u044b\u043a \u0438\u0442\u043e\u0433\u043e\u0432\u043e\u0433\u043e \u0432\u0438\u0434\u0435\u043e.",
     "P_LANG_EXPLAIN": "\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0439 \u044f\u0437\u044b\u043a \u043f\u0440\u0438\u043c\u0435\u043d\u044f\u0435\u0442\u0441\u044f \u043a \u043f\u043e\u0434\u043f\u0438\u0441\u044f\u043c \u043e\u0432\u0435\u0440\u043b\u0435\u044f (\u0434\u0435\u043b\u044c\u0442\u0430) \u0438 \u043a \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044e \u0438 \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u044e \u0432\u0438\u0434\u0435\u043e \u043d\u0430 YouTube. \u0424\u0430\u0439\u043b\u044b \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u043d\u0430 \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u043e\u043c.",
     "P_LANG_LABEL": "\u042f\u0437\u044b\u043a:",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 - \u0431\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u0430\u044f \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 AiM, \u043a\u043e\u0442\u043e\u0440\u0430\u044f \u0441\u043a\u0430\u0447\u0438\u0432\u0430\u0435\u0442 \u0442\u0435\u043b\u0435\u043c\u0435\u0442\u0440\u0438\u044e \u0441 \u0432\u0430\u0448\u0435\u0433\u043e MyChron; MyOverlay \u043d\u0443\u0436\u043d\u044b \u0435\u0451 \u0434\u0430\u043d\u043d\u044b\u0435. \u0421\u043a\u0430\u0447\u0430\u0439\u0442\u0435 \u0435\u0451 \u0441 www.aim-sportline.com.",
     "P_DEPB_TITLE": "\u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0435\u043d\u0430",
     "P_DEPB_DESC": "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043d\u0435\u043e\u0431\u0445\u043e\u0434\u0438\u043c\u043e \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0435 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b:",
     "P_DEPB_EXPLAIN": "MyOverlay \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c \u0431\u0435\u0437 \u043d\u0435\u0451. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 \u0435\u0451 \u0441\u0435\u0439\u0447\u0430\u0441 (\u043d\u0435 \u0437\u0430\u043a\u0440\u044b\u0432\u0430\u0439\u0442\u0435 \u044d\u0442\u043e \u043e\u043a\u043d\u043e), \u0437\u0430\u0442\u0435\u043c \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u00ab\u041d\u0430\u0437\u0430\u0434\u00bb \u0438 \u00ab\u0414\u0430\u043b\u0435\u0435\u00bb, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0441\u043d\u043e\u0432\u0430, - \u0438\u043b\u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u00ab\u041e\u0442\u043c\u0435\u043d\u0430\u00bb, \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u0439\u0442\u0438 \u0438\u0437 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0435\u0451 \u043f\u043e\u0437\u0436\u0435.",
@@ -531,7 +523,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "\u0423\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0443\u0431\u0438\u0440\u0430\u0435\u0442 MyOverlay: \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435, \u0435\u0433\u043e \u044f\u0440\u043b\u044b\u043a\u0438, \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0439 \u0432\u0445\u043e\u0434.",
     "P_RO_GCLOUD": "\u0422\u0430\u043a\u0436\u0435 \u0443\u0434\u0430\u043b\u0438\u0442\u044c Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "\u041e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043d\u0435\u043e\u0442\u043c\u0435\u0447\u0435\u043d\u043d\u044b\u043c, \u0435\u0441\u043b\u0438 \u0438\u043c \u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442\u0441\u044f \u0434\u0440\u0443\u0433\u0438\u0435 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b \u043d\u0430 \u044d\u0442\u043e\u043c \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440\u0435.",
-    "P_RO_DATA": "\u0412\u0430\u0448\u0438 \u0432\u0438\u0434\u0435\u043e \u0438 \u0442\u0435\u043b\u0435\u043c\u0435\u0442\u0440\u0438\u044f \u043d\u0435 \u0437\u0430\u0442\u0440\u0430\u0433\u0438\u0432\u0430\u044e\u0442\u0441\u044f: \u0432\u0430\u0448\u0430 \u043c\u0435\u0434\u0438\u0430\u0442\u0435\u043a\u0430 \u0438 \u0434\u0430\u043d\u043d\u044b\u0435 Race Studio 3 \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u043a\u0430\u043a \u0435\u0441\u0442\u044c."
+    "P_RO_DATA": "\u0412\u0430\u0448\u0438 \u0432\u0438\u0434\u0435\u043e \u0438 \u0442\u0435\u043b\u0435\u043c\u0435\u0442\u0440\u0438\u044f \u043d\u0435 \u0437\u0430\u0442\u0440\u0430\u0433\u0438\u0432\u0430\u044e\u0442\u0441\u044f: \u0432\u0430\u0448\u0430 \u043c\u0435\u0434\u0438\u0430\u0442\u0435\u043a\u0430 \u0438 \u0441\u043a\u0430\u0447\u0430\u043d\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 MyChron \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f \u043a\u0430\u043a \u0435\u0441\u0442\u044c."
   },
   "zh": {
     "P_BACK": "< \u4e0a\u4e00\u6b65(&B)",
@@ -549,7 +541,6 @@ var STRINGS = {
     "P_LANG_DESC": "\u9009\u62e9\u8f93\u51fa\u89c6\u9891\u7684\u8bed\u8a00\u3002",
     "P_LANG_EXPLAIN": "\u6240\u9009\u8bed\u8a00\u5e94\u7528\u4e8e delta \u53e0\u52a0\u5c42\u6807\u7b7e\u4ee5\u53ca YouTube \u89c6\u9891\u7684\u6807\u9898\u548c\u8bf4\u660e\u3002\u914d\u7f6e\u6587\u4ef6\u4ecd\u4fdd\u6301\u82f1\u6587\u3002",
     "P_LANG_LABEL": "\u8bed\u8a00\uff1a",
-    "P_DEPS_RS3_NOTE": "Race Studio 3 \u662f AiM \u7684\u514d\u8d39\u7a0b\u5e8f\uff0c\u7528\u4e8e\u4ece\u60a8\u7684 MyChron \u4e0b\u8f7d\u9065\u6d4b\u6570\u636e\u2014\u2014MyOverlay \u9700\u8981\u5b83\u7684\u6570\u636e\u3002\u8bf7\u4ece www.aim-sportline.com \u4e0b\u8f7d\u3002",
     "P_DEPB_TITLE": "\u65e0\u6cd5\u7ee7\u7eed\u5b89\u88c5",
     "P_DEPB_DESC": "\u5fc5\u987b\u5148\u5b89\u88c5\u4ee5\u4e0b\u8f6f\u4ef6\uff1a",
     "P_DEPB_EXPLAIN": "\u6ca1\u6709\u5b83\uff0cMyOverlay \u65e0\u6cd5\u5de5\u4f5c\u3002\u8bf7\u7acb\u5373\u5b89\u88c5\uff08\u4fdd\u6301\u6b64\u7a97\u53e3\u6253\u5f00\uff09\uff0c\u7136\u540e\u5355\u51fb\u201c\u4e0a\u4e00\u6b65\u201d\u548c\u201c\u4e0b\u4e00\u6b65\u201d\u91cd\u65b0\u68c0\u67e5\u2014\u2014\u6216\u5355\u51fb\u201c\u53d6\u6d88\u201d\u9000\u51fa\u5b89\u88c5\uff0c\u7a0d\u540e\u518d\u8fd0\u884c\u3002",
@@ -597,7 +588,7 @@ var STRINGS = {
     "P_RO_EXPLAIN": "\u5378\u8f7d\u4f1a\u5220\u9664 MyOverlay\uff1a\u5e94\u7528\u7a0b\u5e8f\u3001\u5176\u5feb\u6377\u65b9\u5f0f\uff0c\u4ee5\u53ca\u5176\u8bbe\u7f6e\u548c\u5df2\u4fdd\u5b58\u7684\u767b\u5f55\u4fe1\u606f\u3002",
     "P_RO_GCLOUD": "\u540c\u65f6\u5378\u8f7d Google Cloud SDK",
     "P_RO_GCLOUD_NOTE": "\u5982\u679c\u6b64\u8ba1\u7b97\u673a\u4e0a\u7684\u5176\u4ed6\u5de5\u5177\u4f7f\u7528\u5b83\uff0c\u8bf7\u4e0d\u8981\u52fe\u9009\u3002",
-    "P_RO_DATA": "\u60a8\u7684\u89c6\u9891\u548c\u9065\u6d4b\u6570\u636e\u4e0d\u4f1a\u88ab\u89e6\u78b0\uff1a\u60a8\u7684\u5a92\u4f53\u5e93\u548c Race Studio 3 \u6570\u636e\u5c06\u539f\u6837\u4fdd\u7559\u3002"
+    "P_RO_DATA": "\u60a8\u7684\u89c6\u9891\u548c\u9065\u6d4b\u6570\u636e\u4e0d\u4f1a\u88ab\u89e6\u78b0\uff1a\u60a8\u7684\u5a92\u4f53\u5e93\u548c\u5df2\u4e0b\u8f7d\u7684 MyChron \u6570\u636e\u5c06\u539f\u6837\u4fdd\u7559\u3002"
   }
 };
 

@@ -33,8 +33,6 @@ PIPELINE_PACKAGES = [
     "google_auth_httplib2", "httplib2", "uritemplate", "requests_oauthlib",
     "oauthlib", "requests", "certifi", "charset_normalizer", "idna", "urllib3",
     "pyparsing", "rsa", "pyasn1", "pyasn1_modules", "cachetools",
-    # rs3 automation
-    "pywinauto", "comtypes", "win32ctypes",
     # google-setup automation (mt google-setup -> gcp_console.py). Playwright
     # drives the machine's Edge/Chrome (channel fallback), so only the Python
     # package + its node driver ship - no Chromium browser is bundled.

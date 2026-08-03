@@ -131,7 +131,7 @@ def list_library_videos(cfg: Config) -> LibraryVideoListResult:
 
 
 def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> TelemetryListResult:
-    """Read-only listing of .xrk files in RS3's data dir (default: only new).
+    """Read-only listing of .xrk files in the download dir(s) (default: only new).
 
     Parses each file's header for its session date (the same clock-corrected
     start_utc ingest/scan use) - slower than a bare directory scan, but this

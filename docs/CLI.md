@@ -80,9 +80,7 @@ Copy new camera videos and MyChron sessions into the library (download only).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--source` | `all` | Which sources to ingest: all, camera, mychron |
-| `--rs3` | false | First drive Race Studio 3 to download from the MyChron |
-| `--rs3-only` | false | Only drive the Race Studio 3 download; skip camera/mychron file ingest |
-| `--troubleshoot` | false | RS3 diagnostics (implies --rs3-only): snapshot every step, dump the control tree, unhide already-downloaded sessions, scroll the list, 30s waits |
+| `--device` | false | First download new sessions off the MyChron (USB or WiFi) |
 | `--force` | false | Re-download and refresh files already ingested |
 
 ## mt join
@@ -163,7 +161,7 @@ Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> pub
 | Option | Default | Description |
 | --- | --- | --- |
 | `--publish` / `--no-publish` | false | Also upload to YouTube |
-| `--rs3` / `--no-rs3` | false | Trigger Race Studio 3 download (default: [rs3] enabled) |
+| `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: [mychron] auto_download) |
 | `--resolution`, `--res` |  | Output resolution: hd\|fhd\|2k\|4k (default from config) |
 
 ## mt scan
@@ -233,21 +231,20 @@ MyChron telemetry utilities (list / download).
 
     mt telemetry get [OPTIONS] [NAMES]...
 
-Download MyChron sessions via Race Studio 3 and ingest them. No camera involvement.
+Download MyChron sessions off the device and ingest them. No camera involvement.
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `NAMES` | no | Session filenames from `mt telemetry list local` (omit to download all new) |
+| `NAMES` | no | Session names from `mt telemetry list` (omit to download all new sessions) |
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--rs3` / `--no-rs3` | true | First drive Race Studio 3 to pull sessions off the MyChron |
-| `--troubleshoot` | false | RS3 diagnostics; skips the file ingest step |
-| `--force` | false | Re-ingest files already downloaded (only files already on disk; RS3 hides sessions already pulled off the device) |
+| `--download` / `--no-download` | true | Pull sessions off the MyChron (USB or WiFi) before ingesting; --no-download only ingests files already on disk |
+| `--force` | false | Re-download and re-ingest sessions already handled |
 
 ## mt telemetry list
 
-List MyChron sessions - remote (on the device via RS3, default), local (downloaded to disk), or all (both, including already handled).
+List MyChron sessions - remote (on the device, over USB/WiFi, default), local (downloaded to disk), or all (both, including already handled).
 
 ## mt telemetry list all
 
@@ -264,7 +261,7 @@ local files (including already-ingested).
 
     mt telemetry list local [OPTIONS]
 
-List new MyChron .xrk sessions already downloaded to RS3's data dir. Copies nothing.
+List new MyChron .xrk sessions already downloaded to disk. Copies nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -274,7 +271,7 @@ List new MyChron .xrk sessions already downloaded to RS3's data dir. Copies noth
 
     mt telemetry list remote [OPTIONS]
 
-List MyChron sessions in Race Studio 3's app, on the connected device. Downloads nothing.
+List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |

@@ -12,7 +12,7 @@ ffmpeg or any install needed. One folder, one exe.
 myoverlay run                # everything: MyChron download -> ingest -> sync -> correlate -> render
 myoverlay run --publish      # ... plus YouTube upload
 myoverlay status             # table of every track day
-myoverlay ingest             # pull new files from camera/SD + RS3 folder
+myoverlay ingest             # pull new files from camera/SD + telemetry folder
 myoverlay sync 2026-07-13
 myoverlay correlate 2026-07-13
 myoverlay render 2026-07-13  # --force to re-render
@@ -25,8 +25,8 @@ myoverlay slice 2026-07-13 "12:01-14:02" "31:00-33:10"
 On every start the launcher checks the GitHub repo for new commits and pulls
 them, so the pipeline stays current without reinstalling (`--no-update` or
 `MYOVERLAY_NO_UPDATE=1` skips the check). The first run creates
-`config.toml` and prints its location — edit `library_root` and the Race
-Studio 3 data folder before the first real use. For YouTube upload each
+`config.toml` and prints its location — edit `library_root` and the MyChron
+download folder (`[mychron] data_dirs`) before the first real use. For YouTube upload each
 person needs their own Google OAuth client (see the main README).
 
 The pipeline working copy lives in `%LOCALAPPDATA%\myoverlay\repo`
@@ -73,18 +73,13 @@ The setup wizard asks for:
 1. **Video language** (en default, pt/es/ja/ar/fr/it/ru) — applies to the
    delta overlay labels and the YouTube title/description defaults only;
    config and CLI stay English.
-   Its Next also runs a silent **dependency check** (`detect_deps.js`) —
-   currently Race Studio 3, read from Windows' installed-programs record
-   (the Uninstall registry keys behind Add/Remove Programs). That is the
-   same source `media_tools.ingest.rs3` uses, so the wizard cannot admit an
-   install the pipeline would then refuse to drive; an RS3 Windows has no
-   record of counts as absent. The **version** is checked too: only versions
-   the GUI automation was validated against are accepted (see
-   `VALIDATED_RS3_VERSIONS`, kept in sync with `Rs3Config.validated_versions`
-   by a unit test). Nothing is shown when everything is present; a missing
-   or unsupported blocking dependency detours to a dead-end page listing it,
-   whose only options are Back (return; Next re-checks) and Cancel (exits
-   setup). RS3 is blocking.
+   Its Next also runs a silent **dependency check** (`detect_deps.js`).
+   No external software is currently required — MyOverlay talks to the
+   MyChron directly (USB/WiFi) and bundles everything else — so the DEPS
+   table is empty; the framework stays for any future dependency. Nothing
+   is shown when everything is present; a missing blocking dependency
+   detours to a dead-end page listing it, whose only options are Back
+   (return; Next re-checks) and Cancel (exits setup).
 2. **Google Cloud SDK** — the official Windows installer
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an
@@ -120,5 +115,5 @@ the software installed: app files, shortcuts, `install_settings.yaml`, and
 `%LOCALAPPDATA%\myoverlay` (pipeline clone, config.toml, Google
 credentials). A checkbox on the remove-options page additionally
 uninstalls the Google Cloud SDK (unchecked by default). The media library
-(`library_root` — videos/telemetry) and Race Studio 3 data are never
+(`library_root` — videos/telemetry) and downloaded MyChron data are never
 touched.

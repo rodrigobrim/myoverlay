@@ -61,17 +61,6 @@ S: dict[str, dict[str, str]] = {
     ])),
     "LANG_LABEL": dict(zip(L, ["Language:", "Idioma:", "Idioma:", "言語:", "اللغة:", "Langue :", "Lingua:", "Язык:"])),
 
-    # -------- dependency hints (shown on the missing-required page) --------
-    "DEPS_RS3_NOTE": dict(zip(L, [
-        "Race Studio 3 is AiM's free program that downloads the telemetry from your MyChron - MyOverlay needs its data. Download it from www.aim-sportline.com.",
-        "O Race Studio 3 é o programa gratuito da AiM que baixa a telemetria do seu MyChron - o MyOverlay precisa dos dados dele. Baixe-o em www.aim-sportline.com.",
-        "Race Studio 3 es el programa gratuito de AiM que descarga la telemetría de su MyChron - MyOverlay necesita sus datos. Descárguelo de www.aim-sportline.com.",
-        "Race Studio 3 は、MyChron からテレメトリをダウンロードする AiM の無料プログラムで、MyOverlay はそのデータを必要とします。www.aim-sportline.com からダウンロードしてください。",
-        "Race Studio 3 هو برنامج AiM المجاني الذي ينزل بيانات القياس عن بعد من جهاز MyChron - ويحتاج MyOverlay إلى بياناته. نزله من www.aim-sportline.com.",
-        "Race Studio 3 est le programme gratuit d'AiM qui télécharge la télémétrie de votre MyChron - MyOverlay a besoin de ses données. Téléchargez-le sur www.aim-sportline.com.",
-        "Race Studio 3 è il programma gratuito di AiM che scarica la telemetria dal tuo MyChron - MyOverlay ha bisogno dei suoi dati. Scaricalo da www.aim-sportline.com.",
-        "Race Studio 3 - бесплатная программа AiM, которая скачивает телеметрию с вашего MyChron; MyOverlay нужны её данные. Скачайте её с www.aim-sportline.com.",
-    ])),
     # -------- missing-required-software page (dead end) --------
     "DEPB_TITLE": dict(zip(L, ["Setup cannot continue", "A instalação não pode continuar", "La instalación no puede continuar", "セットアップを続行できません", "لا يمكن متابعة الإعداد", "L'installation ne peut pas continuer", "L'installazione non può continuare", "Установка не может быть продолжена"])),
     "DEPB_DESC": dict(zip(L, ["The following software must be installed first:", "O software a seguir precisa ser instalado primeiro:", "Primero debe instalarse el software siguiente:", "先に次のソフトウェアをインストールする必要があります:", "يجب تثبيت البرامج التالية أولا:", "Le logiciel suivant doit d'abord être installé :", "Il software seguente deve prima essere installato:", "Сначала необходимо установить следующие программы:"])),
@@ -234,14 +223,14 @@ S: dict[str, dict[str, str]] = {
     "RO_GCLOUD": dict(zip(L, ["Also uninstall the Google Cloud SDK", "Desinstalar também o Google Cloud SDK", "Desinstalar también el Google Cloud SDK", "Google Cloud SDK もアンインストールする", "إزالة Google Cloud SDK أيضا", "Désinstaller aussi le Google Cloud SDK", "Disinstalla anche il Google Cloud SDK", "Также удалить Google Cloud SDK"])),
     "RO_GCLOUD_NOTE": dict(zip(L, ["Leave unchecked if other tools on this computer use it.", "Deixe desmarcado se outras ferramentas deste computador o utilizam.", "Déjelo sin marcar si otras herramientas de este equipo lo usan.", "このコンピューターの他のツールが使用している場合はチェックを外したままにしてください。", "اتركه بدون تحديد إذا كانت أدوات أخرى على هذا الكمبيوتر تستخدمه.", "Laissez décoché si d'autres outils de cet ordinateur l'utilisent.", "Lascia deselezionato se altri strumenti su questo computer lo usano.", "Оставьте неотмеченным, если им пользуются другие программы на этом компьютере."])),
     "RO_DATA": dict(zip(L, [
-        "Your videos and telemetry are not touched: your media library and Race Studio 3 data stay exactly as they are.",
-        "Seus vídeos e telemetria não são afetados: sua biblioteca de mídia e os dados do Race Studio 3 permanecem exatamente como estão.",
-        "Sus vídeos y telemetría no se ven afectados: su biblioteca multimedia y los datos de Race Studio 3 quedan exactamente como están.",
-        "動画とテレメトリには一切触れません: メディア ライブラリと Race Studio 3 のデータはそのまま残ります。",
-        "لا يتم المساس بفيديوهاتك وبيانات القياس عن بعد: تبقى مكتبة الوسائط وبيانات Race Studio 3 كما هي تمامًا.",
-        "Vos vidéos et votre télémétrie ne sont pas touchées : votre médiathèque et les données Race Studio 3 restent telles quelles.",
-        "I tuoi video e la telemetria non vengono toccati: la tua libreria multimediale e i dati di Race Studio 3 restano esattamente come sono.",
-        "Ваши видео и телеметрия не затрагиваются: ваша медиатека и данные Race Studio 3 остаются как есть.",
+        "Your videos and telemetry are not touched: your media library and downloaded MyChron data stay exactly as they are.",
+        "Seus vídeos e telemetria não são afetados: sua biblioteca de mídia e os dados baixados do MyChron permanecem exatamente como estão.",
+        "Sus vídeos y telemetría no se ven afectados: su biblioteca multimedia y los datos descargados del MyChron quedan exactamente como están.",
+        "動画とテレメトリには一切触れません: メディア ライブラリとダウンロード済みの MyChron データはそのまま残ります。",
+        "لا يتم المساس بفيديوهاتك وبيانات القياس عن بعد: تبقى مكتبة الوسائط وبيانات MyChron المنزلة كما هي تمامًا.",
+        "Vos vidéos et votre télémétrie ne sont pas touchées : votre médiathèque et les données MyChron téléchargées restent telles quelles.",
+        "I tuoi video e la telemetria non vengono toccati: la tua libreria multimediale e i dati MyChron scaricati restano esattamente come sono.",
+        "Ваши видео и телеметрия не затрагиваются: ваша медиатека и скачанные данные MyChron остаются как есть.",
     ])),
 }
 
@@ -262,7 +251,6 @@ ZH: dict[str, str] = {
     "LANG_DESC": "选择输出视频的语言。",
     "LANG_EXPLAIN": "所选语言应用于 delta 叠加层标签以及 YouTube 视频的标题和说明。配置文件仍保持英文。",
     "LANG_LABEL": "语言：",
-    "DEPS_RS3_NOTE": "Race Studio 3 是 AiM 的免费程序，用于从您的 MyChron 下载遥测数据——MyOverlay 需要它的数据。请从 www.aim-sportline.com 下载。",
     "DEPB_TITLE": "无法继续安装",
     "DEPB_DESC": "必须先安装以下软件：",
     "DEPB_EXPLAIN": "没有它，MyOverlay 无法工作。请立即安装（保持此窗口打开），然后单击“上一步”和“下一步”重新检查——或单击“取消”退出安装，稍后再运行。",
@@ -310,7 +298,7 @@ ZH: dict[str, str] = {
     "RO_EXPLAIN": "卸载会删除 MyOverlay：应用程序、其快捷方式，以及其设置和已保存的登录信息。",
     "RO_GCLOUD": "同时卸载 Google Cloud SDK",
     "RO_GCLOUD_NOTE": "如果此计算机上的其他工具使用它，请不要勾选。",
-    "RO_DATA": "您的视频和遥测数据不会被触碰：您的媒体库和 Race Studio 3 数据将原样保留。",
+    "RO_DATA": "您的视频和遥测数据不会被触碰：您的媒体库和已下载的 MyChron 数据将原样保留。",
 }
 for _key, _zh in ZH.items():
     assert _key in S, f"ZH has unknown key {_key}"

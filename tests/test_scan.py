@@ -30,7 +30,7 @@ def scan_cfg(cfg, tmp_path):
     tel = tmp_path / "tel"
     tel.mkdir()
     cfg.camera.source_dirs = [cam]
-    cfg.mychron.rs3_data_dirs = [tel]
+    cfg.mychron.data_dirs = [tel]
     return cfg, cam, tel
 
 

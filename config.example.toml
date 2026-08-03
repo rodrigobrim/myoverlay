@@ -18,34 +18,23 @@ extensions = [".mp4", ".mov"]
 clock_tolerance_s = 900.0
 
 [mychron]
-# Where Race Studio 3 stores downloaded .xrk sessions.
-rs3_data_dirs = ["C:/AIM_SPORT/RaceStudio3/user/data"]
-# Only the .xrk log is a session; RS3's compressed .xrz twin is always skipped.
+# Where downloaded MyChron sessions live on disk. `mt telemetry get` talks
+# to the device directly (USB or WiFi) and writes .xrk files into the FIRST
+# entry; every entry is scanned on ingest. Defaults to ~/Videos/karting/mychron.
+# Add Race Studio 3's data folder here if you have old sessions there
+# (rs3_data_dirs is still accepted as a legacy alias for this key).
+# data_dirs = ["C:/Users/you/Videos/karting/mychron", "C:/AIM_SPORT/RaceStudio3/user/data"]
+# Only the .xrk log is a session; a compressed .xrz twin is always skipped.
 extensions = [".xrk"]
 # timezone = "America/Sao_Paulo"
-
-[rs3]
-# Zero-touch MyChron download: drive Race Studio 3's UI automatically.
-# Brittle by nature - the pipeline also works if you click Download yourself.
-enabled = false
-# Auto-detected under C:/AIM_SPORT/RaceStudio3 when unset (the real 3.83
-# binary is 64/AiMRS3-64-ReleaseU.exe). Set only for unusual installs.
-# exe_path = "C:/AIM_SPORT/RaceStudio3/64/AiMRS3-64-ReleaseU.exe"
-# Note: RS3's real window title has no space ("RaceStudio3 (64 bit) 3.83.39")
-window_title_re = ".*Race\\s*Studio.*"
-# Only RS3 versions validated against real UI snapshots are ever driven -
-# any other version is refused instead of clicked blind. Empty list disables
-# the check (not recommended).
-# validated_versions = ["3.83.39"]
-download_button_names = ["Data Download", "Download Data", "Download"]
-trigger_interval_s = 600.0
-# With no device on USB, connect to the MyChron over WiFi (and disconnect
-# again afterwards - RS3 holding the device's WiFi replaces the house
-# network, i.e. no internet until released).
-# wifi_connect = true
-# Hands-off pause after clicking Connect while the WiFi handshake runs.
-# Raise this if devices land in the red "Can't communicate" state.
-# wifi_settle_s = 3.0
+# Force one transport for device downloads: "usb" | "wifi". Omit to try USB
+# first (3x faster, charges the logger), then WiFi. WiFi downloads join the
+# MyChron's own access point, replacing the house network while they run.
+# transport = "usb"
+# Zero-touch device download: `mt run` / the watcher pull new sessions off
+# the MyChron whenever one is reachable, no clicks needed.
+auto_download = false
+download_interval_s = 600.0
 
 [watch]
 poll_s = 30.0

@@ -27,13 +27,13 @@ class PipelineReport:
 
 
 def run_pipeline(
-    cfg: Config, publish: bool = False, trigger_rs3: bool | None = None
+    cfg: Config, publish: bool = False, download: bool | None = None
 ) -> PipelineReport:
-    """Full chain. trigger_rs3=None means: download MyChron data whenever the
-    RS3 automation is enabled in config - the pipeline takes every action
-    itself by default."""
-    if trigger_rs3 is None:
-        trigger_rs3 = cfg.rs3.enabled
+    """Full chain. download=None means: pull MyChron data off the device
+    whenever [mychron] auto_download is enabled in config - the pipeline
+    takes every action itself by default."""
+    if download is None:
+        download = cfg.mychron.auto_download
     from .correlate import correlate_day
     from .ingest.camera import ingest_camera
     from .ingest.mychron import ingest_mychron
@@ -42,10 +42,10 @@ def run_pipeline(
 
     report = PipelineReport()
 
-    if trigger_rs3 and cfg.rs3.enabled:
-        from .ingest.rs3 import trigger_rs3_download
+    if download:
+        from .ingest.aim import download_sessions
 
-        report.add("rs3", trigger_rs3_download(cfg))
+        report.add("mychron:download", download_sessions(cfg).lines())
 
     cam = ingest_camera(cfg)
     report.add("ingest:camera", cam.copied + [f"! {e}" for e in cam.errors])
@@ -80,7 +80,7 @@ def run_pipeline(
 @dataclass(frozen=True)
 class SourcesSnapshot:
     dcim_volumes: frozenset[str]
-    rs3_files: frozenset[tuple[str, int]]
+    telemetry_files: frozenset[tuple[str, int]]
 
 
 def snapshot_sources(cfg: Config) -> SourcesSnapshot:
@@ -89,42 +89,43 @@ def snapshot_sources(cfg: Config) -> SourcesSnapshot:
 
     return SourcesSnapshot(
         dcim_volumes=frozenset(str(p) for p in find_dcim_sources()),
-        rs3_files=frozenset((p.name, p.stat().st_size) for p in scan_sources(cfg)),
+        telemetry_files=frozenset((p.name, p.stat().st_size) for p in scan_sources(cfg)),
     )
 
 
 def has_new_material(before: SourcesSnapshot, after: SourcesSnapshot) -> bool:
     return bool(after.dcim_volumes - before.dcim_volumes) or bool(
-        after.rs3_files - before.rs3_files
+        after.telemetry_files - before.telemetry_files
     )
 
 
 def watch(cfg: Config, publish: bool, on_report, once: bool = False) -> None:
-    """Poll for new camera volumes / RS3 files and run the pipeline on change.
+    """Poll for new camera volumes / telemetry files and run the pipeline on change.
 
     on_report: callable receiving (PipelineReport) after each triggered run.
     """
     last = snapshot_sources(cfg)
 
     # Initial pass picks up anything that appeared while the watcher was down
-    # (and, with rs3 enabled, immediately tries a MyChron download).
+    # (and, with auto_download enabled, immediately tries a MyChron download).
     on_report(run_pipeline(cfg, publish=publish))
-    last_rs3_trigger = time.monotonic()
+    last_download = time.monotonic()
 
     while True:
         if once:
             return
         time.sleep(cfg.watch.poll_s)
 
-        trigger_rs3 = (
-            cfg.rs3.enabled and time.monotonic() - last_rs3_trigger > cfg.rs3.trigger_interval_s
+        download = (
+            cfg.mychron.auto_download
+            and time.monotonic() - last_download > cfg.mychron.download_interval_s
         )
         current = snapshot_sources(cfg)
-        if has_new_material(last, current) or trigger_rs3:
-            if trigger_rs3:
-                last_rs3_trigger = time.monotonic()
+        if has_new_material(last, current) or download:
+            if download:
+                last_download = time.monotonic()
             time.sleep(cfg.watch.settle_s)
-            on_report(run_pipeline(cfg, publish=publish, trigger_rs3=trigger_rs3))
+            on_report(run_pipeline(cfg, publish=publish, download=download))
             current = snapshot_sources(cfg)
         last = current
 

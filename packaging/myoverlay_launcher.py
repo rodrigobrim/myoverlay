@@ -313,7 +313,7 @@ def ensure_config(repo: Path) -> None:
         say(f"    {cfg}")
         say("Open it in Notepad and set at least:")
         say("    library_root      (where processed videos will live)")
-        say("    [mychron] rs3_data_dirs  (Race Studio 3 data folder)")
+        say("    [mychron] data_dirs  (where MyChron downloads are kept)")
         say("For YouTube upload, see the README section 'YouTube setup'.")
         say("=" * 62)
 

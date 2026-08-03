@@ -16,5 +16,5 @@ def cfg(tmp_path: Path) -> Config:
     return Config(
         library_root=tmp_path / "library",
         camera=CameraConfig(source_dirs=[], timezone="America/Sao_Paulo"),
-        mychron=MychronConfig(rs3_data_dirs=[], timezone="America/Sao_Paulo"),
+        mychron=MychronConfig(data_dirs=[], timezone="America/Sao_Paulo"),
     )

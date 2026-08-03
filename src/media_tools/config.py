@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 def _local_tzinfo() -> tzinfo:
@@ -41,12 +41,26 @@ class CameraConfig(BaseModel):
 
 
 class MychronConfig(BaseModel):
-    # Where Race Studio 3 stores downloaded sessions.
-    rs3_data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path("C:/AIM_SPORT/RaceStudio3/user/data")]
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Where downloaded MyChron sessions live on disk. The first entry is
+    # where `mt telemetry get` writes device downloads; every entry is
+    # scanned on ingest. `rs3_data_dirs` is accepted as a legacy alias
+    # (configs from when Race Studio 3 did the downloading).
+    data_dirs: list[Path] = Field(
+        default_factory=lambda: [Path.home() / "Videos" / "karting" / "mychron"],
+        validation_alias=AliasChoices("data_dirs", "rs3_data_dirs"),
     )
-    # .xrz files are compressed twins of the .xrk RS3 writes alongside;
-    # ingesting both would duplicate every session.
+    # Force one transport for device downloads: "usb" | "wifi";
+    # null tries USB first (faster, charges the logger), then WiFi.
+    transport: str | None = None
+    # Zero-touch device download: with auto_download on, `mt run` / the
+    # watcher pull new sessions off the MyChron whenever one is reachable
+    # (WiFi downloads replace the house network while they run).
+    auto_download: bool = False
+    download_interval_s: float = 600.0
+    # .xrz files are compressed twins of the .xrk (legacy Race Studio 3
+    # data dirs hold both); ingesting both would duplicate every session.
     extensions: list[str] = Field(default_factory=lambda: [".xrk"])
     # Timezone of the MyChron 'Log Date'/'Log Time' metadata; null = system local.
     timezone: str | None = None
@@ -63,46 +77,6 @@ class MychronConfig(BaseModel):
         if self.clock_reads and self.clock_actual:
             return self.clock_actual - self.clock_reads
         return timedelta(0)
-
-
-class Rs3Config(BaseModel):
-    """Best-effort GUI automation of Race Studio 3 (no CLI exists).
-
-    When enabled, the watcher periodically brings RS3 up and clicks its
-    download control so new MyChron sessions land in rs3_data_dirs without a
-    human click. Brittle by nature (breaks if AiM redesigns the UI); the
-    folder watcher keeps working either way.
-    """
-
-    enabled: bool = False
-    exe_path: Path | None = None  # e.g. C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe
-    # Real RS3 window title is e.g. "RaceStudio3 (64 bit) 3.83.11" (no space).
-    window_title_re: str = ".*Race\\s*Studio.*"
-    # RS3 3.83 names its download view button "Data Download".
-    download_button_names: list[str] = Field(
-        default_factory=lambda: ["Data Download", "Download Data", "Download"]
-    )
-    trigger_interval_s: float = 600.0
-    # The automation clicks by control name in a UI AiM redesigns at will, so
-    # it only ever drives RS3 versions whose layout was validated against real
-    # UI snapshots. Anything else is refused with a clear message rather than
-    # clicked blind - a mis-click mid-transfer can wedge the MyChron.
-    validated_versions: list[str] = Field(default_factory=lambda: ["3.83.39"])
-    # With no device on USB, open RS3's "Available devices" dialog and connect
-    # to the MyChron over WiFi before downloading.
-    wifi_connect: bool = True
-    # How long to wait for a WiFi-connected device to show up in RS3 after
-    # clicking Connect (the handshake goes over the device's own AP).
-    wifi_connect_timeout_s: float = 120.0
-    # Hands-off settle right after clicking Connect, before the first UIA
-    # poll. The handshake runs on RS3's UI thread, so during this window the
-    # UI is left completely alone. 3 connected cleanly against a real
-    # handshake; raise this if devices start landing in the red "Can't
-    # communicate" state after Connect.
-    wifi_settle_s: float = 3.0
-    # SSID prefix AiM devices broadcast; also the search filter that isolates
-    # them from house networks in the Available devices list.
-    wifi_device_prefix: str = "AiM-"
 
 
 class WatchConfig(BaseModel):
@@ -191,7 +165,6 @@ class Config(BaseModel):
     language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
     mychron: MychronConfig = Field(default_factory=MychronConfig)
-    rs3: Rs3Config = Field(default_factory=Rs3Config)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
