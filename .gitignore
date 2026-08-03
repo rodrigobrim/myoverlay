@@ -11,7 +11,7 @@ __pycache__/
 *secret*.json
 *cred*.json
 *client_secret*
-token.json
+token*.json
 .env
 
 # Machine-specific configuration (paths, track settings, YouTube privacy).
