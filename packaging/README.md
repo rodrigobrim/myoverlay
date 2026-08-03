@@ -57,6 +57,17 @@ powershell -File packaging\msi\build_msi.ps1  # -> dist\myoverlay-setup.msi
 `build_msi.ps1` downloads the WiX 3.14 binaries into `packaging\vendor\wix`
 (cached), harvests `dist\myoverlay\` and links `dist\myoverlay-setup.msi`.
 
+The Google Cloud SDK is bundled as Google's own archive — one file — and is
+expanded on the target machine by the `ExpandGCloud` custom action
+(`gcloud_payload.js`), not harvested into the MSI. That is not an
+optimisation: the SDK's deepest entry sits 145 characters below its own
+root, which pushes a build checkout past Windows' 260-character path limit,
+and the WiX 3.14 tools are .NET Framework programs that simply report such a
+file as "cannot be found". Installed, the same path is ~189 characters and
+perfectly fine. It also keeps ~30k files out of the harvest, which was most
+of the build time. The expanded tree has no MSI components, so
+`RemoveBundledGCloud` is what deletes it on uninstall and on rollback.
+
 The setup wizard asks for:
 
 1. **Video language** (en default, pt/es/ja/ar/fr/it/ru) — applies to the
