@@ -1,4 +1,4 @@
-"""Derive the MyChron clock error by audio-syncing the Jul 13 clip against
+﻿"""Derive the MyChron clock error by audio-syncing the Jul 13 clip against
 each downloaded session, with no assumption about the offset."""
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,7 +10,7 @@ from media_tools.ingest.mychron import _parse_log_datetime
 from libxrk import aim_xrk
 
 CLIP = Path(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\video\DJI_20260713081722_0062_D.MP4")
-SESSIONS = sorted(Path(r"C:\AIM_SPORT\RaceStudio3\user\data\2047-10-29").glob("*.xrk"))
+SESSIONS = sorted(Path(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\telemetry").glob("*.xrk"))
 TZ = ZoneInfo("America/Sao_Paulo")
 
 video_start_utc = datetime(2026, 7, 13, 8, 17, 22, tzinfo=TZ).astimezone(ZoneInfo("UTC"))

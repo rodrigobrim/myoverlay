@@ -1,4 +1,4 @@
-"""Which audio feature of the real DJI clip correlates with real kart speed?"""
+﻿"""Which audio feature of the real DJI clip correlates with real kart speed?"""
 import numpy as np
 from pathlib import Path
 from media_tools.sync import (
@@ -43,7 +43,7 @@ top = np.argsort(seg_spec)[-12:][::-1]
 print("dominant freqs while driving (t~600s):", sorted(freqs[top].round(1)))
 
 # telemetry: concatenate all four sessions is wrong (gaps unknown); use 0081 (16 laps)
-log = aim_xrk(r"C:\AIM_SPORT\RaceStudio3\user\data\2047-10-29\KGV 101 _Race_a_0081.xrk")
+log = aim_xrk(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\telemetry\KGV 101 _Race_a_0081.xrk")
 df = unified_frame(log)
 t_end = float(df["t_s"].iloc[-1])
 grid = np.arange(0, t_end, 1/FEATURE_HZ)

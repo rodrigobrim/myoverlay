@@ -19,11 +19,11 @@ from dateutil import parser as dtparser
 from ..config import Config
 from ..library import Lap, Library, TelemetryLog
 
-# Legacy Race Studio 3 data dirs hold a compressed .xrz twin alongside every
-# .xrk session. It carries no extra information (the .xrk is the real telemetry
-# libxrk reads), so it is never a session in its own right - always skip it,
-# even if a config lists it in `extensions`. (Device downloads via ingest/aim.py
-# are decompressed to .xrk on arrival, so new files never hit this.) Mirrors
+# A data dir can hold a compressed .xrz twin alongside an .xrk session. It
+# carries no extra information (the .xrk is the real telemetry libxrk reads),
+# so it is never a session in its own right - always skip it, even if a config
+# lists it in `extensions`. (Device downloads via ingest/aim.py are
+# decompressed to .xrk on arrival, so new files never hit this.) Mirrors
 # camera.SKIP_SUFFIXES for .lrf/.thm proxies.
 SKIP_SUFFIXES = {".xrz"}
 

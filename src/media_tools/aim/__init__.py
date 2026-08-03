@@ -10,9 +10,10 @@ storage layout are per model.
     aim/mychron/v6/wifi.py  MyChron6 over WiFi
 
 Only the MyChron6 is implemented. Other models will need their own package:
-RS3 splits devices across CStrumentoMXL2 (2G, has a filesystem) and the
+AiM splits devices across CStrumentoMXL2 (2G, has a filesystem) and the
 CStrumentoSpansionNoFileSystem family (older, no filesystem, different
 download path entirely), so the command layer here is not portable as-is.
+See docs/mychron-protocol-re.md for how the protocol was recovered.
 """
 
 from .errors import NoDeviceError

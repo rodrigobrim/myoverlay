@@ -1,4 +1,4 @@
-"""Coarse activity timelines: video audio energy vs telemetry session layout."""
+﻿"""Coarse activity timelines: video audio energy vs telemetry session layout."""
 import numpy as np
 from pathlib import Path
 from media_tools.sync import AUDIO_RATE
@@ -21,7 +21,7 @@ for row in range(0, n, 30):
 TZ = ZoneInfo("America/Sao_Paulo")
 print("\nsessions (device clock, local):")
 starts = []
-for p in sorted(Path(r"C:\AIM_SPORT\RaceStudio3\user\data\2047-10-29").glob("*.xrk")):
+for p in sorted(Path(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\telemetry").glob("*.xrk")):
     log = aim_xrk(str(p))
     start = _parse_log_datetime(log.metadata, TZ).astimezone(TZ)
     t = log.channels["GPS Speed"]

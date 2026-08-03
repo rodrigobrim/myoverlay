@@ -53,7 +53,7 @@ IOCTL_DRIVER_INFO = 0x220014
 
 DIR_OUT, DIR_IN = 0x40, 0xC0
 EP_BULK_IN = 0x81
-DEFAULT_TIMEOUT = 0x1388          # 5000 ms, matching Race Studio
+DEFAULT_TIMEOUT = 0x1388          # 5000 ms, matching AiM's own software
 TEARDOWN_TIMEOUT = 300            # ms; close() must not hang on a dead device
 
 OP_IDENTIFY = 0x00010010
@@ -232,7 +232,7 @@ class Transport:
     def close(self):
         """Terminate the session, then release the handle.
 
-        This is what Race Studio does: its last call before CloseHandle is a
+        This is what AiM's own software does: its last call before CloseHandle is a
         single zero-length control OUT with bRequest 2, and nothing else - no
         draining, no polling. Every transfer already ends with the same call,
         so by the time we get here the logger is idle and this is one round

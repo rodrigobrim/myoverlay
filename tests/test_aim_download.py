@@ -72,7 +72,7 @@ def test_list_remote_sessions(dl_cfg, monkeypatch):
     assert all(not s.downloaded for s in result.sessions)
     assert dev.closed
 
-    # One session already on disk (with the RS3-era venue prefix): default
+    # One session already on disk (with a legacy venue prefix): default
     # listing hides it, include_downloaded shows it flagged.
     d.mkdir(parents=True)
     (d / "KGV 101 _Race_a_0186.xrk").write_bytes(b"x")

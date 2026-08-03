@@ -21,9 +21,7 @@ clock_tolerance_s = 900.0
 # Where downloaded MyChron sessions live on disk. `mt telemetry get` talks
 # to the device directly (USB or WiFi) and writes .xrk files into the FIRST
 # entry; every entry is scanned on ingest. Defaults to ~/Videos/karting/mychron.
-# Add Race Studio 3's data folder here if you have old sessions there
-# (rs3_data_dirs is still accepted as a legacy alias for this key).
-# data_dirs = ["C:/Users/you/Videos/karting/mychron", "C:/AIM_SPORT/RaceStudio3/user/data"]
+# data_dirs = ["C:/Users/you/Videos/karting/mychron"]
 # Only the .xrk log is a session; a compressed .xrz twin is always skipped.
 extensions = [".xrk"]
 # timezone = "America/Sao_Paulo"

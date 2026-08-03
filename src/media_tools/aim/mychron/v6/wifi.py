@@ -82,7 +82,7 @@ def timestamp_body() -> bytes:
     """68-byte frame carrying the PC clock; the device waits for it.
 
     It holds TWO y/m/d/h/m records and they are not the same clock. In the
-    captured Race Studio exchange they read 14:38 at +12 and 11:38 at +44 -
+    captured exchange from AiM's own software they read 14:38 at +12 and 11:38 at +44 -
     exactly the UTC-3 offset of the machine that produced it. So +12 is UTC
     and +44 is local. Writing local time into both puts a wrong UTC in front
     of a device that may discipline its clock from it.
