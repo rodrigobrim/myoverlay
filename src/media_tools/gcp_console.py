@@ -624,16 +624,15 @@ def _run_flow(cfg: Config, page, project: str, report: list[str], ts: _Shoot) ->
     if cfg.youtube.client_secret_file.is_file():
         other = _secret_project(cfg.youtube.client_secret_file)
         if other and other != project:
-            # A secret for another project cannot authorize this one, and a
-            # project can be deleted out from under it - so stopping here just
-            # asked the human to do a rename we can do safely ourselves. Never
-            # overwrite it though: Google reveals a secret once, so the file is
-            # unrecoverable and moves aside under a name that records its
-            # project (the run then mints a client for the configured one).
-            kept = _rotate_secret_aside(cfg.youtube.client_secret_file, other)
+            # A secret for another project cannot authorize this one, so this
+            # run continues on to mint one. The existing file is NOT moved
+            # here: the browser steps below can still fail (a closed window is
+            # enough), and rotating first turned a run that merely failed into
+            # one that left no client_secret.json at all. It moves aside at
+            # write time instead, once a replacement actually exists.
             report.append(
                 f"client secret at {cfg.youtube.client_secret_file} belongs to project "
-                f"'{other}', not '{project}' - kept as {kept.name}"
+                f"'{other}', not '{project}' - minting one for '{project}'"
             )
         else:
             report.append(
@@ -813,7 +812,7 @@ def _secret_from_body(cfg: Config, body: str, report: list[str]) -> bool:
         }
     }
     dest = cfg.youtube.client_secret_file
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    _claim_secret_path(dest, report)
     dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
     report.append("client secret captured from the create API response")
     return True
@@ -841,7 +840,7 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
             # click. Waiting 30s per candidate only ever stalled the run.
             with page.expect_download(timeout=6_000) as dl:
                 loc.click(timeout=8_000)
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            _claim_secret_path(dest, report)
             dl.value.save_as(str(dest))
             return True
         except Exception as exc:  # noqa: BLE001
@@ -1011,6 +1010,18 @@ def _rotate_secret_aside(path: Path, project: str) -> Path:
             path.rename(kept)
             return kept
     raise OSError(f"could not find a free backup name beside {path}")
+
+
+def _claim_secret_path(dest: Path, report: list[str] | None = None) -> None:
+    """Free `dest` for a secret we are about to write, without ever destroying
+    the one already there. Called at write time, not before the browser work:
+    the old secret stays usable right up to the moment a replacement exists."""
+    if not dest.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        return
+    kept = _rotate_secret_aside(dest, _secret_project(dest) or "previous")
+    if report is not None:
+        report.append(f"previous client secret kept as {kept.name}")
 
 
 def _account_email(page) -> str | None:
