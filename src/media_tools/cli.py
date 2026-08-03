@@ -392,6 +392,35 @@ def telemetry_list_all(
     _telemetry_list_local(include_ingested=True, json_out=False)
 
 
+def _fmt_lap_ms(text: str | None) -> str:
+    """Device lap time (milliseconds) -> '52.509' / '1:02.345'."""
+    try:
+        ms = int(text or "")
+    except ValueError:
+        return text or "?"
+    if ms <= 0:
+        return "?"
+    minutes, seconds = divmod(ms / 1000.0, 60)
+    return f"{int(minutes)}:{seconds:06.3f}" if minutes else f"{seconds:.3f}"
+
+
+def _fmt_device_dt(meta: dict) -> str:
+    """The catalog's 'date'/'hour' -> '2026-07-30 22:26:00'.
+
+    The MyChron writes day-first dates ('30/07/2026'); anything unparseable
+    is shown verbatim rather than guessed at.
+    """
+    from datetime import datetime
+
+    text = f"{meta.get('date', '')} {meta.get('hour', '')}".strip()
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return text or "?"
+
+
 def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     from .ingest.aim import list_remote_sessions
 
@@ -415,10 +444,19 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     table = Table(title=title)
     table.add_column("session")
     table.add_column("size", justify="right")
+    table.add_column("captured")
+    table.add_column("laps", justify="right")
+    table.add_column("best", justify="right")
     if include_downloaded:
         table.add_column("status")
     for s in result.sessions:
-        row = [s.name, _fmt_size(s.size_bytes) if s.size_bytes is not None else "?"]
+        row = [
+            s.name,
+            _fmt_size(s.size_bytes) if s.size_bytes is not None else "?",
+            _fmt_device_dt(s.meta),
+            s.meta.get("nlap") or "?",
+            _fmt_lap_ms(s.meta.get("best")),
+        ]
         if include_downloaded:
             row.append("[dim]downloaded[/dim]" if s.downloaded else "[green]new[/green]")
         table.add_row(*row)

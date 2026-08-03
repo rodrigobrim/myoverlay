@@ -150,6 +150,19 @@ def test_telemetry_get_device_error_fails(cfg_with_card, monkeypatch):
     assert r.exit_code == 1
 
 
+def test_remote_listing_formatters():
+    # Real values from a MyChron6 catalog row (day-first dates, ms lap times).
+    assert cli._fmt_device_dt({"date": "30/07/2026", "hour": "22:26:00"}) == "2026-07-30 22:26:00"
+    assert cli._fmt_device_dt({"date": "30/07/2026"}) == "2026-07-30 00:00:00"
+    assert cli._fmt_device_dt({"date": "garbled", "hour": "x"}) == "garbled x"
+    assert cli._fmt_device_dt({}) == "?"
+    assert cli._fmt_lap_ms("52509") == "52.509"
+    assert cli._fmt_lap_ms("62345") == "1:02.345"
+    assert cli._fmt_lap_ms("") == "?"
+    assert cli._fmt_lap_ms(None) == "?"
+    assert cli._fmt_lap_ms("0") == "?"
+
+
 def test_ingest_force_threads_through(cfg_with_card, monkeypatch):
     seen = {}
 
