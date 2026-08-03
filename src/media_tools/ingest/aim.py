@@ -99,6 +99,12 @@ def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> Remot
     try:
         result.transport = dev.kind
         _columns, _rows, catalog = as_catalog(dev.session_csv())
+    # A device can enumerate (USB powered, e.g. charging while off) yet never
+    # answer a command: report it as a note, like every other failure - a
+    # traceback here would take down `mt run`/`mt watch` too.
+    except Exception as exc:  # noqa: BLE001
+        result.notes.append(f"! {dev.kind}: {exc}")
+        return result
     finally:
         dev.close()
 
@@ -150,7 +156,13 @@ def download_sessions(
 
     try:
         say(f"connected over {dev.kind}")
-        _columns, _rows, catalog = as_catalog(dev.session_csv())
+        try:
+            _columns, _rows, catalog = as_catalog(dev.session_csv())
+        # Same contract as the per-session loop below: any device failure is
+        # an error line, never a traceback.
+        except Exception as exc:  # noqa: BLE001
+            report.errors.append(f"{dev.kind}: {exc}")
+            return report
 
         local = _local_stems(cfg)
         if names:
