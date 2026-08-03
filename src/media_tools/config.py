@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _local_tzinfo() -> tzinfo:
@@ -41,15 +41,11 @@ class CameraConfig(BaseModel):
 
 
 class MychronConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     # Where downloaded MyChron sessions live on disk. The first entry is
     # where `mt telemetry get` writes device downloads; every entry is
-    # scanned on ingest. `rs3_data_dirs` is accepted as a legacy alias
-    # (configs from when Race Studio 3 did the downloading).
+    # scanned on ingest.
     data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path.home() / "Videos" / "karting" / "mychron"],
-        validation_alias=AliasChoices("data_dirs", "rs3_data_dirs"),
+        default_factory=lambda: [Path.home() / "Videos" / "karting" / "mychron"]
     )
     # Force one transport for device downloads: "usb" | "wifi";
     # null tries USB first (faster, charges the logger), then WiFi.
@@ -59,8 +55,8 @@ class MychronConfig(BaseModel):
     # (WiFi downloads replace the house network while they run).
     auto_download: bool = False
     download_interval_s: float = 600.0
-    # .xrz files are compressed twins of the .xrk (legacy Race Studio 3
-    # data dirs hold both); ingesting both would duplicate every session.
+    # .xrz files are compressed twins of the .xrk; ingesting both would
+    # duplicate every session.
     extensions: list[str] = Field(default_factory=lambda: [".xrk"])
     # Timezone of the MyChron 'Log Date'/'Log Time' metadata; null = system local.
     timezone: str | None = None

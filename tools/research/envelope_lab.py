@@ -1,4 +1,4 @@
-"""Validate envelope-stage sync: whole-day speed trace (gaps = 0) vs audio RMS."""
+﻿"""Validate envelope-stage sync: whole-day speed trace (gaps = 0) vs audio RMS."""
 import numpy as np
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,7 +12,7 @@ pcm = np.load("pcm_cache.npy")
 
 # day speed trace on a 10 Hz grid, 0 in the gaps
 logs = []
-for p in sorted(Path(r"C:\AIM_SPORT\RaceStudio3\user\data\2047-10-29").glob("*.xrk")):
+for p in sorted(Path(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\telemetry").glob("*.xrk")):
     log = aim_xrk(str(p))
     start = _parse_log_datetime(log.metadata, TZ)
     logs.append((start, unified_frame(log)))

@@ -1,4 +1,4 @@
-"""Harmonic-product-spectrum fundamental + band energy vs real speed."""
+﻿"""Harmonic-product-spectrum fundamental + band energy vs real speed."""
 import numpy as np
 from pathlib import Path
 from media_tools.sync import AUDIO_RATE, FEATURE_HZ, _zscore, find_offset
@@ -37,7 +37,7 @@ e_band = np.concatenate(e_band_l)
 rms = np.concatenate(rms_l)
 print("f0 stats:", f0.min(), np.median(f0), f0.max())
 
-log = aim_xrk(r"C:\AIM_SPORT\RaceStudio3\user\data\2047-10-29\KGV 101 _Race_a_0081.xrk")
+log = aim_xrk(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\telemetry\KGV 101 _Race_a_0081.xrk")
 df = unified_frame(log)
 t_end = float(df["t_s"].iloc[-1])
 grid = np.arange(0, t_end, 1/FEATURE_HZ)

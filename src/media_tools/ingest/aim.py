@@ -68,10 +68,10 @@ def _local_stems(cfg: Config) -> set[str]:
 
 
 def _is_downloaded(device_name: str, local_stems: set[str]) -> bool:
-    # Race Studio 3 used to prefix downloads with venue/session text
-    # ("KGV 101 _Race_a_0081.xrk" for device session "a_0081.xrz"), so an
-    # exact-stem match would re-download every legacy session: match any
-    # local stem that ends with the device stem instead.
+    # Files downloaded before this client existed carry a venue/session
+    # prefix ("KGV 101 _Race_a_0081.xrk" for device session "a_0081.xrz"),
+    # so an exact-stem match would re-download every legacy session: match
+    # any local stem that ends with the device stem instead.
     stem = Path(device_name).stem.lower()
     return any(s.endswith(stem) for s in local_stems)
 
@@ -200,9 +200,10 @@ def _write_session(dest_dir: Path, name: str, payload: bytes) -> Path:
     """Write one downloaded session, decompressing .xrz -> .xrk.
 
     The .xrz the device serves is a plain zlib stream of the .xrk (verified
-    byte-identical against RS3's output, minus a trailing empty note block
-    RS3 appends). Anything that does not decompress is kept verbatim under
-    its device name - never guess at unknown formats (.hrz etc).
+    byte-identical against known-good .xrk files, minus a trailing empty
+    note block other tools append). Anything that does not decompress is
+    kept verbatim under its device name - never guess at unknown formats
+    (.hrz etc).
     """
     try:
         raw = zlib.decompress(payload)

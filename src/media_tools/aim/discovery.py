@@ -75,7 +75,7 @@ def find_logger_ap() -> str | None:
 
 
 def join_logger_ap(ssid: str, timeout: float = 30.0) -> bool:
-    """Join the logger's access point, as Race Studio does.
+    """Join the logger's access point, as AiM's own software does.
 
     Uses a throwaway OPEN profile. Any profile the AiM software left behind
     is deliberately not reused: on this device it specifies WPA2 while the
