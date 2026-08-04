@@ -1,16 +1,16 @@
-"""myoverlay - self-updating launcher for the media-tools pipeline.
+"""MyOverlay - self-updating launcher for the media-tools pipeline.
 
 This is the entry point of the frozen (PyInstaller) executable that friends
 run. It bundles a Python runtime, every pipeline dependency, MinGit and
 ffmpeg - nothing needs to be installed.
 
 On every start it:
-  1. clones the repo on first run (into %LOCALAPPDATA%\\myoverlay\\repo),
+  1. clones the repo on first run (into %LOCALAPPDATA%\\MyOverlay\\repo),
      or fast-forward pulls new commits;
   2. creates config.toml from config.example.toml on first run;
   3. puts the bundled git/ffmpeg on PATH;
   4. imports the *pulled* media_tools package and forwards the command line
-     to its CLI - so `myoverlay run`, `myoverlay slice ...` etc. behave
+     to its CLI - so `MyOverlay run`, `MyOverlay slice ...` etc. behave
      exactly like `uv run mt ...` in a dev checkout.
 
 Because the pipeline source comes from the repo (not the frozen bundle),
@@ -19,7 +19,7 @@ third-party dependency does the exe need a rebuild - that failure mode is
 detected and explained.
 
 Environment overrides:
-  MYOVERLAY_REPO       working copy location (default %LOCALAPPDATA%\\myoverlay\\repo)
+  MYOVERLAY_REPO       working copy location (default %LOCALAPPDATA%\\MyOverlay\\repo)
   MYOVERLAY_REPO_URL   git remote to clone/pull (default the official repo)
   MYOVERLAY_NO_UPDATE  set to 1 to skip the git pull (same as --no-update)
   MYOVERLAY_BRANCH     run this branch instead of the default (same as
@@ -45,7 +45,7 @@ def bundle_dir() -> Path:
 
 
 def say(msg: str) -> None:
-    print(f"[myoverlay] {msg}")
+    print(f"[MyOverlay] {msg}")
 
 
 def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 300):
@@ -59,7 +59,7 @@ def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 
 
 
 def default_repo_path() -> Path:
-    return Path(os.environ["LOCALAPPDATA"]) / "myoverlay" / "repo"
+    return Path(os.environ["LOCALAPPDATA"]) / "MyOverlay" / "repo"
 
 
 def _managed_marker(repo: Path) -> Path:
@@ -143,9 +143,9 @@ def _return_to_default_branch(git: Path, repo: Path) -> None:
             # one: a friend's clone may have no user.name/user.email at all,
             # and "Please tell me who you are" must not be what stands between
             # them and a current pipeline.
-            ["-c", "user.email=myoverlay@localhost", "-c", "user.name=myoverlay",
+            ["-c", "user.email=myoverlay@localhost", "-c", "user.name=MyOverlay",
              "stash", "push", "-u",
-             "-m", f"myoverlay: local edits before returning to {branch}"],
+             "-m", f"MyOverlay: local edits before returning to {branch}"],
             cwd=repo,
             timeout=120,
         )
@@ -182,7 +182,7 @@ def ensure_repo(
             say("ERROR: could not download the pipeline repository.")
             say(proc.stderr.strip()[:800])
             sys.exit(2)
-        _managed_marker(repo).write_text("created by myoverlay\n", encoding="ascii")
+        _managed_marker(repo).write_text("created by MyOverlay\n", encoding="ascii")
         say("download complete")
         if branch:
             _checkout_branch(git, repo, branch)
@@ -230,7 +230,7 @@ def ensure_repo(
     # silently keep running old code - re-sync the managed clone instead.
     if not is_managed(repo):
         say("warning: could not update (offline, or this checkout is not managed by")
-        say("myoverlay); continuing with the current version")
+        say("MyOverlay); continuing with the current version")
         return
     say("this copy diverged from the remote; re-syncing to the official version")
     if _resync(git, repo):
@@ -268,7 +268,7 @@ def _parse_settings_yaml(text: str) -> dict:
 def installer_settings() -> dict:
     """Choices made in the MSI setup wizard, if this exe was installed by it.
 
-    The installer writes install_settings.yaml next to myoverlay.exe:
+    The installer writes install_settings.yaml next to MyOverlay.exe:
       language: pt
       resolution: fhd
       client_secret: C:\\...\\client_secret.json
@@ -445,10 +445,10 @@ def main() -> None:
         from media_tools.cli import app
     except ImportError as exc:
         say(f"ERROR: the pipeline needs a package this launcher build lacks: {exc}")
-        say("Ask for an updated myoverlay build (the code moved ahead of it).")
+        say("Ask for an updated MyOverlay build (the code moved ahead of it).")
         sys.exit(2)
 
-    sys.argv = ["myoverlay", *argv]
+    sys.argv = ["MyOverlay", *argv]
     app()
 
 

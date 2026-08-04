@@ -10,7 +10,7 @@ Two separate credentials are involved, and it matters which is which:
 | File | What it is | How you get it |
 |---|---|---|
 | `client_secret.json` | The **OAuth client** — identifies the *app* ("myoverlay") to Google. Contains a client id + `GOCSPX-…` secret. | Created once in the Cloud Console (steps 1–4). |
-| `token.json` | The **user token** — proves *you* allowed that app to manage your YouTube channel. Contains an access token + refresh token. | Produced by `myoverlay google-auth` (step 5). |
+| `token.json` | The **user token** — proves *you* allowed that app to manage your YouTube channel. Contains an access token + refresh token. | Produced by `MyOverlay google-auth` (step 5). |
 
 Paths are set in `config.toml` under `[youtube]` (`client_secret_file`,
 `token_file`); by default both live next to `config.toml`.
@@ -75,7 +75,7 @@ An `{"installed": …}` top-level key is what the pipeline expects (that's what
 ## 5. Authorize and get the token
 
 ```bash
-myoverlay google-auth
+MyOverlay google-auth
 ```
 
 (dev checkout: `uv run mt google-auth`)
@@ -98,7 +98,7 @@ What's in the token, and how it's used afterwards:
 - Treat both files as secrets: anyone holding `client_secret.json` +
   `token.json` can manage the channel. Neither is committed to git.
 
-After this, `myoverlay publish` (or `myoverlay run --publish`) uploads with no
+After this, `MyOverlay publish` (or `MyOverlay run --publish`) uploads with no
 further prompts.
 
 ## Troubleshooting

@@ -1,4 +1,4 @@
-"""Tests for the myoverlay launcher's repo management.
+"""Tests for the MyOverlay launcher's repo management.
 
 The launcher ships inside the frozen exe (it is not imported by the
 pipeline), so it is loaded here by path. These tests use real git repos:
@@ -239,7 +239,7 @@ def test_returning_to_default_branch_stashes_local_edits(tmp_path, origin):
     assert git(["branch", "--show-current"], repo).stdout.strip() == "main"
     assert (repo / "file.txt").read_text() == "v1\n"
     # The edit is recoverable, which is the whole point of stashing over reset.
-    assert "myoverlay" in git(["stash", "list"], repo).stdout
+    assert "MyOverlay" in git(["stash", "list"], repo).stdout
     git(["checkout", "-q", "feature"], repo)
     git(["stash", "pop"], repo)
     assert (repo / "file.txt").read_text() == "precious local edit\n"

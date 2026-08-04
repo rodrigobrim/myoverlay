@@ -1,5 +1,5 @@
 // MSI deferred custom action: persist the setup wizard's choices as
-// install_settings.yaml next to myoverlay.exe. The launcher reads it on first
+// install_settings.yaml next to MyOverlay.exe. The launcher reads it on first
 // run to seed config.toml (language, resolution, install_dir) and to copy the
 // Google client secret into place.
 //

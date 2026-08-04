@@ -46,7 +46,7 @@ def _gcp_data_dir(cfg: Config) -> Path:
     except OSError:
         pass
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "myoverlay"
+    return Path(base) / "MyOverlay"
 
 CONSOLE = "https://console.cloud.google.com"
 _STEP_TIMEOUT_MS = 15_000
@@ -196,10 +196,10 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     if not gcloud_available():
         report.append("! Google Cloud SDK (gcloud) not found")
         report.append(
-            "  It normally ships with myoverlay (installed next to the app). "
+            "  It normally ships with MyOverlay (installed next to the app). "
             "Re-run the installer with the 'Google Cloud SDK' component ticked, "
             "or install it from https://cloud.google.com/sdk/docs/install and "
-            "run `myoverlay google-setup` again."
+            "run `MyOverlay google-setup` again."
         )
         return False
 

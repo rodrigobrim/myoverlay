@@ -58,7 +58,7 @@ def test_config_pointing_at_deleted_install_falls_back(tmp_path, monkeypatch):
 def _fake_frozen(monkeypatch, install_dir):
     """Pretend we run as the frozen exe installed in `install_dir`."""
     monkeypatch.setattr(tools.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(tools.sys, "executable", str(install_dir / "myoverlay.exe"))
+    monkeypatch.setattr(tools.sys, "executable", str(install_dir / "MyOverlay.exe"))
 
 
 def test_frozen_exe_dir_resolves_without_config(tmp_path, monkeypatch):

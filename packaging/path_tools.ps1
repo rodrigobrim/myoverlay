@@ -1,5 +1,5 @@
 # Stages the commands that must be callable by NAME after an install - `uv`
-# and `mt` - into the payload root (dist\myoverlay).
+# and `mt` - into the payload root (dist\MyOverlay).
 #
 # Why the root, and not the spec's datas: PyInstaller 6 puts every bundled
 # data file under _internal\, and only the payload ROOT becomes the install
@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 $pack = $PSScriptRoot
 $vendor = Join-Path $pack "vendor"
 
-if (-not (Test-Path (Join-Path $Payload "myoverlay.exe"))) {
+if (-not (Test-Path (Join-Path $Payload "MyOverlay.exe"))) {
     throw "Payload missing: $Payload - run packaging\build_exe.ps1 first."
 }
 
@@ -48,4 +48,4 @@ Copy-Item (Join-Path $pack "mt.cmd") (Join-Path $Payload "mt.cmd") -Force
 
 $uvVersion = (& $uvVendored --version 2>$null | Select-Object -First 1)
 if ([string]::IsNullOrWhiteSpace($uvVersion)) { $uvVersion = "unknown" }
-Write-Host "PATH commands staged -> uv ($uvVersion) | mt (shim to myoverlay.exe)"
+Write-Host "PATH commands staged -> uv ($uvVersion) | mt (shim to MyOverlay.exe)"
