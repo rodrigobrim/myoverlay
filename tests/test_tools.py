@@ -95,9 +95,23 @@ def test_config_install_dir_still_used_when_not_frozen(tmp_path, monkeypatch):
 
 def test_gcloud_cmd_keeps_cmd_c_wrapper_on_windows(monkeypatch):
     monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(tools.shutil, "which", lambda name: None)
     prefix = tools.gcloud_cmd()
     assert prefix[:2] == ["cmd", "/c"]
     assert prefix[2] == "gcloud"  # bare, nothing resolved
+
+
+def test_gcloud_cmd_prefers_sdk_python_over_cmd_c(tmp_path, monkeypatch):
+    # `cmd /c "<path with spaces>\gcloud.cmd" "--filter=a AND b"` breaks: cmd
+    # strips the outer quotes and executes `C:\Program`. With the SDK's
+    # bundled python present, gcloud must be invoked through it instead.
+    monkeypatch.setattr(os, "name", "nt")
+    sdk = tmp_path / "Program Files" / "MyOverlay" / "google-cloud-sdk"
+    gcloud = _touch(sdk / "bin" / "gcloud.cmd")
+    python = _touch(sdk / "platform" / "bundledpython" / "python.exe")
+    entry = _touch(sdk / "lib" / "gcloud.py")
+    monkeypatch.setenv("MYOVERLAY_GCLOUD_BIN", str(gcloud.parent))
+    assert tools.gcloud_cmd() == [str(python), str(entry)]
 
 
 def test_gcloud_cmd_full_path_from_env(tmp_path, monkeypatch):

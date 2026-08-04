@@ -132,16 +132,40 @@ def _gcloud_path() -> str | None:
     return None
 
 
+def _sdk_python_entry(gcloud_path: str) -> list[str] | None:
+    """argv for invoking gcloud through the SDK's own python, or None.
+
+    <sdk>\\bin\\gcloud.cmd is a batch file, so it needs `cmd /c` - and cmd's
+    quote stripping breaks any invocation where BOTH the .cmd path and an
+    argument carry spaces (an install under C:\\Program Files running
+    `--filter=... AND ...` executes `C:\\Program` instead). The SDK ships the
+    pieces the .cmd itself ends up calling - a bundled python and lib\\gcloud.py
+    - and CreateProcess quoting handles those correctly for any argument.
+    """
+    sdk = Path(gcloud_path).parent.parent
+    python = sdk / "platform" / "bundledpython" / "python.exe"
+    entry = sdk / "lib" / "gcloud.py"
+    if python.is_file() and entry.is_file():
+        return [str(python), str(entry)]
+    return None
+
+
 def gcloud_cmd() -> list[str]:
     """argv prefix for invoking gcloud.
 
-    gcloud is a .cmd batch file on Windows, which subprocess cannot exec
-    directly - it must go through `cmd /c`. Returns the resolved full path when
-    a bundled copy exists, else the bare name (found via PATH)."""
-    gcloud = _gcloud_path() or "gcloud"
+    On Windows the .cmd launcher is bypassed in favor of the SDK's bundled
+    python + lib/gcloud.py whenever they exist (see _sdk_python_entry); the
+    `cmd /c` form survives only as a fallback, safe while the gcloud path has
+    no spaces or the call has no quoted arguments."""
+    gcloud = _gcloud_path()
     if os.name == "nt":
-        return ["cmd", "/c", gcloud]
-    return [gcloud]
+        which = gcloud or shutil.which("gcloud") or shutil.which("gcloud.cmd")
+        if which:
+            entry = _sdk_python_entry(which)
+            if entry is not None:
+                return entry
+        return ["cmd", "/c", gcloud or "gcloud"]
+    return [gcloud or "gcloud"]
 
 
 def gcloud_available() -> bool:

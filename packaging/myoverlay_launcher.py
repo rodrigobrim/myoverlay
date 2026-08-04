@@ -5,9 +5,12 @@ run. It bundles a Python runtime, every pipeline dependency, MinGit and
 ffmpeg - nothing needs to be installed.
 
 On every start it:
-  1. clones the repo on first run (into %LOCALAPPDATA%\\MyOverlay\\repo),
-     or fast-forward pulls new commits;
-  2. creates config.toml from config.example.toml on first run;
+  1. clones the repo on first run (into ~\\myoverlay\\repo), or fast-forward
+     pulls new commits; data from an older install under %LOCALAPPDATA%
+     \\MyOverlay is moved to ~\\myoverlay once;
+  2. creates ~\\myoverlay\\config.toml from config.example.toml on first run
+     (the Google credentials live next to it: client_secret.json and
+     google-token);
   3. puts the bundled git/ffmpeg on PATH;
   4. imports the *pulled* media_tools package and forwards the command line
      to its CLI - so `MyOverlay run`, `MyOverlay slice ...` etc. behave
@@ -19,7 +22,7 @@ third-party dependency does the exe need a rebuild - that failure mode is
 detected and explained.
 
 Environment overrides:
-  MYOVERLAY_REPO       working copy location (default %LOCALAPPDATA%\\MyOverlay\\repo)
+  MYOVERLAY_REPO       working copy location (default ~\\myoverlay\\repo)
   MYOVERLAY_REPO_URL   git remote to clone/pull (default the official repo)
   MYOVERLAY_NO_UPDATE  set to 1 to skip the git pull (same as --no-update)
   MYOVERLAY_BRANCH     run this branch instead of the default (same as
@@ -44,8 +47,33 @@ def bundle_dir() -> Path:
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
 
+# Open by _open_status_log() for google-setup runs: mirrors every say() line
+# into ~\myoverlay\google-setup.log, which the MSI wizard tails for live
+# status. Without it the clone/pull phase is invisible from the wizard.
+_TEE = None
+
+
 def say(msg: str) -> None:
     print(f"[MyOverlay] {msg}")
+    if _TEE is not None:
+        try:
+            _TEE.write(msg + "\n")
+            _TEE.flush()
+        except OSError:
+            pass
+
+
+def _open_status_log(home: Path) -> None:
+    """Start the live status log for a google-setup run (truncates any old
+    one). MYOVERLAY_SETUP_LOG_ACTIVE tells media_tools' google-setup to append
+    to it instead of truncating it again."""
+    global _TEE
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        _TEE = (home / "google-setup.log").open("w", encoding="utf-8")
+        os.environ["MYOVERLAY_SETUP_LOG_ACTIVE"] = "1"
+    except OSError:
+        _TEE = None
 
 
 def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 300):
@@ -58,8 +86,51 @@ def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 
     )
 
 
+def default_home() -> Path:
+    """The user-facing data dir: config.toml, google-token, client_secret.json
+    and the managed repo clone all live here."""
+    return Path.home() / "myoverlay"
+
+
 def default_repo_path() -> Path:
-    return Path(os.environ["LOCALAPPDATA"]) / "MyOverlay" / "repo"
+    return default_home() / "repo"
+
+
+def _legacy_appdata_dir() -> Path | None:
+    """Where installs before the ~\\myoverlay layout kept everything."""
+    base = os.environ.get("LOCALAPPDATA")
+    return Path(base) / "MyOverlay" if base else None
+
+
+def migrate_legacy_layout(home: Path, repo: Path) -> None:
+    """One-time move of an older install's data into ~\\myoverlay.
+
+    Old layout: everything under %LOCALAPPDATA%\\MyOverlay - the clone with
+    config.toml/token.json/client_secret.json inside it, plus the sign-in
+    browser profile. New layout: the clone at <home>/repo stays a disposable
+    code cache, while config and credentials live in <home> directly. Each
+    piece moves only when the destination does not exist yet, so a partially
+    migrated (or already current) setup is never overwritten.
+    """
+    old = _legacy_appdata_dir()
+    if old is None or not old.is_dir() or old.resolve() == home.resolve():
+        return
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        old_repo = old / "repo"
+        if old_repo.is_dir() and not repo.exists():
+            say(f"moving your MyOverlay data to {home}")
+            shutil.move(str(old_repo), str(repo))
+        moves = [
+            (repo / "config.toml", home / "config.toml"),
+            (repo / "token.json", home / "google-token"),
+            (repo / "client_secret.json", home / "client_secret.json"),
+        ]
+        for src, dst in moves:
+            if src.exists() and not dst.exists():
+                shutil.move(str(src), str(dst))
+    except OSError as exc:
+        say(f"warning: could not finish moving data to {home}: {exc}")
 
 
 def _managed_marker(repo: Path) -> Path:
@@ -291,7 +362,7 @@ def installer_settings() -> dict:
         return {}
 
 
-def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
+def _apply_installer_settings(cfg: Path, settings: dict) -> None:
     """Seed a just-created config.toml with the setup wizard's choices."""
     text = cfg.read_text(encoding="utf-8-sig")
     lang = settings.get("language")
@@ -307,8 +378,9 @@ def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
     cfg.write_text(text, encoding="utf-8")
 
     secret = settings.get("client_secret")
-    if secret and Path(secret).is_file() and not (repo / "client_secret.json").is_file():
-        shutil.copy2(secret, repo / "client_secret.json")
+    dest = cfg.parent / "client_secret.json"
+    if secret and Path(secret).is_file() and not dest.is_file():
+        shutil.copy2(secret, dest)
         say("Google API client secret installed (from the setup wizard)")
     elif settings.get("google_skipped"):
         say("note: Google API setup was skipped during install -")
@@ -353,15 +425,15 @@ def _upsert_install_dir(cfg: Path, install_dir: str) -> None:
         pass
 
 
-def ensure_config(repo: Path) -> None:
-    cfg = repo / "config.toml"
+def ensure_config(repo: Path, data_dir: Path) -> None:
+    cfg = data_dir / "config.toml"
     example = repo / "config.example.toml"
     settings = installer_settings()
     if not cfg.is_file():
         if not example.is_file():
             return
         shutil.copy2(example, cfg)
-        _apply_installer_settings(repo, cfg, settings)
+        _apply_installer_settings(cfg, settings)
         say("=" * 62)
         say("Created your configuration file:")
         say(f"    {cfg}")
@@ -431,15 +503,26 @@ def main() -> None:
     repo = Path(os.environ.get("MYOVERLAY_REPO") or default_repo_path())
     url = os.environ.get("MYOVERLAY_REPO_URL", DEFAULT_REPO_URL)
 
+    # Managed clone: config and credentials live in ~\myoverlay, next to the
+    # repo. A custom MYOVERLAY_REPO (a dev checkout) keeps the classic layout
+    # with config.toml inside the checkout itself.
+    if is_managed(repo):
+        data_dir = default_home()
+        if "google-setup" in argv:
+            _open_status_log(data_dir)
+        migrate_legacy_layout(data_dir, repo)
+    else:
+        data_dir = repo
+
     ensure_repo(git, repo, url, skip_update, branch)
-    ensure_config(repo)
+    ensure_config(repo, data_dir)
 
     src = repo / "src"
     if not (src / "media_tools").is_dir():
         say(f"ERROR: {src} does not contain media_tools - wrong repository?")
         sys.exit(2)
     sys.path.insert(0, str(src))
-    os.chdir(repo)  # config.toml discovery + relative paths
+    os.chdir(data_dir)  # config.toml discovery + relative credential paths
 
     try:
         from media_tools.cli import app

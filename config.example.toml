@@ -59,7 +59,7 @@ privacy = "private"  # API uploads from unaudited projects are locked private an
 # description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
 # playlist_id = "PL..."
 client_secret_file = "client_secret.json"
-token_file = "token.json"
+token_file = "google-token"
 # Cloud project used by `mt google-setup` (Console browser automation)
 # project_id = "media-tools-yt-1784475396"
 

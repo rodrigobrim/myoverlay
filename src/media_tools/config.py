@@ -139,7 +139,9 @@ class YouTubeConfig(BaseModel):
     description_template: str | None = None
     playlist_id: str | None = None
     client_secret_file: Path = Path("client_secret.json")
-    token_file: Path = Path("token.json")
+    # Relative paths resolve against the process cwd: the launcher chdirs to
+    # ~\myoverlay (installed) or the checkout root (dev) before the CLI runs.
+    token_file: Path = Path("google-token")
     # Cloud project used by `mt google-setup`. Default "myoverlay": the setup
     # creates it (or reuses it if it already exists) under your Google account.
     project_id: str = "myoverlay"

@@ -26,7 +26,7 @@ def _make_repo(tmp_path: Path) -> tuple[Path, Path]:
 def test_language_and_resolution_seeded(tmp_path):
     repo, cfg = _make_repo(tmp_path)
     launcher._apply_installer_settings(
-        repo, cfg, {"language": "pt", "resolution": "fhd", "google_skipped": True}
+        cfg, {"language": "pt", "resolution": "fhd", "google_skipped": True}
     )
     text = cfg.read_text(encoding="utf-8")
     assert 'language = "pt"' in text
@@ -48,15 +48,15 @@ def test_client_secret_copied(tmp_path):
     secret = tmp_path / "client_secret_download.json"
     secret.write_text('{"installed": {"client_id": "x.apps.googleusercontent.com"}}')
     launcher._apply_installer_settings(
-        repo, cfg, {"language": "en", "client_secret": str(secret)}
+        cfg, {"language": "en", "client_secret": str(secret)}
     )
-    assert json.loads((repo / "client_secret.json").read_text())["installed"]
+    assert json.loads((cfg.parent / "client_secret.json").read_text())["installed"]
 
 
 def test_empty_settings_leave_defaults(tmp_path):
     repo, cfg = _make_repo(tmp_path)
     before = cfg.read_text(encoding="utf-8")
-    launcher._apply_installer_settings(repo, cfg, {})
+    launcher._apply_installer_settings(cfg, {})
     assert cfg.read_text(encoding="utf-8") == before
 
 

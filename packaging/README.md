@@ -29,9 +29,12 @@ them, so the pipeline stays current without reinstalling (`--no-update` or
 download folder (`[mychron] data_dirs`) before the first real use. For YouTube upload each
 person needs their own Google OAuth client (see the main README).
 
-The pipeline working copy lives in `%LOCALAPPDATA%\MyOverlay\repo`
-(override with `MYOVERLAY_REPO`; point `MYOVERLAY_REPO_URL` at a fork to
-test branches).
+The app's data lives in `~\myoverlay`: `config.toml`, the Google
+credentials (`client_secret.json`, `google-token`) and the pipeline working
+copy at `~\myoverlay\repo` (override with `MYOVERLAY_REPO`; point
+`MYOVERLAY_REPO_URL` at a fork to test branches). Data from an older
+install under `%LOCALAPPDATA%\MyOverlay` is moved there automatically on
+first run.
 
 `mt` and `uv` ship beside the exe as well. After an MSI install both are
 plain commands in any terminal — the installer already puts the install
@@ -131,8 +134,9 @@ directory, so new pipeline code running under an older exe still finds them.
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
 the software installed: app files, shortcuts, `install_settings.yaml`, and
-`%LOCALAPPDATA%\MyOverlay` (pipeline clone, config.toml, Google
-credentials). A checkbox on the remove-options page additionally
+the data dirs: `~\myoverlay` (pipeline clone, config.toml, Google
+credentials) plus the legacy `%LOCALAPPDATA%\MyOverlay`. A checkbox on the
+remove-options page additionally
 uninstalls the Google Cloud SDK (unchecked by default). The media library
 (`library_root` — videos/telemetry) and downloaded MyChron data are never
 touched.
