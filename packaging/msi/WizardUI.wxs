@@ -366,8 +366,15 @@
         <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_PROG_TITLE]" />
         <Control Id="WaitText" Type="Text" X="25" Y="65" Width="320" Height="30" NoPrefix="yes" Text="[P_PROG_WAIT]" />
         <Control Id="StatusLabel" Type="Text" X="25" Y="100" Width="50" Height="10" NoPrefix="yes" Text="[P_PROG_STATUS]" />
-        <Control Id="ActionText" Type="Text" X="75" Y="100" Width="280" Height="10">
+        <!-- Live status: ActionText carries each action's progress text (the
+             ActionText table entries below via WixUI_ErrorProgressText and
+             ProgressText); ActionData carries per-step ticks that long
+             custom actions emit themselves (ExpandGCloud's elapsed-seconds
+             counter, RunGoogleSetup's google-setup.log tail). Height 20 for
+             two lines: some texts don't fit one. -->
+        <Control Id="ActionText" Type="Text" X="75" Y="98" Width="280" Height="20" NoPrefix="yes">
           <Subscribe Event="ActionText" Attribute="Text" />
+          <Subscribe Event="ActionData" Attribute="Text" />
         </Control>
         <Control Id="ProgressBar" Type="ProgressBar" X="25" Y="115" Width="320" Height="10" ProgressBlocks="yes" Text="Progress done">
           <Subscribe Event="SetProgress" Attribute="Progress" />
@@ -412,9 +419,20 @@
           <Publish Event="EndDialog" Value="Exit">1</Publish>
         </Control>
       </Dialog>
+      <!-- Progress texts for the wizard's status line. Standard actions
+           (file costing/copy, registry, shortcuts) come from
+           WixUI_ErrorProgressText; the custom actions below would otherwise
+           sit silent for minutes - ExpandGCloud in particular unpacks ~30k
+           SDK files. Every wait must say what it is waiting for. -->
+      <ProgressText Action="ExpandGCloud" Template="[1]">Extracting the Google Cloud SDK (thousands of small files, this takes a few minutes)...</ProgressText>
+      <ProgressText Action="WriteSettings">Saving the setup wizard choices...</ProgressText>
+      <ProgressText Action="RemoveBundledGCloud">Removing the bundled Google Cloud SDK...</ProgressText>
+      <ProgressText Action="RemoveAppData">Removing MyOverlay data...</ProgressText>
+      <ProgressText Action="RemoveGCloud">Uninstalling the Google Cloud SDK...</ProgressText>
     </UI>
 
     <UIRef Id="WixUI_Common" />
+    <UIRef Id="WixUI_ErrorProgressText" />
 
     <!-- Own dialog sequencing. WixUI_Common links the stock ProgressDlg WITH
          its own overridable Show entry right before ExecuteAction - left

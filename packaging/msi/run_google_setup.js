@@ -149,7 +149,14 @@ function RunGoogleSetup() {
         try { sh.CurrentDirectory = folder; } catch (e0) {}
         // A log left by a previous run must not be mistaken for this run's.
         try { fso.DeleteFile(_setupLogPath(sh), true); } catch (eDel) {}
-        sh.Run('"' + exe + '" google-setup', 1, false);
+        // The console window is the GUARANTEED live status surface for this
+        // phase: google-setup prints every step there as it happens. MSI
+        // drops ActionText updates sent from a UI-sequence action after
+        // ExecuteAction (observed live: the wizard status stayed empty), so
+        // the window gets a recognizable title and is brought to the front
+        // instead of spawning hidden behind the wizard.
+        sh.Run('cmd /c "title MyOverlay - Google setup & "' + exe + '" google-setup"', 1, false);
+        try { sh.AppActivate("MyOverlay - Google setup"); } catch (eAct) {}
 
         var wmi = GetObject(
             "winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2");
