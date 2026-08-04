@@ -30,21 +30,21 @@ skips anything already done, so all commands are safe to re-run.
 4. For YouTube uploads: create a project in Google Cloud Console, enable the
    *YouTube Data API v3*, create a **Desktop** OAuth client, save the JSON as
    `client_secret.json` in the repo, **publish** the OAuth consent screen
-   (otherwise the token expires weekly), then run `myoverlay publish --dry-run`
-   once and complete the browser authorization. `myoverlay google-setup`
+   (otherwise the token expires weekly), then run `MyOverlay publish --dry-run`
+   once and complete the browser authorization. `MyOverlay google-setup`
    automates all of this; the manual procedure is detailed in
    [docs/google-manual-setup.md](docs/google-manual-setup.md).
 
 ## Usage
 
-All commands run through the `myoverlay` executable (`dist/myoverlay/myoverlay.exe`).
+All commands run through the `MyOverlay` executable (`dist/MyOverlay/MyOverlay.exe`).
 The full command reference — every command and option — is auto-generated in
 **[docs/CLI.md](docs/CLI.md)**. The day-to-day entry points:
 
 ```
-myoverlay run                # full chain: ingest -> correlate -> sync -> render
-myoverlay run --publish      # ... and upload to YouTube
-myoverlay status             # pipeline state of every track day
+MyOverlay run                # full chain: ingest -> correlate -> sync -> render
+MyOverlay run --publish      # ... and upload to YouTube
+MyOverlay status             # pipeline state of every track day
 ```
 
 The exe self-updates from this repo and bundles git + ffmpeg, so friends need
@@ -57,8 +57,8 @@ entry point; see [Development](#development).)
 ### Zero-touch mode
 
 ```
-myoverlay watch              # poll for new material and run the pipeline (renders too)
-myoverlay watch --install    # auto-start the watcher at logon (launches via the exe)
+MyOverlay watch              # poll for new material and run the pipeline (renders too)
+MyOverlay watch --install    # auto-start the watcher at logon (launches via the exe)
 ```
 
 With the watcher running the only human actions per track day are physical:
@@ -75,7 +75,7 @@ sync gets a confidence score; clips below `render.min_sync_confidence` are
 not rendered. Escape hatch:
 
 ```
-myoverlay sync 2026-07-12 --clip DJI_0042.MP4 --video-start "2026-07-12T13:05:02.30+00:00"
+MyOverlay sync 2026-07-12 --clip DJI_0042.MP4 --video-start "2026-07-12T13:05:02.30+00:00"
 ```
 
 Solved clips seed the rest of the day (camera clock drift is stable within a

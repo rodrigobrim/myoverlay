@@ -1,5 +1,5 @@
 // MSI immediate custom action (UI sequence, After ExecuteAction): run
-// `myoverlay.exe google-setup` in a visible console while keeping the wizard's
+// `MyOverlay.exe google-setup` in a visible console while keeping the wizard's
 // Cancel button ALIVE.
 //
 // The old ExeCommand custom action was synchronous: the whole UI thread sat
@@ -17,7 +17,7 @@
 //      gcp_browser_profile (belt and braces - the profile is ours alone),
 //   3. schedule `msiexec /x <ProductCode> /passive`: the install committed at
 //      ExecuteAction, so a real uninstall is the only way to remove the files.
-//      It also runs RemoveAppData (wipes %LOCALAPPDATA%\myoverlay: launcher
+//      It also runs RemoveAppData (wipes %LOCALAPPDATA%\MyOverlay: launcher
 //      clone, config, browser profile). REMOVE_GCLOUD is NOT passed - a
 //      pre-existing machine Google Cloud SDK must survive; the bundled SDK
 //      feature is removed by the uninstall itself.
@@ -34,7 +34,7 @@ function _sleep1s(sh) {
 
 function _findSetupPid(wmi) {
     var q = wmi.ExecQuery(
-        "select ProcessId, CommandLine from Win32_Process where Name='myoverlay.exe'");
+        "select ProcessId, CommandLine from Win32_Process where Name='MyOverlay.exe'");
     for (var e = new Enumerator(q); !e.atEnd(); e.moveNext()) {
         var cl = "" + e.item().CommandLine;
         if (cl.indexOf("google-setup") !== -1) return e.item().ProcessId;
@@ -82,7 +82,7 @@ function RunGoogleSetup() {
         var sh = new ActiveXObject("WScript.Shell");
         var fso = new ActiveXObject("Scripting.FileSystemObject");
         var folder = Session.Property("INSTALLFOLDER");
-        var exe = folder + "myoverlay.exe";
+        var exe = folder + "MyOverlay.exe";
         if (!fso.FileExists(exe)) return 1;
         try { sh.CurrentDirectory = folder; } catch (e0) {}
         sh.Run('"' + exe + '" google-setup', 1, false);

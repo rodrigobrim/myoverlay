@@ -1,10 +1,10 @@
 # Build the MyOverlay MSI installer.
 #
 # Prereq: the PyInstaller onedir build must exist (run packaging\build_exe.ps1
-# first -> dist\myoverlay\). This script then:
+# first -> dist\MyOverlay\). This script then:
 #   1. downloads the WiX 3.14 binaries into packaging\vendor\wix (once);
-#   2. harvests dist\myoverlay into HarvestedFiles.wxs (heat);
-#   3. compiles Product.wxs + WizardUI.wxs and links dist\myoverlay-setup.msi.
+#   2. harvests dist\MyOverlay into HarvestedFiles.wxs (heat);
+#   3. compiles Product.wxs + WizardUI.wxs and links dist\MyOverlay-setup.msi.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File packaging\msi\build_msi.ps1
 #         ... -Version 1.2.0     (release builds; CI passes the git tag)
@@ -22,11 +22,11 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 $msiDir = $PSScriptRoot
 $repo = (Resolve-Path (Join-Path $msiDir "..\..")).Path
-$payload = Join-Path $repo "dist\myoverlay"
+$payload = Join-Path $repo "dist\MyOverlay"
 $vendor = Join-Path $repo "packaging\vendor"
 $wix = Join-Path $vendor "wix"
 $build = Join-Path $repo "packaging\build\msi"
-$out = Join-Path $repo "dist\myoverlay-setup.msi"
+$out = Join-Path $repo "dist\MyOverlay-setup.msi"
 
 # Archive extraction that survives BOTH traps this build hits:
 #
@@ -97,7 +97,7 @@ function Expand-ZipTo {
     [System.IO.Directory]::Move((Get-LongPath $staging), (Get-LongPath $Destination))
 }
 
-$payloadExe = Join-Path $payload "myoverlay.exe"
+$payloadExe = Join-Path $payload "MyOverlay.exe"
 if (-not (Test-Path $payloadExe)) {
     throw "Payload missing: $payloadExe - run packaging\build_exe.ps1 first."
 }

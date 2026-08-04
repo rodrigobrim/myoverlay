@@ -1,4 +1,4 @@
-# PyInstaller spec for the myoverlay launcher (onedir).
+# PyInstaller spec for the MyOverlay launcher (onedir).
 #
 # The launcher imports media_tools from the PULLED repo at runtime, so
 # PyInstaller cannot discover the pipeline's dependencies by static analysis
@@ -51,7 +51,7 @@ for pkg in PIPELINE_PACKAGES:
 # The review GUI (media_tools.gui) is pulled from the repo at runtime, so
 # PyInstaller cannot see its tkinter import statically. Force tkinter + tcl/tk
 # into the bundle (the _tkinter hook pulls the tcl/tk data dirs) so
-# `myoverlay gui` works in the frozen exe.
+# `MyOverlay gui` works in the frozen exe.
 hiddenimports += ["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "_tkinter"]
 
 a = Analysis(
@@ -72,7 +72,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="myoverlay",
+    name="MyOverlay",
     console=True,
     icon="../assets/branding/app.ico",
 )
@@ -81,5 +81,5 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    name="myoverlay",
+    name="MyOverlay",
 )

@@ -1,4 +1,4 @@
-# Builds dist\myoverlay\ (and myoverlay-win64.zip) - the shareable launcher.
+# Builds dist\MyOverlay\ (and MyOverlay-win64.zip) - the shareable launcher.
 #
 # Run from the repo root:  powershell -File packaging\build_exe.ps1
 # Requires: uv (deps come from the project venv), internet on first run
@@ -49,11 +49,11 @@ uv run pyinstaller --noconfirm --distpath (Join-Path $root "dist") --workpath (J
 # --- uv + mt into the payload root, so both are commands after an install
 #     (and in the folder friends unzip). PyInstaller wipes the payload on
 #     every build, so this has to run after it. See path_tools.ps1. ---
-$distDir = Join-Path $root "dist\myoverlay"
+$distDir = Join-Path $root "dist\MyOverlay"
 & (Join-Path $pack "path_tools.ps1") -Payload $distDir
 
 # --- zip for sharing ---
-$zip = Join-Path $root "dist\myoverlay-win64.zip"
+$zip = Join-Path $root "dist\MyOverlay-win64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path $distDir -DestinationPath $zip
 Write-Host "done: $zip"

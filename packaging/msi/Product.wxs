@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MyOverlay MSI. Payload = the PyInstaller onedir build (dist\myoverlay,
+  MyOverlay MSI. Payload = the PyInstaller onedir build (dist\MyOverlay,
   harvested by heat into HarvestedFiles.wxs at build time). The setup wizard
   (WizardUI.wxs) collects: output language, a dependency check (none
   currently registered), install destination, shortcut choices, Google API client secret
@@ -71,7 +71,7 @@
       <Directory Id="DesktopFolder" />
     </Directory>
 
-    <!-- Shortcuts run `myoverlay run` (the zero-touch workflow) in a console.
+    <!-- Shortcuts run `MyOverlay run` (the zero-touch workflow) in a console.
          Non-advertised, conditioned on the wizard checkboxes. Component
          conditions re-run on every transaction with the properties reset to
          defaults, so each condition also accepts the component's own registry
@@ -90,7 +90,7 @@
         <Condition>STARTMENU_SHORTCUT = "1" OR STARTMENU_SC_SAVED</Condition>
         <Shortcut Id="StartMenuRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
-                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  Target="[INSTALLFOLDER]MyOverlay.exe" Arguments="run"
                   WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
         <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
         <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="StartMenuShortcut"
@@ -102,14 +102,14 @@
         <Condition>DESKTOP_SHORTCUT = "1" OR DESKTOP_SC_SAVED</Condition>
         <Shortcut Id="DesktopRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
-                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  Target="[INSTALLFOLDER]MyOverlay.exe" Arguments="run"
                   WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
         <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="DesktopShortcut"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
-    <!-- myoverlay.exe on the machine PATH, same mechanism as GCloudPath
+    <!-- MyOverlay.exe on the machine PATH, same mechanism as GCloudPath
          below: MSI's own Environment table - silent, and cleanly removed on
          uninstall. Rides in the Main feature, so it always accompanies the
          app. -->
@@ -267,7 +267,7 @@
     </Feature>
 
     <!-- Uninstall cleanup: wipe everything the software put on the machine
-         (launcher clone/config/token under %LOCALAPPDATA%\myoverlay, and the
+         (launcher clone/config/token under %LOCALAPPDATA%\MyOverlay, and the
          Google Cloud SDK when the checkbox was ticked). The media library
          (videos/telemetry) is never touched. Skipped on major upgrades. -->
     <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />

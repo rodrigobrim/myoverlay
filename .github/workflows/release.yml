@@ -76,10 +76,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: myoverlay-${{ steps.ver.outputs.version }}
+          name: MyOverlay-${{ steps.ver.outputs.version }}
           path: |
-            dist/myoverlay-setup.msi
-            dist/myoverlay-win64.zip
+            dist/MyOverlay-setup.msi
+            dist/MyOverlay-win64.zip
           retention-days: 14
 
       - name: Publish the release
@@ -91,4 +91,4 @@ jobs:
           gh release create "$env:GITHUB_REF_NAME" `
             --title "MyOverlay ${{ steps.ver.outputs.version }}" `
             --generate-notes `
-            dist/myoverlay-setup.msi dist/myoverlay-win64.zip
+            dist/MyOverlay-setup.msi dist/MyOverlay-win64.zip

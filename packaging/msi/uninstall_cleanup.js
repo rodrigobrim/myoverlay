@@ -1,7 +1,7 @@
 // MSI uninstall custom actions (deferred, impersonated - they act on the
 // uninstalling user's profile).
 //
-// RemoveAppData: wipe %LOCALAPPDATA%\myoverlay (the launcher's pipeline
+// RemoveAppData: wipe %LOCALAPPDATA%\MyOverlay (the launcher's pipeline
 // clone, config.toml, OAuth token, client secret). The media library
 // (library_root - videos/telemetry) lives elsewhere and is NEVER touched.
 //
@@ -12,7 +12,7 @@ function RemoveAppData() {
     try {
         var sh = new ActiveXObject("WScript.Shell");
         var fso = new ActiveXObject("Scripting.FileSystemObject");
-        var dir = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\myoverlay";
+        var dir = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\MyOverlay";
         if (fso.FolderExists(dir)) {
             fso.DeleteFolder(dir, true); // force: .git objects are read-only
         }

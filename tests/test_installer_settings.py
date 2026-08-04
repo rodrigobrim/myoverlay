@@ -119,7 +119,7 @@ def test_install_dir_backslashes_normalized(tmp_path):
 
 def test_parse_settings_yaml_flat_map(tmp_path):
     text = (
-        "# myoverlay install settings\n"
+        "# MyOverlay install settings\n"
         "language: pt\n"
         "resolution: fhd\n"
         "client_secret: C:\\Users\\me\\client_secret.json\n"

@@ -1204,7 +1204,7 @@ def watch(
     if install:
         import os
 
-        # When running from the frozen myoverlay.exe, autostart launches the
+        # When running from the frozen MyOverlay.exe, autostart launches the
         # exe itself (everything via the exe) and must carry the same
         # MYOVERLAY_REPO/NO_UPDATE env, which schtasks /TR can't set - so use
         # the per-user Startup .cmd. A dev checkout uses mt.exe via schtasks.
