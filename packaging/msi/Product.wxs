@@ -267,7 +267,8 @@
     </Feature>
 
     <!-- Uninstall cleanup: wipe everything the software put on the machine
-         (launcher clone/config/token under %LOCALAPPDATA%\MyOverlay, and the
+         (clone/config/token under ~\myoverlay plus the legacy
+         %LOCALAPPDATA%\MyOverlay dir, and the
          Google Cloud SDK when the checkbox was ticked). The media library
          (videos/telemetry) is never touched. Skipped on major upgrades. -->
     <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />

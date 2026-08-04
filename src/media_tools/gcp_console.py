@@ -99,6 +99,40 @@ class _Shoot:
             pass
 
 
+class _TeeReport(list):
+    """Report that also streams each line to a log file the moment it is
+    appended. The MSI wizard tails that file to show live status while
+    google-setup runs, so every wait says what it is waiting for; without the
+    tee the report only exists in memory until the very end."""
+
+    def __init__(self, log_path: Path | None = None):
+        super().__init__()
+        self._fh = None
+        if log_path is not None:
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                self._fh = log_path.open("a", encoding="utf-8")
+            except OSError:
+                self._fh = None
+
+    def append(self, line: str) -> None:
+        super().append(line)
+        if self._fh is not None:
+            try:
+                self._fh.write(line + "\n")
+                self._fh.flush()
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+
+
 def _run_gcloud(args: list[str], **kw):
     """Run gcloud by full path when the bundled copy is known, else by name.
 
@@ -138,6 +172,7 @@ def _resolve_project(cfg: Config, report: list[str]) -> str | None:
     # b) our own project whose display name is 'myoverlay' -> reuse
     #    (idempotent). ACTIVE only: a deleted 'myoverlay' lingers in listings
     #    for its 30-day grace period and must not be picked up again.
+    report.append("looking for an existing 'myoverlay' cloud project...")
     listed = _run_gcloud(
         [
             "projects", "list",
@@ -146,6 +181,15 @@ def _resolve_project(cfg: Config, report: list[str]) -> str | None:
         ],
         capture_output=True, text=True,
     )
+    if listed.returncode != 0:
+        # A failed listing is NOT "no project": treating it that way once made
+        # every install mint a fresh project until the account hit its
+        # project-creation quota. Stop and report instead.
+        report.append(
+            "! could not list existing projects: "
+            + (listed.stderr or "").strip()[:300]
+        )
+        return None
     ids = [x.strip() for x in (listed.stdout or "").splitlines() if x.strip()]
     if ids:
         report.append(f"reusing existing project '{ids[0]}' (name: myoverlay)")
@@ -211,6 +255,7 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
         return (who.stdout or "").strip()
 
     # 1. Sign in if there is no active account (opens a browser once).
+    report.append("checking your Google sign-in (gcloud)...")
     if not active_account():
         report.append("opening a browser to sign in to Google (one time)...")
         _run_gcloud(["auth", "login", "--brief"])
@@ -244,10 +289,22 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     return True
 
 
-def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
+def setup_google_api(
+    cfg: Config, troubleshoot: bool = False, log_path: Path | None = None
+) -> list[str]:
     """Configure the Google side of `mt publish` end to end. Returns a report;
-    never raises (the manual Console path always remains as fallback)."""
-    report: list[str] = []
+    never raises (the manual Console path always remains as fallback).
+
+    With log_path set, every report line is also appended to that file as it
+    happens - the MSI wizard tails it to show live status."""
+    report = _TeeReport(log_path)
+    try:
+        return _setup_google_api(cfg, troubleshoot, report)
+    finally:
+        report.close()
+
+
+def _setup_google_api(cfg: Config, troubleshoot: bool, report: _TeeReport) -> list[str]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -269,6 +326,7 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
         report.append(f"! could not create the browser profile dir: {exc}")
         return report
 
+    report.append("opening the automated browser for the Google Cloud Console...")
     try:
         with sync_playwright() as pw:
             # Two attempts: when the first bounces to Google sign-in, the

@@ -272,12 +272,43 @@ def test_ensure_config_seeds_from_example(tmp_path):
     mod = load_launcher()
     repo = tmp_path / "repo"
     repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
     (repo / "config.example.toml").write_text("library_root = 'CHANGE_ME'\n")
 
-    mod.ensure_config(repo)
-    assert (repo / "config.toml").read_text() == "library_root = 'CHANGE_ME'\n"
+    mod.ensure_config(repo, home)
+    assert (home / "config.toml").read_text() == "library_root = 'CHANGE_ME'\n"
 
     # An existing config is never overwritten.
-    (repo / "config.toml").write_text("library_root = 'D:/karting'\n")
-    mod.ensure_config(repo)
-    assert (repo / "config.toml").read_text() == "library_root = 'D:/karting'\n"
+    (home / "config.toml").write_text("library_root = 'D:/karting'\n")
+    mod.ensure_config(repo, home)
+    assert (home / "config.toml").read_text() == "library_root = 'D:/karting'\n"
+
+
+def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
+    """An old %LOCALAPPDATA%\\MyOverlay install moves to ~\\myoverlay once:
+    the clone to <home>/repo, config and credentials out of the clone into
+    <home> (token.json becomes google-token)."""
+    mod = load_launcher()
+    appdata = tmp_path / "AppData"
+    old_repo = appdata / "MyOverlay" / "repo"
+    old_repo.mkdir(parents=True)
+    (old_repo / "config.toml").write_text("library_root = 'D:/karting'\n")
+    (old_repo / "token.json").write_text("{}")
+    (old_repo / "client_secret.json").write_text('{"installed": {}}')
+    monkeypatch.setenv("LOCALAPPDATA", str(appdata))
+
+    home = tmp_path / "home" / "myoverlay"
+    repo = home / "repo"
+    mod.migrate_legacy_layout(home, repo)
+
+    assert not old_repo.exists()  # clone moved
+    assert (home / "config.toml").read_text() == "library_root = 'D:/karting'\n"
+    assert (home / "google-token").read_text() == "{}"
+    assert (home / "client_secret.json").is_file()
+    assert not (repo / "token.json").exists()
+
+    # Re-running is a no-op (nothing left to move, nothing overwritten).
+    (home / "config.toml").write_text("library_root = 'E:/other'\n")
+    mod.migrate_legacy_layout(home, repo)
+    assert (home / "config.toml").read_text() == "library_root = 'E:/other'\n"

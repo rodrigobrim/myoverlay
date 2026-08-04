@@ -10,7 +10,7 @@ Two separate credentials are involved, and it matters which is which:
 | File | What it is | How you get it |
 |---|---|---|
 | `client_secret.json` | The **OAuth client** — identifies the *app* ("myoverlay") to Google. Contains a client id + `GOCSPX-…` secret. | Created once in the Cloud Console (steps 1–4). |
-| `token.json` | The **user token** — proves *you* allowed that app to manage your YouTube channel. Contains an access token + refresh token. | Produced by `MyOverlay google-auth` (step 5). |
+| `google-token` | The **user token** — proves *you* allowed that app to manage your YouTube channel. Contains an access token + refresh token. | Produced by `MyOverlay google-auth` (step 5). |
 
 Paths are set in `config.toml` under `[youtube]` (`client_secret_file`,
 `token_file`); by default both live next to `config.toml`.
@@ -83,20 +83,20 @@ MyOverlay google-auth
 A browser window opens on Google's consent page. Sign in with the channel's
 account and click **Allow** — the consent lists the single scope the pipeline
 requests, `https://www.googleapis.com/auth/youtube` (manage your YouTube
-account). The command then writes `token.json` and prints where it saved it.
+account). The command then writes `google-token` and prints where it saved it.
 
 What's in the token, and how it's used afterwards:
 
 - The **refresh token** is the part that matters: it does not expire (with the
   consent screen in production) and lets the watcher upload unattended
   forever. The short-lived access token inside is refreshed automatically on
-  every run; `token.json` is rewritten in place when that happens.
+  every run; `google-token` is rewritten in place when that happens.
 - The token is **bound to the OAuth client** that issued it. If you ever
-  recreate the client (or the project), the old `token.json` is dead even
+  recreate the client (or the project), the old `google-token` is dead even
   though it still parses — the pipeline detects this mismatch and
   re-authorizes instead of failing mid-upload.
 - Treat both files as secrets: anyone holding `client_secret.json` +
-  `token.json` can manage the channel. Neither is committed to git.
+  `google-token` can manage the channel. Neither is committed to git.
 
 After this, `MyOverlay publish` (or `MyOverlay run --publish`) uploads with no
 further prompts.
@@ -108,7 +108,7 @@ further prompts.
   unrecoverable).
 - **`google-auth` says "no refresh token returned"** — Google only issues a
   refresh token on the first grant. Revoke the app's old grant at
-  <https://myaccount.google.com/permissions>, delete `token.json`, re-run.
+  <https://myaccount.google.com/permissions>, delete `google-token`, re-run.
 - **Uploads stop working after ~a week** — consent screen still in *Testing*;
   publish it to production (step 3) and re-authorize.
 - **Browser refuses sign-in ("This browser or app may not be secure")** — you

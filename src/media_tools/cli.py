@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Optional
@@ -674,8 +675,28 @@ def google_setup(
 
     cfg = get_config()
     console.print("[bold]google-setup[/bold]:")
-    for line in setup_google_api(cfg, troubleshoot=troubleshoot):
+    # Streamed line by line to a fixed path (not config-relative): the MSI
+    # wizard tails it for live status while this runs in a console that dies
+    # with the process, and reads it back afterwards to detect failure.
+    log = Path.home() / "myoverlay" / "google-setup.log"
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        # When running via the exe, the launcher already started this run's
+        # log (MYOVERLAY_SETUP_LOG_ACTIVE); append to it instead of wiping
+        # its lines from the wizard's live view.
+        if not os.environ.get("MYOVERLAY_SETUP_LOG_ACTIVE"):
+            log.write_text("", encoding="utf-8")
+    except OSError:
+        log = None
+    report = setup_google_api(cfg, troubleshoot=troubleshoot, log_path=log)
+    for line in report:
         console.print(f"  {line}", markup=False)
+    if log is not None:
+        console.print(f"  (full report saved to {log})", markup=False)
+    # "!" lines mark failures; the nonzero exit (and the log) let the wizard
+    # surface them instead of assuming success.
+    if any(line.lstrip().startswith("!") for line in report):
+        raise typer.Exit(1)
 
 
 @app.command(name="google-auth")
