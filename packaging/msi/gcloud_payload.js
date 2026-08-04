@@ -53,68 +53,59 @@ function _tick(text) {
     } catch (e) { return 0; }
 }
 
-function _findPidByCmd(wmi, exeName, needle) {
-    var q = wmi.ExecQuery(
-        "select ProcessId, CommandLine from Win32_Process where Name='" + exeName + "'");
-    for (var e = new Enumerator(q); !e.atEnd(); e.moveNext()) {
-        var cl = "" + e.item().CommandLine;
-        if (cl.indexOf(needle) !== -1) return e.item().ProcessId;
+function _runExtractor(sh, cmd, label) {
+    // Exec, not Run: it hands back the process itself (Status, ProcessID,
+    // ExitCode), so the poll can never lose the extractor - the previous
+    // WMI command-line search could miss it, conclude "done" while tar was
+    // still unpacking, and fail the whole install on the too-early verify
+    // (observed live: wizard "ended prematurely" ~44 s in).
+    // Returns "done" | "cancel" | "failed".
+    var ex;
+    try { ex = sh.Exec(cmd); } catch (e) {
+        log(label + " could not start: " + e.message);
+        return "failed";
     }
-    return 0;
-}
-
-function _isAlive(wmi, pid) {
-    var q = wmi.ExecQuery(
-        "select ProcessId from Win32_Process where ProcessId=" + pid);
-    return !(new Enumerator(q).atEnd());
+    var waited = 0;
+    while (ex.Status === 0) {
+        _sleep1s(sh);
+        waited++;
+        if (_tick("extracting the Google Cloud SDK... (" + waited + " s)") === 2) {
+            try { sh.Run("taskkill /pid " + ex.ProcessID + " /t /f", 0, true); } catch (e2) {}
+            return "cancel";
+        }
+    }
+    if (ex.ExitCode !== 0) {
+        log(label + " exited with code " + ex.ExitCode);
+        return "failed";
+    }
+    return "done";
 }
 
 // tar.exe has shipped in Windows since 10 1803 and unpacks zip archives
-// natively. PowerShell's Expand-Archive is the fallback for older builds;
-// it is slower and rolls back destructively on failure, so it is second
-// choice, not first.
+// natively. PowerShell's Expand-Archive is the fallback: for pre-1803 builds
+// and for a tar run that failed (it is slower and rolls back destructively
+// on failure, so it is second choice, not first).
 //
 // The extractor runs ASYNCHRONOUSLY and is polled once a second, ticking an
 // elapsed-seconds status line into the wizard. A synchronous Run() here used
 // to freeze the status display for the whole multi-minute unpack - the one
-// wait of the install that said nothing. Returns "done" or "cancel"; the
-// caller judges success by the extracted tree, not by an exit code.
+// wait of the install that said nothing. Returns "done" | "cancel" |
+// "failed"; on "done" the caller still verifies the extracted tree.
 function extract(zipPath, destination, sh) {
     var tar = sh.ExpandEnvironmentStrings("%SystemRoot%\\System32\\tar.exe");
     var fso = new ActiveXObject("Scripting.FileSystemObject");
-    var exeName, cmd;
     if (fso.FileExists(tar)) {
-        exeName = "tar.exe";
-        cmd = 'cmd /c ""' + tar + '" -xf "' + zipPath + '" -C "' + destination + '""';
-    } else {
-        exeName = "powershell.exe";
-        cmd = 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command '
-            + '"Expand-Archive -LiteralPath \'' + zipPath + '\' -DestinationPath \''
-            + destination + '\' -Force"';
+        var outcome = _runExtractor(sh,
+            'cmd /c ""' + tar + '" -xf "' + zipPath + '" -C "' + destination + '""',
+            "tar");
+        if (outcome !== "failed") { return outcome; }
+        log("tar could not unpack the archive; falling back to PowerShell");
     }
-    sh.Run(cmd, 0, false);
-
-    var wmi = GetObject(
-        "winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2");
-    var waited = 0;
-    var pid = 0;
-    for (var tries = 0; tries < 10 && pid === 0; tries++) {
-        _sleep1s(sh);
-        waited++;
-        pid = _findPidByCmd(wmi, exeName, GCLOUD_ZIP);
-        if (_tick("extracting the Google Cloud SDK... (" + waited + " s)") === 2) {
-            return "cancel";
-        }
-    }
-    while (pid !== 0 && _isAlive(wmi, pid)) {
-        _sleep1s(sh);
-        waited++;
-        if (_tick("extracting the Google Cloud SDK... (" + waited + " s)") === 2) {
-            try { sh.Run("taskkill /pid " + pid + " /t /f", 0, true); } catch (e) {}
-            return "cancel";
-        }
-    }
-    return "done";
+    return _runExtractor(sh,
+        'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command '
+        + '"Expand-Archive -LiteralPath \'' + zipPath + '\' -DestinationPath \''
+        + destination + '\' -Force"',
+        "PowerShell");
 }
 
 function ExpandGCloud() {
