@@ -1,7 +1,8 @@
 # media-tools configuration. Copy to config.toml and edit.
 
 # Root folder where ingested/processed media lives (one subfolder per track day).
-library_root = "D:/karting/library"
+# Optional: defaults to ~/Videos/karting when omitted. Uncomment to override.
+# library_root = "D:/karting/library"
 
 # Language of the video output (overlay labels + default YouTube title and
 # description): en | pt | es | ja | ar | fr | it | ru | zh. Config stays English.
@@ -17,20 +18,21 @@ extensions = [".mp4", ".mov"]
 clock_tolerance_s = 900.0
 
 [mychron]
-# Where Race Studio 3 stores downloaded .xrk sessions.
-rs3_data_dirs = ["C:/AIM_SPORT/RaceStudio3/user/data"]
-extensions = [".xrk", ".xrz"]
+# Where downloaded MyChron sessions live on disk. `mt telemetry get` talks
+# to the device directly (USB or WiFi) and writes .xrk files into the FIRST
+# entry; every entry is scanned on ingest. Defaults to ~/Videos/karting/mychron.
+# data_dirs = ["C:/Users/you/Videos/karting/mychron"]
+# Only the .xrk log is a session; a compressed .xrz twin is always skipped.
+extensions = [".xrk"]
 # timezone = "America/Sao_Paulo"
-
-[rs3]
-# Zero-touch MyChron download: drive Race Studio 3's UI automatically.
-# Brittle by nature - the pipeline also works if you click Download yourself.
-enabled = false
-# exe_path = "C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe"
-# Note: RS3's real window title has no space ("RaceStudio3 (64 bit) 3.83.11")
-window_title_re = ".*Race\\s*Studio.*"
-download_button_names = ["Data Download", "Download Data", "Download"]
-trigger_interval_s = 600.0
+# Force one transport for device downloads: "usb" | "wifi". Omit to try USB
+# first (3x faster, charges the logger), then WiFi. WiFi downloads join the
+# MyChron's own access point, replacing the house network while they run.
+# transport = "usb"
+# Zero-touch device download: `mt run` / the watcher pull new sessions off
+# the MyChron whenever one is reachable, no clicks needed.
+auto_download = false
+download_interval_s = 600.0
 
 [watch]
 poll_s = 30.0
@@ -57,6 +59,12 @@ privacy = "private"  # API uploads from unaudited projects are locked private an
 # description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools."
 # playlist_id = "PL..."
 client_secret_file = "client_secret.json"
-token_file = "token.json"
+token_file = "google-token"
 # Cloud project used by `mt google-setup` (Console browser automation)
 # project_id = "media-tools-yt-1784475396"
+
+[tools]
+# Where the MyOverlay app is installed. Written automatically by the launcher
+# (the setup wizard's chosen destination); used to locate the bundled ffmpeg
+# and Google Cloud SDK by full path. Normally you never edit this by hand.
+# install_dir = "C:/Program Files/MyOverlay"

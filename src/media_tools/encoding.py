@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import subprocess
 
+from .tools import ffmpeg_exe
+
 logger = logging.getLogger("media_tools")
 
 _probe_cache: dict[str, bool] = {}
@@ -21,7 +23,7 @@ def encoder_available(codec: str) -> bool:
         try:
             proc = subprocess.run(
                 [
-                    "ffmpeg", "-v", "error",
+                    ffmpeg_exe(), "-v", "error",
                     # 320x240: NVENC rejects frames below its minimum dimensions
                     # (h264 ~145px wide). A tiny probe frame would fail to open
                     # the encoder and falsely report nvenc unusable on machines

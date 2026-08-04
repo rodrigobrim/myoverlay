@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MyOverlay MSI. Payload = the PyInstaller onedir build (dist\myoverlay,
+  MyOverlay MSI. Payload = the PyInstaller onedir build (dist\MyOverlay,
   harvested by heat into HarvestedFiles.wxs at build time). The setup wizard
-  (WizardUI.wxs) collects: output language, shortcut choices, Google API
-  client secret (validated, skippable with a warning) and default render
-  resolution; a deferred CA writes them to install_settings.json, which the
-  launcher applies when it creates config.toml on first run.
+  (WizardUI.wxs) collects: output language, a dependency check (none
+  currently registered), install destination, shortcut choices, Google API client secret
+  (validated, skippable with a warning) and default render resolution; a deferred CA writes them to
+  install_settings.yaml, which the launcher applies when it creates config.toml
+  on first run (the chosen destination is also recorded there as
+  [tools] install_dir so the pipeline finds the bundled ffmpeg/gcloud).
 
   Build with packaging\msi\build_msi.ps1.
 -->
@@ -13,7 +15,7 @@
   <Product Id="*"
            Name="MyOverlay - the definitive overlay tool for MyChron users"
            Language="1033"
-           Version="0.1.0"
+           Version="$(var.ProductVersion)"
            Manufacturer="Rodrigo Brim"
            UpgradeCode="7C3B7A66-9A1E-4C1D-B7F1-52A70E6D0D11">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
@@ -25,6 +27,10 @@
          sequence of this per-machine install. -->
     <Property Id="OUTPUT_LANGUAGE" Value="en" Secure="yes" />
     <Property Id="RESOLUTION" Value="2k" Secure="yes" />
+    <!-- Lets the DestinationDlg (WizardUI.wxs) edit/browse the install path and
+         drives WixUIValidatePath / BrowseDlg (WixUIExtension). Must name the
+         Directory the user is choosing. -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" Secure="yes" />
     <Property Id="STARTMENU_SHORTCUT" Value="1" Secure="yes" />
     <Property Id="DESKTOP_SHORTCUT" Secure="yes" />
     <!-- Component-selection page. FFmpeg and Git are part of the app payload
@@ -65,14 +71,26 @@
       <Directory Id="DesktopFolder" />
     </Directory>
 
-    <!-- Shortcuts run `myoverlay run` (the zero-touch workflow) in a console.
-         Non-advertised, conditioned on the wizard checkboxes. -->
+    <!-- Shortcuts run `MyOverlay run` (the zero-touch workflow) in a console.
+         Non-advertised, conditioned on the wizard checkboxes. Component
+         conditions re-run on every transaction with the properties reset to
+         defaults, so each condition also accepts the component's own registry
+         marker - otherwise a plain repair silently deleted the desktop
+         shortcut (its property has no default). -->
+    <Property Id="STARTMENU_SC_SAVED">
+      <RegistrySearch Id="StartMenuScSaved" Root="HKLM" Key="Software\MyOverlay"
+                      Name="StartMenuShortcut" Type="raw" Win64="yes" />
+    </Property>
+    <Property Id="DESKTOP_SC_SAVED">
+      <RegistrySearch Id="DesktopScSaved" Root="HKLM" Key="Software\MyOverlay"
+                      Name="DesktopShortcut" Type="raw" Win64="yes" />
+    </Property>
     <DirectoryRef Id="AppMenuFolder">
       <Component Id="StartMenuShortcut" Guid="10B3B9E4-63F2-4C89-9A57-2E24D8B10F01" Win64="yes">
-        <Condition>STARTMENU_SHORTCUT = "1"</Condition>
+        <Condition>STARTMENU_SHORTCUT = "1" OR STARTMENU_SC_SAVED</Condition>
         <Shortcut Id="StartMenuRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
-                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  Target="[INSTALLFOLDER]MyOverlay.exe" Arguments="run"
                   WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
         <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
         <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="StartMenuShortcut"
@@ -81,12 +99,25 @@
     </DirectoryRef>
     <DirectoryRef Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="1B0B18A2-7B4B-45D3-8E19-6A4E2C33AB02" Win64="yes">
-        <Condition>DESKTOP_SHORTCUT = "1"</Condition>
+        <Condition>DESKTOP_SHORTCUT = "1" OR DESKTOP_SC_SAVED</Condition>
         <Shortcut Id="DesktopRun" Name="MyOverlay"
                   Description="The definitive overlay tool for MyChron users"
-                  Target="[INSTALLFOLDER]myoverlay.exe" Arguments="run"
+                  Target="[INSTALLFOLDER]MyOverlay.exe" Arguments="run"
                   WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
         <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- MyOverlay.exe on the machine PATH, same mechanism as GCloudPath
+         below: MSI's own Environment table - silent, and cleanly removed on
+         uninstall. Rides in the Main feature, so it always accompanies the
+         app. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AppPath" Guid="6E2D4B87-0C31-4F5A-8D4E-9B1F3A7C5E20" Win64="yes">
+        <Environment Id="AppBinPath" Name="PATH" Part="last" Action="set"
+                     Permanent="no" System="yes" Value="[INSTALLFOLDER]" />
+        <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="AppPath"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
@@ -95,22 +126,29 @@
       <ComponentGroupRef Id="MyOverlayFiles" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="AppPath" />
     </Feature>
 
     <!-- The bundled SDK is its own feature so it can be conditionally skipped
          when the machine already has gcloud (Level 0 = not installed). When it
          IS installed, uninstalling MyOverlay removes it automatically. -->
     <Feature Id="GCloudSdk" Level="1" Absent="disallow" Display="hidden">
-      <ComponentGroupRef Id="GCloudFiles" />
+      <ComponentRef Id="GCloudArchive" />
       <ComponentRef Id="GCloudPath" />
       <!-- Skip when already on the machine, or when the user unticked it on
-           the component page. -->
-      <Condition Level="0">GCLOUD_PRESENT OR INSTALL_GCLOUD &lt;&gt; "1"</Condition>
+           the component page. First install only: feature conditions re-run
+           on EVERY transaction, and on a repair the wizard properties are
+           back at their defaults - without the Installed guard a repair
+           could silently add or remove the SDK against the original choice. -->
+      <Condition Level="0">NOT Installed AND (GCLOUD_PRESENT OR INSTALL_GCLOUD &lt;&gt; "1")</Condition>
     </Feature>
 
-    <!-- The offline SDK is bundled as MSI files (GCloudFiles component group,
-         installed under GCLOUDDIR) and set up with install.bat in quiet mode.
-         No download, no wizard, no clicks - the progress bar carries it. -->
+    <!-- The offline SDK ships as Google's own archive - ONE file - and is
+         expanded into GCLOUDDIR on the target machine by ExpandGCloud. It is
+         not harvested into ~30k MSI components because the SDK's deepest
+         entry pushes a build checkout past Windows' 260-character path limit,
+         which the WiX 3.14 tools cannot read at all; under the install folder
+         the same path is short. See gcloud_payload.js. -->
     <!-- Set by AppSearch when the SDK is already on this machine: the SDK
          feature is then not installed and the wizard skips its page. Checks
          the per-user and per-machine uninstall registrations. -->
@@ -139,19 +177,58 @@
       </Component>
     </DirectoryRef>
 
-    <!-- Google API config runs DURING the wizard, from the Finish button, as
-         an IMMEDIATE action in the interactive UI session - the only context
-         where the sign-in browser can actually appear (deferred CAs run
-         non-interactively). Synchronous (Return=ignore: the wizard waits for
-         it, but a cancel/failure never blocks finishing). Full exe path +
-         working dir so it launches reliably; property refs expand because
-         immediate CAs (unlike deferred) have property access. -->
-    <CustomAction Id="RunGoogleSetup" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]myoverlay.exe&quot; google-setup"
-                  Execute="immediate" Return="ignore" />
+    <!-- The archive itself: the only SDK file MSI tracks. ExpandGCloud
+         unpacks it beside itself and then deletes it, so it costs nothing on
+         disk after setup; the component stays registered, which is what makes
+         a repair re-copy and re-expand it. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="GCloudArchive" Guid="B7C1E5D4-2A93-4F16-8E7B-5D0A9C34F812" Win64="yes">
+        <File Id="GCloudZip" Source="$(var.GCloudZip)"
+              Name="google-cloud-cli-windows.zip" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Expansion + its cleanup. Deferred and NOT impersonated: the target is
+         under Program Files, which the installing user need not be able to
+         write. Deferred actions cannot read properties, hence the paired
+         SetProperty actions carrying INSTALLFOLDER in CustomActionData. -->
+    <Binary Id="GCloudPayloadJs" SourceFile="gcloud_payload.js" />
+    <CustomAction Id="SetExpandGCloudData" Property="ExpandGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="ExpandGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="ExpandGCloud" Execute="deferred"
+                  Impersonate="no" Return="check" />
+    <!-- Rollback runs if the transaction fails LATER: without it a failed
+         install would leave the expanded SDK behind. Scheduled before the
+         expansion it undoes, as rollback actions run in reverse. -->
+    <CustomAction Id="SetRollbackGCloudData" Property="RollbackGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="RollbackGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="RemoveBundledGCloud" Execute="rollback"
+                  Impersonate="no" Return="ignore" />
+    <CustomAction Id="SetRemoveBundledGCloudData" Property="RemoveBundledGCloud"
+                  Value="[INSTALLFOLDER]" />
+    <CustomAction Id="RemoveBundledGCloud" BinaryKey="GCloudPayloadJs"
+                  JScriptCall="RemoveBundledGCloud" Execute="deferred"
+                  Impersonate="no" Return="ignore" />
+
+    <!-- Google API config runs DURING the wizard as an IMMEDIATE action in
+         the interactive UI session - the only context where the sign-in
+         browser can actually appear (deferred CAs run non-interactively).
+         JScript launcher (run_google_setup.js): starts the exe asynchronously
+         and polls it, pinging the wizard every second so Cancel stays live.
+         On cancel it kills the console + browsers and schedules a passive
+         uninstall of the just-committed install (Google-side changes are
+         left alone), then returns UserExit (2). Return="check" so that exit
+         code closes the wizard; every other path returns success. -->
+    <Binary Id="RunGoogleSetupJs" SourceFile="run_google_setup.js" />
+    <CustomAction Id="RunGoogleSetup" BinaryKey="RunGoogleSetupJs"
+                  JScriptCall="RunGoogleSetup" Execute="immediate" Return="check" />
 
     <!-- Persist wizard choices next to the exe (elevated, after files land). -->
     <Binary Id="WriteSettingsJs" SourceFile="write_settings.js" />
+    <!-- INSTALLFOLDER is both where the settings file is written AND the chosen
+         install dir persisted into it (parts[0] in write_settings.js). -->
     <CustomAction Id="WriteSettings.SetData" Property="WriteSettings"
                   Value="[INSTALLFOLDER]|[OUTPUT_LANGUAGE]|[RESOLUTION]|[GOOGLE_CLIENT_SECRET]|[GOOGLE_SKIPPED]" />
     <CustomAction Id="WriteSettings" BinaryKey="WriteSettingsJs"
@@ -160,6 +237,17 @@
     <!-- Preselect the wizard's language from the machine's UI language. -->
     <CustomAction Id="DetectLanguage" BinaryKey="WriteSettingsJs"
                   JScriptCall="DetectLanguage" Execute="immediate" Return="ignore" />
+    <!-- Dependency-detection phase (detect_deps.js): silently checks the
+         machine for software MyOverlay needs (none currently registered) and
+         fills the DEP_*/DEPS_* properties. No page appears when everything
+         is present; a missing blocking dependency detours the wizard to the
+         DepsBlockedDlg dead end. Registering another dependency is a new
+         entry in the script's DEPS table plus a hint on that page. Runs
+         before the first dialog and re-runs from the language page's
+         Next. -->
+    <Binary Id="DetectDepsJs" SourceFile="detect_deps.js" />
+    <CustomAction Id="DetectDependencies" BinaryKey="DetectDepsJs"
+                  JScriptCall="DetectDependencies" Execute="immediate" Return="ignore" />
     <!-- Fill every P_* wizard string for the active language (generated file;
          see gen_i18n_ui.py). Runs before the first dialog and again from the
          language combo's Next/Back. -->
@@ -169,7 +257,7 @@
     <!-- The settings file is created by a CA, so removal must be explicit. -->
     <DirectoryRef Id="INSTALLFOLDER">
       <Component Id="SettingsCleanup" Guid="52D5B0C0-1F0E-4E7B-9C57-8E70A21F5C03" Win64="yes">
-        <RemoveFile Id="RemoveInstallSettings" Name="install_settings.json" On="uninstall" />
+        <RemoveFile Id="RemoveInstallSettings" Name="install_settings.yaml" On="uninstall" />
         <RegistryValue Root="HKLM" Key="Software\MyOverlay" Name="Installed"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
@@ -179,7 +267,8 @@
     </Feature>
 
     <!-- Uninstall cleanup: wipe everything the software put on the machine
-         (launcher clone/config/token under %LOCALAPPDATA%\myoverlay, and the
+         (clone/config/token under ~\myoverlay plus the legacy
+         %LOCALAPPDATA%\MyOverlay dir, and the
          Google Cloud SDK when the checkbox was ticked). The media library
          (videos/telemetry) is never touched. Skipped on major upgrades. -->
     <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />
@@ -196,6 +285,9 @@
       <!-- Unconditional: maintenance mode dialogs localize too. -->
       <Custom Action="DetectLanguage" After="AppSearch">1</Custom>
       <Custom Action="ApplyUiLanguage" After="DetectLanguage">1</Custom>
+      <!-- Fresh installs only: the dependency page is not in the maintenance
+           chain. -->
+      <Custom Action="DetectDependencies" After="ApplyUiLanguage">NOT Installed</Custom>
       <!-- Configure the Google API right after the install completes but while
            still in the interactive UI session (After ExecuteAction, before the
            Exit page). This is the only spot that is BOTH post-install (the exe
@@ -212,8 +304,29 @@
       <Custom Action="DetectLanguage" After="AppSearch">NOT Installed AND UILevel &lt; 5</Custom>
       <Custom Action="WriteSettings.SetData" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="WriteSettings" After="WriteSettings.SetData">NOT Installed</Custom>
-      <Custom Action="RemoveGCloud" After="InstallInitialize">REMOVE="ALL" AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
-      <Custom Action="RemoveAppData" After="RemoveGCloud">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <!-- Expand the bundled SDK once its archive is on disk (InstallFiles).
+           &amp;GCloudSdk=3 means "this transaction installs that feature", so
+           the work is skipped when the user unticked it or gcloud was already
+           present, and on uninstall. The rollback pair is scheduled first:
+           rollback actions replay in reverse, so it must be queued before the
+           action whose effect it undoes. -->
+      <Custom Action="SetRollbackGCloudData" After="WriteSettings">&amp;GCloudSdk=3</Custom>
+      <Custom Action="RollbackGCloud" After="SetRollbackGCloudData">&amp;GCloudSdk=3</Custom>
+      <Custom Action="SetExpandGCloudData" After="RollbackGCloud">&amp;GCloudSdk=3</Custom>
+      <Custom Action="ExpandGCloud" After="SetExpandGCloudData">&amp;GCloudSdk=3</Custom>
+      <!-- "Uninstall" is matched two ways: REMOVE="ALL" (true product
+           uninstall) OR the core feature installed-and-requested-absent
+           (feature-wise removal, which is what the wizard's Remove event
+           produces on its own). With only the literal check, a wizard
+           uninstall stripped the product but never ran these cleanups. -->
+      <Custom Action="RemoveGCloud" After="InstallInitialize">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RemoveAppData" After="RemoveGCloud">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <!-- The expanded SDK has no MSI components, so the installer's own file
+           removal never touches it - this is the only thing that deletes it.
+           Runs whenever the SDK feature goes away, including on a major
+           upgrade (where the new version expands its own copy). -->
+      <Custom Action="SetRemoveBundledGCloudData" After="RemoveAppData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
+      <Custom Action="RemoveBundledGCloud" After="SetRemoveBundledGCloudData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
     </InstallExecuteSequence>
 
     <UIRef Id="MyOverlayWizard" />

@@ -3,9 +3,8 @@
 Google exposes no API to configure an OAuth consent screen or create a
 Desktop OAuth client for a personal (no-organization) account - the
 `iap oauth-brands` API is org-only and the shared gcloud/ADC client blocks
-the YouTube scope. So, exactly like the Race Studio 3 situation (rs3.py),
-the only zero-touch path is driving the vendor's own UI. This module drives
-the Cloud Console with Playwright and mirrors rs3.py's philosophy: every
+the YouTube scope. So the only zero-touch path is driving the vendor's own
+UI. This module drives the Cloud Console with Playwright; every
 step is defensive, any failure is reported as text (never raised), and a
 troubleshoot mode snapshots each step so the procedure can be refined when
 Google shifts the UI.
@@ -27,12 +26,12 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from .config import Config
+from .tools import gcloud_available, gcloud_cmd
 
 
 def _gcp_data_dir(cfg: Config) -> Path:
@@ -47,7 +46,7 @@ def _gcp_data_dir(cfg: Config) -> Path:
     except OSError:
         pass
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "myoverlay"
+    return Path(base) / "MyOverlay"
 
 CONSOLE = "https://console.cloud.google.com"
 _STEP_TIMEOUT_MS = 15_000
@@ -62,7 +61,7 @@ class _NeedsLogin(Exception):
 
 class _Shoot:
     """Numbered per-step screenshots into <library_root>/gcp_troubleshoot/,
-    same contract as rs3._Troubleshoot: capture everything, break nothing."""
+    contract: capture everything, break nothing."""
 
     def __init__(self, cfg: Config, enabled: bool) -> None:
         self.enabled = enabled
@@ -86,7 +85,7 @@ class _Shoot:
             pass
 
     def dump_html(self, page, name: str) -> None:
-        """The web equivalent of rs3's control-tree dump: the live DOM, for
+        """A control-tree dump, web edition: the live DOM, for
         working out the real element behind a control a screenshot can't
         disambiguate."""
         if not self.enabled:
@@ -101,8 +100,10 @@ class _Shoot:
 
 
 def _run_gcloud(args: list[str], **kw):
-    """Run gcloud (a .cmd on Windows) via cmd /c so it resolves from PATH."""
-    return subprocess.run(["cmd", "/c", "gcloud", *args], **kw)
+    """Run gcloud by full path when the bundled copy is known, else by name.
+
+    gcloud is a .cmd on Windows, so it goes through `cmd /c` (see gcloud_cmd)."""
+    return subprocess.run([*gcloud_cmd(), *args], **kw)
 
 
 def _unique_project_id() -> str:
@@ -122,17 +123,38 @@ def _resolve_project(cfg: Config, report: list[str]) -> str | None:
     else - we instead reuse OUR project (display name 'myoverlay', matched
     across runs) or create a fresh id with that name."""
     configured = cfg.youtube.project_id
-    # a) a previously-resolved id we actually own -> reuse it.
+    # a) a previously-resolved id we actually own -> reuse it. Check the
+    #    lifecycle state, not just existence: describe still succeeds on a
+    #    project scheduled for deletion, and reusing one lands the Console
+    #    automation on a dead project ("Project scheduled for deletion").
     if configured and configured != "myoverlay":
-        d = _run_gcloud(["projects", "describe", configured], capture_output=True, text=True)
-        if d.returncode == 0:
+        d = _run_gcloud(
+            ["projects", "describe", configured, "--format=value(lifecycleState)"],
+            capture_output=True, text=True,
+        )
+        if d.returncode == 0 and (d.stdout or "").strip() == "ACTIVE":
             report.append(f"reusing configured project '{configured}'")
             return configured
-    # b) our own project whose display name is 'myoverlay' -> reuse (idempotent).
+    # b) our own project whose display name is 'myoverlay' -> reuse
+    #    (idempotent). ACTIVE only: a deleted 'myoverlay' lingers in listings
+    #    for its 30-day grace period and must not be picked up again.
     listed = _run_gcloud(
-        ["projects", "list", "--filter=name=myoverlay", "--format=value(projectId)"],
+        [
+            "projects", "list",
+            "--filter=name=myoverlay AND lifecycleState=ACTIVE",
+            "--format=value(projectId)",
+        ],
         capture_output=True, text=True,
     )
+    if listed.returncode != 0:
+        # A failed listing is NOT "no project": treating it that way once made
+        # every install mint a fresh project until the account hit its
+        # project-creation quota. Stop and report instead.
+        report.append(
+            "! could not list existing projects: "
+            + (listed.stderr or "").strip()[:300]
+        )
+        return None
     ids = [x.strip() for x in (listed.stdout or "").splitlines() if x.strip()]
     if ids:
         report.append(f"reusing existing project '{ids[0]}' (name: myoverlay)")
@@ -180,8 +202,14 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
     project (default 'myoverlay') or reuse it if it already exists, and enable
     the YouTube Data API. Returns True when the project is ready. The browser
     steps that follow (in setup_google_api) need this done first."""
-    if shutil.which("gcloud") is None:
-        report.append("! Google Cloud SDK (gcloud) not found on PATH")
+    if not gcloud_available():
+        report.append("! Google Cloud SDK (gcloud) not found")
+        report.append(
+            "  It normally ships with MyOverlay (installed next to the app). "
+            "Re-run the installer with the 'Google Cloud SDK' component ticked, "
+            "or install it from https://cloud.google.com/sdk/docs/install and "
+            "run `MyOverlay google-setup` again."
+        )
         return False
 
     def active_account() -> str:
@@ -259,10 +287,21 @@ def setup_google_api(cfg: Config, troubleshoot: bool = False) -> list[str]:
                     _automated_pass(pw, cfg, project, profile_dir, report, ts)
                     break
                 except _NeedsLogin:
-                    if attempt == 2 or not _manual_login(profile_dir, report):
+                    # Two distinct dead ends, two distinct messages: after the
+                    # second bounce NO window opens, so the old "sign in once in
+                    # the window that opens" read as an instruction about a
+                    # window that was never coming.
+                    if attempt == 2:
                         report.append(
-                            "! still not signed in - sign in once in the window that "
-                            "opens, close it, then re-run `mt google-setup`"
+                            "! the Console still bounces to sign-in after the login "
+                            "handoff - re-run `mt google-setup` and finish the sign-in "
+                            "in the window it opens (it closes itself once the Cloud "
+                            "Console loads)"
+                        )
+                        break
+                    if not _manual_login(profile_dir, report):
+                        report.append(
+                            "! sign-in did not complete - re-run `mt google-setup`"
                         )
                         break
     except Exception as exc:  # noqa: BLE001 - never kill the caller
@@ -349,18 +388,47 @@ _SESSION_COOKIES = (
 )
 
 
-def _has_google_session(profile_dir: Path) -> bool:
-    """True once the profile holds a Google auth-session cookie.
+def _signed_in_prefs(profile_dir: Path) -> bool:
+    """Lock-free sign-in signal: after a web sign-in Chrome mirrors the Google
+    account into the profile's Preferences JSON (account_info / gaia_cookie).
+    Preferences is replaced atomically and stays readable, unlike the Cookies
+    DB, which current Chrome holds under an exclusive lock while running - any
+    outside read fails with a sharing violation, so the cookie probe below can
+    never fire until the browser exits (observed as a login window that never
+    closes)."""
+    import json
 
-    Chrome's cookie DB is WAL-mode and buffers writes: an `immutable=1` read of
-    the main file alone misses a just-set session cookie that still lives in the
-    -wal sidecar (that lag is exactly why the login window seemed to never
-    close). So copy the DB together with its -wal/-shm to a temp dir and read
-    the copy, which replays the WAL and sees the fresh cookie.
+    for rel in ("Default/Preferences", "Preferences"):
+        f = profile_dir / rel
+        if not f.is_file():
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+        except ValueError:
+            continue
+        if d.get("account_info"):
+            return True
+        if "@" in (d.get("gaia_cookie", {}).get("last_list_accounts_data") or ""):
+            return True
+    return False
+
+
+def _has_google_session(profile_dir: Path) -> bool:
+    """True once the profile holds a signed-in Google session.
+
+    Preferences (never locked) is checked first; the cookie DB is the fallback
+    for engines that still allow shared reads (e.g. Edge). The cookie DB is
+    WAL-mode and buffers writes: an `immutable=1` read of the main file alone
+    misses a just-set session cookie that still lives in the -wal sidecar, so
+    copy the DB together with its -wal/-shm to a temp dir and read the copy,
+    which replays the WAL and sees the fresh cookie.
     """
     import shutil
     import sqlite3
     import tempfile
+
+    if _signed_in_prefs(profile_dir):
+        return True
 
     for rel in ("Default/Network/Cookies", "Network/Cookies", "Default/Cookies"):
         db = profile_dir / rel
@@ -391,21 +459,80 @@ def _has_google_session(profile_dir: Path) -> bool:
     return False
 
 
-def _close_profile_browsers(profile_dir: Path) -> None:
-    """Close every browser process bound to this profile so the automated pass
-    can take the profile lock. Safe because we only call it once the session
-    cookie is already flushed to disk - a terminate loses nothing."""
+def _profile_browser_pids(profile_dir: Path) -> set[int]:
+    """Pids of every chrome/msedge process bound to this profile dir."""
     import psutil
 
     key = str(profile_dir)
-    victims = []
+    pids: set[int] = set()
     for p in psutil.process_iter(["name", "cmdline"]):
         try:
             name = (p.info["name"] or "").lower()
             if ("chrome" in name or "msedge" in name) and key in " ".join(
                 p.info["cmdline"] or []
             ):
-                victims.append(p)
+                pids.add(p.pid)
+        except Exception:  # noqa: BLE001 - vanished process
+            continue
+    return pids
+
+
+def _console_window_open(profile_dir: Path) -> bool:
+    """Engine-agnostic sign-in signal: the login handoff carries a continue URL
+    into the Cloud Console, so once sign-in completes the tab title becomes
+    '... - Google Cloud console' - readable from outside the browser via Win32
+    title enumeration. This is the only passive signal that works on Edge,
+    whose profile files carry no Google-account marker and whose cookie DB is
+    exclusively locked. It must stay passive: launching the handoff browser
+    with a DevTools port makes Google reject the sign-in outright
+    (accounts.google.com/v3/signin/rejected)."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    pids = _profile_browser_pids(profile_dir)
+    if not pids:
+        return False
+
+    user32 = ctypes.windll.user32
+    hit = False
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def _cb(hwnd, _lparam):
+        nonlocal hit
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        pid = wt.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value not in pids:
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            # Match the CONSOLE title exactly ("... - Google Cloud console"),
+            # never a bare "google cloud": the sign-in page carries the
+            # destination's branding ("Google Cloud Platform"), so the loose
+            # match fired mid-login and killed the window before the password
+            # step - leaving a profile with __Host-GAPS and no session cookie.
+            if "google cloud console" in buf.value.lower():
+                hit = True
+                return False  # stop enumerating
+        return True
+
+    user32.EnumWindows(_cb, 0)
+    return hit
+
+
+def _close_profile_browsers(profile_dir: Path) -> None:
+    """Close every browser process bound to this profile so the automated pass
+    can take the profile lock. Safe because we only call it once the session
+    cookie is already flushed to disk - a terminate loses nothing."""
+    import psutil
+
+    victims = []
+    for pid in _profile_browser_pids(profile_dir):
+        try:
+            victims.append(psutil.Process(pid))
         except Exception:  # noqa: BLE001 - vanished process
             continue
     for p in victims:
@@ -425,7 +552,8 @@ def _close_profile_browsers(profile_dir: Path) -> None:
 def _manual_login(profile_dir: Path, report: list[str]) -> bool:
     """Google rejects sign-in inside an automation-controlled browser, so open
     a PLAIN browser on the same profile and let the human sign in there. We
-    watch the profile for the Google session cookie and close the window
+    watch for the sign-in (profile files, or the Cloud Console window title
+    for engines like Edge whose profile carries no signal) and close the window
     OURSELVES once it appears - the user just signs in, nothing to close. The
     retry pass then reuses the session; no credential is ever typed by us."""
     import subprocess
@@ -461,7 +589,7 @@ def _manual_login(profile_dir: Path, report: list[str]) -> bool:
         if proc.poll() is not None:  # user closed it themselves
             time.sleep(2)
             return True
-        if _has_google_session(profile_dir):
+        if _has_google_session(profile_dir) or _console_window_open(profile_dir):
             report.append("sign-in detected - closing the login window")
             _close_profile_browsers(profile_dir)
             return True
@@ -503,16 +631,23 @@ def _run_flow(cfg: Config, page, project: str, report: list[str], ts: _Shoot) ->
 
     # -- 3. desktop client + JSON -------------------------------------------
     if cfg.youtube.client_secret_file.is_file():
-        report.append(f"client secret already present at {cfg.youtube.client_secret_file}")
         other = _secret_project(cfg.youtube.client_secret_file)
         if other and other != project:
-            # Existing file belongs to a different project. Never overwrite it
-            # silently - surface the mismatch and let the human decide.
+            # A secret for another project cannot authorize this one, so this
+            # run continues on to mint one. The existing file is NOT moved
+            # here: the browser steps below can still fail (a closed window is
+            # enough), and rotating first turned a run that merely failed into
+            # one that left no client_secret.json at all. It moves aside at
+            # write time instead, once a replacement actually exists.
             report.append(
-                f"? but it belongs to project '{other}', not '{project}' - move/rename it "
-                "and re-run google-setup to mint one for this project"
+                f"client secret at {cfg.youtube.client_secret_file} belongs to project "
+                f"'{other}', not '{project}' - minting one for '{project}'"
             )
-        return
+        else:
+            report.append(
+                f"client secret already present at {cfg.youtube.client_secret_file}"
+            )
+            return
     # Google only reveals a client's secret ONCE, in the creation dialog
     # ("viewing and downloading client secrets is no longer available" on the
     # client page afterwards). So when the secret file is missing, an existing
@@ -589,25 +724,36 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
     # the create API response itself: it carries the client id and the
     # GOCSPX- secret that the dialog renders. Sniff responses around the
     # Create click and synthesize the standard installed-app JSON from them.
+    # Sniffing is tried FIRST and polled: the response arrives about a second
+    # after the click, whereas the download path can only ever time out here.
+    # Listen for `requestfinished` (NOT `response`): in the sync API,
+    # Response.text() blocks until the response completes, and the Console
+    # keeps long-poll/streaming connections open whose URLs also match the
+    # filter - reading one of those froze the flow for 30+ seconds. A finished
+    # request's body reads back instantly. The create call is a mutation, so
+    # only POSTs are buffered (the long-lived channels are GETs).
     sniffed: list = []
 
-    def _on_response(resp) -> None:
+    def _on_finished(req) -> None:
+        # Only touch local properties here - blocking Playwright calls inside
+        # an event handler can deadlock the sync dispatcher.
         try:
-            if re.search(r"client|oauth", resp.url, re.I):
-                sniffed.append(resp)
+            if req.method == "POST" and re.search(r"client|oauth", req.url, re.I):
+                sniffed.append(req)
         except Exception:  # noqa: BLE001
             pass
 
-    page.on("response", _on_response)
+    page.on("requestfinished", _on_finished)
     _click(page, "button", "Create")
-    time.sleep(4)  # let the create call and dialog finish
-    ts.snap(page, "client_created")
 
-    saved = _download_json(page, cfg.youtube.client_secret_file, report)
+    saved = _await_secret_from_responses(cfg, sniffed, report)
+    ts.snap(page, "client_created")
     if not saved:
-        saved = _secret_from_responses(cfg, sniffed, report)
+        # Sniffing missed it (body unavailable, or Google changed the payload).
+        # Fall back to the dialog's own download link.
+        saved = _download_json(page, cfg.youtube.client_secret_file, report)
     try:
-        page.remove_listener("response", _on_response)
+        page.remove_listener("requestfinished", _on_finished)
     except Exception:  # noqa: BLE001
         pass
     if saved:
@@ -622,37 +768,63 @@ def _create_desktop_client(cfg: Config, page, report: list[str], ts: _Shoot) -> 
         ts.dump_html(page, "download_fail_dom")
 
 
-def _secret_from_responses(cfg: Config, responses: list, report: list[str]) -> bool:
-    """Extract client id + GOCSPX- secret from the create call's response and
+def _await_secret_from_responses(
+    cfg: Config, requests: list, report: list[str], timeout_s: float = 20.0
+) -> bool:
+    """Poll the sniffed FINISHED requests until the create call's body shows up.
+
+    `requests` is appended to by the page's requestfinished handler while this
+    runs, so this both waits for the create call and scans arrivals on later
+    ticks. Every buffered request has completed, so response() / text() return
+    immediately - the loop never blocks on an open connection. Returns as soon
+    as the secret is written, typically about a second after the Create click."""
+    deadline = time.monotonic() + timeout_s
+    scanned: set[int] = set()  # requests already read (matched or not)
+    while True:
+        # Newest first: the create call is the last request the click fires.
+        for req in reversed(list(requests)):
+            if id(req) in scanned:
+                continue
+            scanned.add(id(req))
+            try:
+                resp = req.response()
+                body = resp.text() if resp else ""
+            except Exception:  # noqa: BLE001 - body gone (e.g. context torn down)
+                continue
+            if _secret_from_body(cfg, body, report):
+                return True
+        if time.monotonic() >= deadline:
+            report.append("~ create response did not carry the secret within "
+                          f"{timeout_s:.0f}s")
+            return False
+        time.sleep(0.25)
+
+
+def _secret_from_body(cfg: Config, body: str, report: list[str]) -> bool:
+    """Extract client id + GOCSPX- secret from a create-call response body and
     write the standard installed-app client_secret.json ourselves."""
     import json
 
-    for resp in reversed(responses):  # newest first: the create call is last
-        try:
-            body = resp.text()
-        except Exception:  # noqa: BLE001 - body may be unavailable/binary
-            continue
-        secret = re.search(r"GOCSPX-[\w-]+", body)
-        client = re.search(r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", body)
-        if not (secret and client):
-            continue
-        data = {
-            "installed": {
-                "client_id": client.group(0),
-                "project_id": cfg.youtube.project_id,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_secret": secret.group(0),
-                "redirect_uris": ["http://localhost"],
-            }
+    secret = re.search(r"GOCSPX-[\w-]+", body)
+    client = re.search(r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", body)
+    if not (secret and client):
+        return False
+    data = {
+        "installed": {
+            "client_id": client.group(0),
+            "project_id": cfg.youtube.project_id,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": secret.group(0),
+            "redirect_uris": ["http://localhost"],
         }
-        dest = cfg.youtube.client_secret_file
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        report.append("client secret captured from the create API response")
-        return True
-    return False
+    }
+    dest = cfg.youtube.client_secret_file
+    _claim_secret_path(dest, report)
+    dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    report.append("client secret captured from the create API response")
+    return True
 
 
 def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
@@ -673,9 +845,11 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
             loc = locate()
             if loc is None:
                 continue
-            with page.expect_download(timeout=30_000) as dl:
+            # Short: a download that is going to fire, fires right after the
+            # click. Waiting 30s per candidate only ever stalled the run.
+            with page.expect_download(timeout=6_000) as dl:
                 loc.click(timeout=8_000)
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            _claim_secret_path(dest, report)
             dl.value.save_as(str(dest))
             return True
         except Exception as exc:  # noqa: BLE001
@@ -685,7 +859,7 @@ def _download_json(page, dest: Path, report: list[str] | None = None) -> bool:
     return False
 
 
-# --- small defensive helpers (the rs3.py "click named control" idiom) -------
+# --- small defensive helpers (the "click named control" idiom) --------------
 
 
 def _dismiss_overlays(page) -> None:
@@ -831,6 +1005,32 @@ def _secret_project(path: Path) -> str | None:
         return json.loads(path.read_text(encoding="utf-8-sig"))["installed"]["project_id"]
     except Exception:  # noqa: BLE001 - unreadable/foreign file is fine
         return None
+
+
+def _rotate_secret_aside(path: Path, project: str) -> Path:
+    """Move a client secret belonging to another project out of the way,
+    recording that project in the name (client_secret.<project>.bak.json, the
+    convention already on disk). Never deletes and never clobbers an earlier
+    backup: a client secret is shown once by Google and cannot be re-read."""
+    for n in range(100):
+        suffix = "" if n == 0 else f".{n}"
+        kept = path.with_name(f"{path.stem}.{project}{suffix}.bak{path.suffix}")
+        if not kept.exists():
+            path.rename(kept)
+            return kept
+    raise OSError(f"could not find a free backup name beside {path}")
+
+
+def _claim_secret_path(dest: Path, report: list[str] | None = None) -> None:
+    """Free `dest` for a secret we are about to write, without ever destroying
+    the one already there. Called at write time, not before the browser work:
+    the old secret stays usable right up to the moment a replacement exists."""
+    if not dest.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        return
+    kept = _rotate_secret_aside(dest, _secret_project(dest) or "previous")
+    if report is not None:
+        report.append(f"previous client secret kept as {kept.name}")
 
 
 def _account_email(page) -> str | None:

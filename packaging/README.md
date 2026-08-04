@@ -1,37 +1,49 @@
-# myoverlay — shareable launcher
+# MyOverlay — shareable launcher
 
 A self-contained Windows build of the pipeline for friends: no Python, git,
 ffmpeg or any install needed. One folder, one exe.
 
 ## For friends (using it)
 
-1. Unzip `myoverlay-win64.zip` anywhere (e.g. `C:\myoverlay`).
+1. Unzip `MyOverlay-win64.zip` anywhere (e.g. `C:\MyOverlay`).
 2. Open a terminal in that folder and run:
 
 ```
-myoverlay run                # everything: MyChron download -> ingest -> sync -> correlate -> render
-myoverlay run --publish      # ... plus YouTube upload
-myoverlay status             # table of every track day
-myoverlay ingest             # pull new files from camera/SD + RS3 folder
-myoverlay sync 2026-07-13
-myoverlay correlate 2026-07-13
-myoverlay render 2026-07-13  # --force to re-render
-myoverlay publish 2026-07-13 # --dry-run to preview
-myoverlay slice 2026-07-13 "25:15-30:37"            # cut only (lands in out\slices\)
-myoverlay slice 2026-07-13 "25:15-30:37" --publish  # cut + upload with labeled title
-myoverlay slice 2026-07-13 "12:01-14:02" "31:00-33:10"
+MyOverlay run                # everything: MyChron download -> ingest -> sync -> correlate -> render
+MyOverlay run --publish      # ... plus YouTube upload
+MyOverlay status             # table of every track day
+MyOverlay ingest             # pull new files from camera/SD + telemetry folder
+MyOverlay sync 2026-07-13
+MyOverlay correlate 2026-07-13
+MyOverlay render 2026-07-13  # --force to re-render
+MyOverlay publish 2026-07-13 # --dry-run to preview
+MyOverlay slice 2026-07-13 "25:15-30:37"            # cut only (lands in out\slices\)
+MyOverlay slice 2026-07-13 "25:15-30:37" --publish  # cut + upload with labeled title
+MyOverlay slice 2026-07-13 "12:01-14:02" "31:00-33:10"
 ```
 
 On every start the launcher checks the GitHub repo for new commits and pulls
 them, so the pipeline stays current without reinstalling (`--no-update` or
 `MYOVERLAY_NO_UPDATE=1` skips the check). The first run creates
-`config.toml` and prints its location — edit `library_root` and the Race
-Studio 3 data folder before the first real use. For YouTube upload each
+`config.toml` and prints its location — edit `library_root` and the MyChron
+download folder (`[mychron] data_dirs`) before the first real use. For YouTube upload each
 person needs their own Google OAuth client (see the main README).
 
-The pipeline working copy lives in `%LOCALAPPDATA%\myoverlay\repo`
-(override with `MYOVERLAY_REPO`; point `MYOVERLAY_REPO_URL` at a fork to
-test branches).
+The app's data lives in `~\myoverlay`: `config.toml`, the Google
+credentials (`client_secret.json`, `google-token`) and the pipeline working
+copy at `~\myoverlay\repo` (override with `MYOVERLAY_REPO`; point
+`MYOVERLAY_REPO_URL` at a fork to test branches). Data from an older
+install under `%LOCALAPPDATA%\MyOverlay` is moved there automatically on
+first run.
+
+`mt` and `uv` ship beside the exe as well. After an MSI install both are
+plain commands in any terminal — the installer already puts the install
+directory on the machine PATH — so `mt render 2026-07-13` is `MyOverlay
+render 2026-07-13` (the shim forwards to the exe next to it, never to some
+other copy on PATH), and the bundled `uv` is there for working on the
+pipeline checkout without installing anything. The PATH entry is appended,
+so a `uv` the machine already has keeps winning; ours is what a clean
+machine resolves.
 
 ## Building the zip (maintainer)
 
@@ -40,7 +52,17 @@ powershell -File packaging\build_exe.ps1
 ```
 
 Downloads MinGit + ffmpeg into `packaging\vendor\` (cached), then produces
-`dist\myoverlay\` and `dist\myoverlay-win64.zip` with PyInstaller.
+`dist\MyOverlay\` and `dist\MyOverlay-win64.zip` with PyInstaller.
+
+`path_tools.ps1` then stages `uv.exe` and `mt.cmd` into the payload ROOT
+(uv is vendored into `packaging\vendor\uv`, cached like the others). The
+root is deliberate: PyInstaller 6 puts every bundled data file under
+`_internal\`, and only the payload root becomes the install directory —
+the one already on the machine PATH — so a file dropped there is a command
+after install with no extra PATH entry to add or to clean up on uninstall.
+`build_msi.ps1` runs the same script, so the zip and the installer cannot
+disagree, and a payload built before this existed still gets both without a
+full exe rebuild.
 
 **Rebuild needed only when** `pyproject.toml` gains a new dependency — the
 launcher imports the pulled source against the bundled packages, so pure
@@ -51,38 +73,70 @@ code changes reach friends via git pull, but new packages must be added to
 
 ```
 powershell -File packaging\build_exe.ps1      # payload (if not already built)
-powershell -File packaging\msi\build_msi.ps1  # -> dist\myoverlay-setup.msi
+powershell -File packaging\msi\build_msi.ps1  # -> dist\MyOverlay-setup.msi
 ```
 
 `build_msi.ps1` downloads the WiX 3.14 binaries into `packaging\vendor\wix`
-(cached), harvests `dist\myoverlay\` and links `dist\myoverlay-setup.msi`.
+(cached), harvests `dist\MyOverlay\` and links `dist\MyOverlay-setup.msi`.
+
+The Google Cloud SDK is bundled as Google's own archive — one file — and is
+expanded on the target machine by the `ExpandGCloud` custom action
+(`gcloud_payload.js`), not harvested into the MSI. That is not an
+optimisation: the SDK's deepest entry sits 145 characters below its own
+root, which pushes a build checkout past Windows' 260-character path limit,
+and the WiX 3.14 tools are .NET Framework programs that simply report such a
+file as "cannot be found". Installed, the same path is ~189 characters and
+perfectly fine. It also keeps ~30k files out of the harvest, which was most
+of the build time. The expanded tree has no MSI components, so
+`RemoveBundledGCloud` is what deletes it on uninstall and on rollback.
 
 The setup wizard asks for:
 
 1. **Video language** (en default, pt/es/ja/ar/fr/it/ru) — applies to the
    delta overlay labels and the YouTube title/description defaults only;
    config and CLI stay English.
+   Its Next also runs a silent **dependency check** (`detect_deps.js`).
+   No external software is currently required — MyOverlay talks to the
+   MyChron directly (USB/WiFi) and bundles everything else — so the DEPS
+   table is empty; the framework stays for any future dependency. Nothing
+   is shown when everything is present; a missing blocking dependency
+   detours to a dead-end page listing it, whose only options are Back
+   (return; Next re-checks) and Cancel (exits setup).
 2. **Google Cloud SDK** — the official Windows installer
    (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
    launched and must complete before the wizard continues (an
    "already installed" checkbox skips it).
-3. **Start Menu / Desktop shortcuts** (they launch `myoverlay run`).
-4. **Google API configuration** — step-by-step Cloud Console instructions,
+3. **Install destination folder** — where the app (and all bundled tools:
+   ffmpeg, git, the Google Cloud SDK) is installed. Defaults to
+   `Program Files\MyOverlay`; a Browse button and path validation are the
+   stock WiX folder dialogs.
+4. **Start Menu / Desktop shortcuts** (they launch `MyOverlay run`).
+5. **Google API configuration** — step-by-step Cloud Console instructions,
    a Validate button that checks the client_secret JSON is a Desktop-app
    OAuth client, and a Skip button that warns YouTube publishing will be
    unavailable.
-5. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
+6. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
 
-The choices are written to `install_settings.json` next to the installed
+The choices are written to `install_settings.yaml` next to the installed
 exe; the launcher applies them when it creates `config.toml` on first run
 (language, resolution, and it copies the validated client secret to the
-repo as `client_secret.json`).
+repo as `client_secret.json`). The chosen destination is recorded as
+`[tools] install_dir` in `config.toml` (refreshed on every launch), so the
+pipeline finds the bundled ffmpeg and Google Cloud SDK by full path.
+
+That recording, like the `MYOVERLAY_*` env vars, comes from the launcher —
+which is frozen into the exe and only changes on a rebuild. `media_tools.tools`
+therefore also resolves the bundled tools from `sys.executable`'s own
+directory, so new pipeline code running under an older exe still finds them.
+`build_msi.ps1` refuses to package a `dist\MyOverlay` payload older than
+`myoverlay_launcher.py`/`myoverlay.spec` for the same reason.
 
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
-the software installed: app files, shortcuts, `install_settings.json`, and
-`%LOCALAPPDATA%\myoverlay` (pipeline clone, config.toml, Google
-credentials). A checkbox on the remove-options page additionally
+the software installed: app files, shortcuts, `install_settings.yaml`, and
+the data dirs: `~\myoverlay` (pipeline clone, config.toml, Google
+credentials) plus the legacy `%LOCALAPPDATA%\MyOverlay`. A checkbox on the
+remove-options page additionally
 uninstalls the Google Cloud SDK (unchecked by default). The media library
-(`library_root` — videos/telemetry) and Race Studio 3 data are never
+(`library_root` — videos/telemetry) and downloaded MyChron data are never
 touched.

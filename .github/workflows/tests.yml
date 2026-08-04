@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    # windows-latest, not ubuntu: this is a Windows-only product. overlay.py
+    # resolves its fonts from C:/Windows/Fonts and several tests assert on
+    # rendered pixel counts, so Linux would exercise a different font stack
+    # than the one that actually ships.
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Without ffmpeg the real-encoder tests self-skip (encoder resolution,
+      # the render smoke test, ffprobe duration probes). Install it so they
+      # actually run - there is no GPU here, so they exercise the libx264
+      # fallback path.
+      - name: Install ffmpeg
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      # `uv run pytest` hits a uv trampoline error on some setups; going
+      # through `python -m pytest` is the reliable form.
+      - name: Run tests
+        run: uv run python -m pytest -q

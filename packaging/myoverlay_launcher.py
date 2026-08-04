@@ -1,16 +1,19 @@
-"""myoverlay - self-updating launcher for the media-tools pipeline.
+"""MyOverlay - self-updating launcher for the media-tools pipeline.
 
 This is the entry point of the frozen (PyInstaller) executable that friends
 run. It bundles a Python runtime, every pipeline dependency, MinGit and
 ffmpeg - nothing needs to be installed.
 
 On every start it:
-  1. clones the repo on first run (into %LOCALAPPDATA%\\myoverlay\\repo),
-     or fast-forward pulls new commits;
-  2. creates config.toml from config.example.toml on first run;
+  1. clones the repo on first run (into ~\\myoverlay\\repo), or fast-forward
+     pulls new commits; data from an older install under %LOCALAPPDATA%
+     \\MyOverlay is moved to ~\\myoverlay once;
+  2. creates ~\\myoverlay\\config.toml from config.example.toml on first run
+     (the Google credentials live next to it: client_secret.json and
+     google-token);
   3. puts the bundled git/ffmpeg on PATH;
   4. imports the *pulled* media_tools package and forwards the command line
-     to its CLI - so `myoverlay run`, `myoverlay slice ...` etc. behave
+     to its CLI - so `MyOverlay run`, `MyOverlay slice ...` etc. behave
      exactly like `uv run mt ...` in a dev checkout.
 
 Because the pipeline source comes from the repo (not the frozen bundle),
@@ -19,7 +22,7 @@ third-party dependency does the exe need a rebuild - that failure mode is
 detected and explained.
 
 Environment overrides:
-  MYOVERLAY_REPO       working copy location (default %LOCALAPPDATA%\\myoverlay\\repo)
+  MYOVERLAY_REPO       working copy location (default ~\\myoverlay\\repo)
   MYOVERLAY_REPO_URL   git remote to clone/pull (default the official repo)
   MYOVERLAY_NO_UPDATE  set to 1 to skip the git pull (same as --no-update)
   MYOVERLAY_BRANCH     run this branch instead of the default (same as
@@ -30,7 +33,6 @@ Environment overrides:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -46,7 +48,7 @@ def bundle_dir() -> Path:
 
 
 def say(msg: str) -> None:
-    print(f"[myoverlay] {msg}")
+    print(f"[MyOverlay] {msg}")
 
 
 def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 300):
@@ -59,8 +61,51 @@ def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 
     )
 
 
+def default_home() -> Path:
+    """The user-facing data dir: config.toml, google-token, client_secret.json
+    and the managed repo clone all live here."""
+    return Path.home() / "myoverlay"
+
+
 def default_repo_path() -> Path:
-    return Path(os.environ["LOCALAPPDATA"]) / "myoverlay" / "repo"
+    return default_home() / "repo"
+
+
+def _legacy_appdata_dir() -> Path | None:
+    """Where installs before the ~\\myoverlay layout kept everything."""
+    base = os.environ.get("LOCALAPPDATA")
+    return Path(base) / "MyOverlay" if base else None
+
+
+def migrate_legacy_layout(home: Path, repo: Path) -> None:
+    """One-time move of an older install's data into ~\\myoverlay.
+
+    Old layout: everything under %LOCALAPPDATA%\\MyOverlay - the clone with
+    config.toml/token.json/client_secret.json inside it, plus the sign-in
+    browser profile. New layout: the clone at <home>/repo stays a disposable
+    code cache, while config and credentials live in <home> directly. Each
+    piece moves only when the destination does not exist yet, so a partially
+    migrated (or already current) setup is never overwritten.
+    """
+    old = _legacy_appdata_dir()
+    if old is None or not old.is_dir() or old.resolve() == home.resolve():
+        return
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        old_repo = old / "repo"
+        if old_repo.is_dir() and not repo.exists():
+            say(f"moving your MyOverlay data to {home}")
+            shutil.move(str(old_repo), str(repo))
+        moves = [
+            (repo / "config.toml", home / "config.toml"),
+            (repo / "token.json", home / "google-token"),
+            (repo / "client_secret.json", home / "client_secret.json"),
+        ]
+        for src, dst in moves:
+            if src.exists() and not dst.exists():
+                shutil.move(str(src), str(dst))
+    except OSError as exc:
+        say(f"warning: could not finish moving data to {home}: {exc}")
 
 
 def _managed_marker(repo: Path) -> Path:
@@ -113,6 +158,54 @@ def _has_upstream(git: Path, repo: Path) -> bool:
     return proc.returncode == 0
 
 
+def _default_branch(git: Path, repo: Path) -> str:
+    """The clone's default branch (origin/HEAD), 'main' when unreadable."""
+    proc = run_git(git, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=repo)
+    ref = proc.stdout.strip() if proc.returncode == 0 else ""
+    return ref.split("/", 1)[1] if "/" in ref else "main"
+
+
+def _return_to_default_branch(git: Path, repo: Path) -> None:
+    """Put a managed clone back on the default branch before pulling.
+
+    `--branch NAME` is sticky - it checks the branch out and nothing ever
+    switches back - so a single old --branch run left the clone pulling that
+    branch forever. The pull succeeds ("Already up to date" for that branch),
+    the resync path never fires because nothing failed, and the launcher keeps
+    reporting "pipeline is up to date" while the code sits commits behind main:
+    the one stale state that announces itself as current.
+
+    Local edits that block the switch are stashed, never discarded - the clone
+    is disposable, but deciding that someone's uncommitted work is not is a
+    call this launcher does not get to make silently.
+    """
+    branch = _default_branch(git, repo)
+    if _current_branch(git, repo) == branch:
+        return
+    if run_git(git, ["checkout", branch], cwd=repo, timeout=120).returncode != 0:
+        stashed = run_git(
+            git,
+            # A stash writes commit objects, so it needs an identity. Supply
+            # one: a friend's clone may have no user.name/user.email at all,
+            # and "Please tell me who you are" must not be what stands between
+            # them and a current pipeline.
+            ["-c", "user.email=myoverlay@localhost", "-c", "user.name=MyOverlay",
+             "stash", "push", "-u",
+             "-m", f"MyOverlay: local edits before returning to {branch}"],
+            cwd=repo,
+            timeout=120,
+        )
+        if stashed.returncode != 0:
+            say(f"warning: could not return this copy to {branch}; running it as-is")
+            return
+        say(f"local changes in this copy were stashed to return to {branch}")
+        say("(recover them with: git stash list / git stash pop)")
+        if run_git(git, ["checkout", branch], cwd=repo, timeout=120).returncode != 0:
+            say(f"warning: could not return this copy to {branch}; running it as-is")
+            return
+    say(f"returned this copy to the {branch} branch")
+
+
 def _checkout_branch(git: Path, repo: Path, branch: str) -> None:
     if _current_branch(git, repo) == branch:
         return
@@ -135,7 +228,7 @@ def ensure_repo(
             say("ERROR: could not download the pipeline repository.")
             say(proc.stderr.strip()[:800])
             sys.exit(2)
-        _managed_marker(repo).write_text("created by myoverlay\n", encoding="ascii")
+        _managed_marker(repo).write_text("created by MyOverlay\n", encoding="ascii")
         say("download complete")
         if branch:
             _checkout_branch(git, repo, branch)
@@ -162,6 +255,12 @@ def ensure_repo(
     if skip_update:
         return
 
+    # No branch asked for means the default branch, not "whatever an old
+    # --branch run left checked out". Managed clones only: a dev checkout's
+    # branch is the developer's business.
+    if is_managed(repo):
+        _return_to_default_branch(git, repo)
+
     proc = run_git(git, ["pull", "--ff-only"], cwd=repo, timeout=120)
     if proc.returncode == 0:
         out = (proc.stdout or "").strip()
@@ -177,7 +276,7 @@ def ensure_repo(
     # silently keep running old code - re-sync the managed clone instead.
     if not is_managed(repo):
         say("warning: could not update (offline, or this checkout is not managed by")
-        say("myoverlay); continuing with the current version")
+        say("MyOverlay); continuing with the current version")
         return
     say("this copy diverged from the remote; re-syncing to the official version")
     if _resync(git, repo):
@@ -187,12 +286,40 @@ def ensure_repo(
         say("warning: could not reach the remote (offline?); using the current version")
 
 
+def _parse_settings_yaml(text: str) -> dict:
+    """Parse the flat `key: value` install_settings.yaml.
+
+    Deliberately tiny (no PyYAML dependency): the installer only ever writes a
+    flat map of scalars. Splits on the first colon (so Windows paths like
+    C:/... keep their drive letter), unquotes, and coerces true/false to bool
+    to match the old JSON semantics of google_skipped.
+    """
+    out: dict = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        low = value.lower()
+        out[key] = True if low == "true" else False if low == "false" else value
+    return out
+
+
 def installer_settings() -> dict:
     """Choices made in the MSI setup wizard, if this exe was installed by it.
 
-    The installer writes install_settings.json next to myoverlay.exe:
-      {"language": "pt", "resolution": "fhd",
-       "client_secret": "C:\\...\\client_secret.json", "google_skipped": false}
+    The installer writes install_settings.yaml next to MyOverlay.exe:
+      language: pt
+      resolution: fhd
+      client_secret: C:\\...\\client_secret.json
+      google_skipped: false
+      install_dir: C:/Program Files/MyOverlay
     A zip/dev deployment has no such file; everything keeps its default.
     """
     exe_dir = (
@@ -200,17 +327,17 @@ def installer_settings() -> dict:
         if getattr(sys, "frozen", False)
         else Path(__file__).resolve().parent
     )
-    f = exe_dir / "install_settings.json"
+    f = exe_dir / "install_settings.yaml"
     if not f.is_file():
         return {}
     try:
-        return json.loads(f.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+        return _parse_settings_yaml(f.read_text(encoding="utf-8-sig"))
+    except OSError:
         say(f"warning: could not read {f}; using default settings")
         return {}
 
 
-def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
+def _apply_installer_settings(cfg: Path, settings: dict) -> None:
     """Seed a just-created config.toml with the setup wizard's choices."""
     text = cfg.read_text(encoding="utf-8-sig")
     lang = settings.get("language")
@@ -226,29 +353,76 @@ def _apply_installer_settings(repo: Path, cfg: Path, settings: dict) -> None:
     cfg.write_text(text, encoding="utf-8")
 
     secret = settings.get("client_secret")
-    if secret and Path(secret).is_file() and not (repo / "client_secret.json").is_file():
-        shutil.copy2(secret, repo / "client_secret.json")
+    dest = cfg.parent / "client_secret.json"
+    if secret and Path(secret).is_file() and not dest.is_file():
+        shutil.copy2(secret, dest)
         say("Google API client secret installed (from the setup wizard)")
     elif settings.get("google_skipped"):
         say("note: Google API setup was skipped during install -")
         say("YouTube publishing is disabled until you configure it (README).")
 
 
-def ensure_config(repo: Path) -> None:
-    cfg = repo / "config.toml"
-    example = repo / "config.example.toml"
-    if cfg.is_file() or not example.is_file():
+def _runtime_install_dir() -> str | None:
+    """Where this frozen exe actually runs from (its own directory), or None in
+    a dev checkout. Ground truth for locating the bundled tools - it stays
+    correct even if the install was moved."""
+    if not getattr(sys, "frozen", False):
+        return None
+    return str(Path(sys.executable).resolve().parent)
+
+
+def _upsert_install_dir(cfg: Path, install_dir: str) -> None:
+    """Write [tools] install_dir into config.toml, refreshing a stale value.
+
+    Idempotent: a no-op when the value is already current, so it doesn't
+    rewrite the file on every launch. Forward slashes keep the TOML string
+    valid without backslash escaping. Modeled on gcp_console._persist_project_id.
+    """
+    value = install_dir.replace("\\", "/").rstrip("/")
+    try:
+        text = cfg.read_bytes().decode("utf-8-sig")
+    except OSError:
         return
-    shutil.copy2(example, cfg)
-    _apply_installer_settings(repo, cfg, installer_settings())
-    say("=" * 62)
-    say("Created your configuration file:")
-    say(f"    {cfg}")
-    say("Open it in Notepad and set at least:")
-    say("    library_root      (where processed videos will live)")
-    say("    [mychron] rs3_data_dirs  (Race Studio 3 data folder)")
-    say("For YouTube upload, see the README section 'YouTube setup'.")
-    say("=" * 62)
+    if re.search(r"(?m)^\s*install_dir\s*=", text):
+        if re.search(rf'(?m)^\s*install_dir\s*=\s*"{re.escape(value)}"\s*$', text):
+            return  # already current
+        text = re.sub(r"(?m)^(\s*)install_dir\s*=.*$", rf'\1install_dir = "{value}"', text)
+    elif re.search(r"(?m)^\[tools\]", text):
+        text = re.sub(r"(?m)^(\[tools\][^\n]*)$", rf'\1\ninstall_dir = "{value}"', text, count=1)
+    else:
+        text = text.rstrip() + f'\n\n[tools]\ninstall_dir = "{value}"\n'
+    # Normalize to LF and write without newline translation (see the same
+    # trick in gcp_console._persist_project_id) so tomllib doesn't choke.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        cfg.write_text(text, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
+def ensure_config(repo: Path, data_dir: Path) -> None:
+    cfg = data_dir / "config.toml"
+    example = repo / "config.example.toml"
+    settings = installer_settings()
+    if not cfg.is_file():
+        if not example.is_file():
+            return
+        shutil.copy2(example, cfg)
+        _apply_installer_settings(cfg, settings)
+        say("=" * 62)
+        say("Created your configuration file:")
+        say(f"    {cfg}")
+        say("Open it in Notepad and set at least:")
+        say("    library_root      (where processed videos will live)")
+        say("    [mychron] data_dirs  (where MyChron downloads are kept)")
+        say("For YouTube upload, see the README section 'YouTube setup'.")
+        say("=" * 62)
+
+    # Record (and keep current, across reinstalls) where the frozen app runs
+    # from, so the pipeline resolves the bundled ffmpeg / gcloud by full path.
+    install_dir = _runtime_install_dir() or settings.get("install_dir")
+    if install_dir and cfg.is_file():
+        _upsert_install_dir(cfg, str(install_dir))
 
 
 def main() -> None:
@@ -261,6 +435,13 @@ def main() -> None:
     if not (ffmpeg_dir / "ffmpeg.exe").is_file():
         say(f"ERROR: bundled ffmpeg missing at {ffmpeg_dir} - broken build")
         sys.exit(2)
+    # Point the pipeline at the bundled binaries by full path (media_tools.tools
+    # reads these), so it never picks up a different ffmpeg/gcloud that happens
+    # to be first on PATH. The PATH prepend below stays too, as a compatibility
+    # bridge: the pipeline updates via git pull independently of this exe, so an
+    # old exe (no env vars) running new code, and a new exe running old code
+    # (bare names), both still resolve the bundled tools.
+    os.environ["MYOVERLAY_FFMPEG_DIR"] = str(ffmpeg_dir)
     # Bundled tools first on PATH: the pipeline invokes ffmpeg/ffprobe by name.
     path_parts = [str(ffmpeg_dir), str(git.parent)]
     # The MSI installs the Google Cloud SDK next to the exe (not inside the
@@ -272,6 +453,7 @@ def main() -> None:
         gcloud_bin = exe_dir / "google-cloud-sdk" / "bin"
         if gcloud_bin.is_dir():
             path_parts.append(str(gcloud_bin))
+            os.environ["MYOVERLAY_GCLOUD_BIN"] = str(gcloud_bin)
     os.environ["PATH"] = os.pathsep.join(path_parts + [os.environ.get("PATH", "")])
 
     argv = list(sys.argv[1:])
@@ -296,24 +478,33 @@ def main() -> None:
     repo = Path(os.environ.get("MYOVERLAY_REPO") or default_repo_path())
     url = os.environ.get("MYOVERLAY_REPO_URL", DEFAULT_REPO_URL)
 
+    # Managed clone: config and credentials live in ~\myoverlay, next to the
+    # repo. A custom MYOVERLAY_REPO (a dev checkout) keeps the classic layout
+    # with config.toml inside the checkout itself.
+    if is_managed(repo):
+        data_dir = default_home()
+        migrate_legacy_layout(data_dir, repo)
+    else:
+        data_dir = repo
+
     ensure_repo(git, repo, url, skip_update, branch)
-    ensure_config(repo)
+    ensure_config(repo, data_dir)
 
     src = repo / "src"
     if not (src / "media_tools").is_dir():
         say(f"ERROR: {src} does not contain media_tools - wrong repository?")
         sys.exit(2)
     sys.path.insert(0, str(src))
-    os.chdir(repo)  # config.toml discovery + relative paths
+    os.chdir(data_dir)  # config.toml discovery + relative credential paths
 
     try:
         from media_tools.cli import app
     except ImportError as exc:
         say(f"ERROR: the pipeline needs a package this launcher build lacks: {exc}")
-        say("Ask for an updated myoverlay build (the code moved ahead of it).")
+        say("Ask for an updated MyOverlay build (the code moved ahead of it).")
         sys.exit(2)
 
-    sys.argv = ["myoverlay", *argv]
+    sys.argv = ["MyOverlay", *argv]
     app()
 
 

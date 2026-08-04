@@ -41,12 +41,22 @@ class CameraConfig(BaseModel):
 
 
 class MychronConfig(BaseModel):
-    # Where Race Studio 3 stores downloaded sessions.
-    rs3_data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path("C:/AIM_SPORT/RaceStudio3/user/data")]
+    # Where downloaded MyChron sessions live on disk. The first entry is
+    # where `mt telemetry get` writes device downloads; every entry is
+    # scanned on ingest.
+    data_dirs: list[Path] = Field(
+        default_factory=lambda: [Path.home() / "Videos" / "karting" / "mychron"]
     )
-    # .xrz files are compressed twins of the .xrk RS3 writes alongside;
-    # ingesting both would duplicate every session.
+    # Force one transport for device downloads: "usb" | "wifi";
+    # null tries USB first (faster, charges the logger), then WiFi.
+    transport: str | None = None
+    # Zero-touch device download: with auto_download on, `mt run` / the
+    # watcher pull new sessions off the MyChron whenever one is reachable
+    # (WiFi downloads replace the house network while they run).
+    auto_download: bool = False
+    download_interval_s: float = 600.0
+    # .xrz files are compressed twins of the .xrk; ingesting both would
+    # duplicate every session.
     extensions: list[str] = Field(default_factory=lambda: [".xrk"])
     # Timezone of the MyChron 'Log Date'/'Log Time' metadata; null = system local.
     timezone: str | None = None
@@ -63,26 +73,6 @@ class MychronConfig(BaseModel):
         if self.clock_reads and self.clock_actual:
             return self.clock_actual - self.clock_reads
         return timedelta(0)
-
-
-class Rs3Config(BaseModel):
-    """Best-effort GUI automation of Race Studio 3 (no CLI exists).
-
-    When enabled, the watcher periodically brings RS3 up and clicks its
-    download control so new MyChron sessions land in rs3_data_dirs without a
-    human click. Brittle by nature (breaks if AiM redesigns the UI); the
-    folder watcher keeps working either way.
-    """
-
-    enabled: bool = False
-    exe_path: Path | None = None  # e.g. C:/AIM_SPORT/RaceStudio3/RaceStudio3.exe
-    # Real RS3 window title is e.g. "RaceStudio3 (64 bit) 3.83.11" (no space).
-    window_title_re: str = ".*Race\\s*Studio.*"
-    # RS3 3.83 names its download view button "Data Download".
-    download_button_names: list[str] = Field(
-        default_factory=lambda: ["Data Download", "Download Data", "Download"]
-    )
-    trigger_interval_s: float = 600.0
 
 
 class WatchConfig(BaseModel):
@@ -149,23 +139,34 @@ class YouTubeConfig(BaseModel):
     description_template: str | None = None
     playlist_id: str | None = None
     client_secret_file: Path = Path("client_secret.json")
-    token_file: Path = Path("token.json")
+    # Relative paths resolve against the process cwd: the launcher chdirs to
+    # ~\myoverlay (installed) or the checkout root (dev) before the CLI runs.
+    token_file: Path = Path("google-token")
     # Cloud project used by `mt google-setup`. Default "myoverlay": the setup
     # creates it (or reuses it if it already exists) under your Google account.
     project_id: str = "myoverlay"
 
 
+class ToolsConfig(BaseModel):
+    # Install directory of the frozen app, recorded by the launcher so the
+    # pipeline can locate the bundled ffmpeg / Google Cloud SDK by full path.
+    # None in dev checkouts and zip deploys (bare-name PATH resolution applies).
+    install_dir: Path | None = None
+
+
 class Config(BaseModel):
-    library_root: Path
+    # Root folder where ingested/processed media lives (one subfolder per track
+    # day). Defaults to ~/Videos/karting when unset in config.toml.
+    library_root: Path = Field(default_factory=lambda: Path.home() / "Videos" / "karting")
     # Output language for the overlay labels and YouTube title/description
     # defaults. Everything else (config, CLI, logs) stays in English.
     language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
     mychron: MychronConfig = Field(default_factory=MychronConfig)
-    rs3: Rs3Config = Field(default_factory=Rs3Config)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     @field_validator("language")
     @classmethod

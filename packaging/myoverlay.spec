@@ -1,4 +1,4 @@
-# PyInstaller spec for the myoverlay launcher (onedir).
+# PyInstaller spec for the MyOverlay launcher (onedir).
 #
 # The launcher imports media_tools from the PULLED repo at runtime, so
 # PyInstaller cannot discover the pipeline's dependencies by static analysis
@@ -11,6 +11,8 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ("vendor/git", "git"),
     ("vendor/ffmpeg", "ffmpeg"),
+    # GPL-3.0 requires every recipient of a binary to get the license text.
+    ("../LICENSE", "."),
 ]
 binaries = []
 hiddenimports = []
@@ -31,8 +33,6 @@ PIPELINE_PACKAGES = [
     "google_auth_httplib2", "httplib2", "uritemplate", "requests_oauthlib",
     "oauthlib", "requests", "certifi", "charset_normalizer", "idna", "urllib3",
     "pyparsing", "rsa", "pyasn1", "pyasn1_modules", "cachetools",
-    # rs3 automation
-    "pywinauto", "comtypes", "win32ctypes",
     # google-setup automation (mt google-setup -> gcp_console.py). Playwright
     # drives the machine's Edge/Chrome (channel fallback), so only the Python
     # package + its node driver ship - no Chromium browser is bundled.
@@ -51,7 +51,7 @@ for pkg in PIPELINE_PACKAGES:
 # The review GUI (media_tools.gui) is pulled from the repo at runtime, so
 # PyInstaller cannot see its tkinter import statically. Force tkinter + tcl/tk
 # into the bundle (the _tkinter hook pulls the tcl/tk data dirs) so
-# `myoverlay gui` works in the frozen exe.
+# `MyOverlay gui` works in the frozen exe.
 hiddenimports += ["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "_tkinter"]
 
 a = Analysis(
@@ -72,7 +72,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="myoverlay",
+    name="MyOverlay",
     console=True,
     icon="../assets/branding/app.ico",
 )
@@ -81,5 +81,5 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    name="myoverlay",
+    name="MyOverlay",
 )

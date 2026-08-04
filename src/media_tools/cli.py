@@ -14,6 +14,10 @@ from .config import Config, load_config
 from .library import Library
 
 app = typer.Typer(help="Zero-touch karting video + telemetry pipeline.", no_args_is_help=True)
+video_app = typer.Typer(help="Camera video utilities (list / selective download).", no_args_is_help=True)
+telemetry_app = typer.Typer(help="MyChron telemetry utilities (list / download).", no_args_is_help=True)
+app.add_typer(video_app, name="video")
+app.add_typer(telemetry_app, name="telemetry")
 console = Console()
 
 _config_path: Path | None = None
@@ -24,9 +28,28 @@ def main(
     config: Annotated[
         Optional[Path], typer.Option("--config", "-c", help="Path to config.toml")
     ] = None,
+    verbosity: Annotated[
+        str,
+        typer.Option(
+            "--verbosity",
+            help="Log level: quiet | info | debug. `debug` also surfaces "
+            "low-level telemetry-decoder chatter (e.g. libxrk 'Unknown units').",
+        ),
+    ] = "info",
 ):
     global _config_path
     _config_path = config
+
+    import logging
+
+    levels = {"quiet": logging.WARNING, "info": logging.INFO, "debug": logging.DEBUG}
+    level = levels.get(verbosity.lower())
+    if level is None:
+        console.print(
+            f"[red]--verbosity must be one of {', '.join(levels)}[/red]"
+        )
+        raise typer.Exit(2)
+    logging.getLogger("media_tools").setLevel(level)
 
 
 def get_config() -> Config:
@@ -54,45 +77,27 @@ def ingest(
     source: Annotated[
         str, typer.Option(help="Which sources to ingest: all, camera, mychron")
     ] = "all",
-    rs3: Annotated[
+    device: Annotated[
         bool,
-        typer.Option("--rs3", help="First drive Race Studio 3 to download from the MyChron"),
+        typer.Option("--device", help="First download new sessions off the MyChron (USB or WiFi)"),
     ] = False,
-    rs3_only: Annotated[
+    force: Annotated[
         bool,
-        typer.Option(
-            "--rs3-only",
-            help="Only drive the Race Studio 3 download; skip camera/mychron file ingest",
-        ),
-    ] = False,
-    troubleshoot: Annotated[
-        bool,
-        typer.Option(
-            "--troubleshoot",
-            help="RS3 diagnostics (implies --rs3-only): snapshot every step, dump the "
-            "control tree, unhide already-downloaded sessions, scroll the list, 30s waits",
-        ),
+        typer.Option("--force", help="Re-download and refresh files already ingested"),
     ] = False,
 ):
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
-    if rs3 or rs3_only or troubleshoot:
-        from .ingest.rs3 import trigger_rs3_download
-
-        console.print("[bold]rs3[/bold]:")
-        for line in trigger_rs3_download(cfg, troubleshoot=troubleshoot):
-            console.print(f"  {line}", markup=False)
-    if rs3_only or troubleshoot:
-        # RS-download-only: never touch camera/mychron ingest (and never render).
-        return
+    if device:
+        _device_download(cfg, names=None, force=False)
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 
-        _print_ingest_report("camera", ingest_camera(cfg))
+        _print_ingest_report("camera", ingest_camera(cfg, force=force))
     if source in ("all", "mychron"):
         from .ingest.mychron import ingest_mychron
 
-        _print_ingest_report("mychron", ingest_mychron(cfg))
+        _print_ingest_report("mychron", ingest_mychron(cfg, force=force))
 
 
 @app.command()
@@ -132,6 +137,447 @@ def scan(
         for t in result.orphan_telemetry:
             orphan.add(f"{t.source_name} - {t.lap_count} laps, best {t.best_lap}")
     console.print(tree)
+
+
+def _fmt_size(n: int) -> str:
+    mb = n / 1_000_000
+    return f"{mb / 1000:.2f} GB" if mb >= 1000 else f"{mb:.1f} MB"
+
+
+video_list_app = typer.Typer(
+    help="List videos - remote (on the camera card, default), local (in the "
+    "library), or all (both, including already downloaded).",
+    invoke_without_command=True,
+)
+video_app.add_typer(video_list_app, name="list")
+
+
+@video_list_app.callback()
+def video_list_default(
+    ctx: typer.Context,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _video_list_remote(include_ingested=False, json_out=json_out)
+
+
+@video_list_app.command("remote")
+def video_list_remote(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List new videos on the connected camera. Copies nothing."""
+    _video_list_remote(include_ingested=False, json_out=json_out)
+
+
+@video_list_app.command("local")
+def video_list_local(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List videos already downloaded into the library."""
+    _video_list_local(json_out=json_out)
+
+
+@video_list_app.command("all")
+def video_list_all(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List everything: camera-card videos (including already-downloaded) and
+    the library's downloaded videos."""
+    if json_out:
+        from .scan import list_camera_videos, list_library_videos
+
+        cfg = get_config()
+        remote = list_camera_videos(cfg, include_ingested=True)
+        local = list_library_videos(cfg)
+        typer.echo(
+            f'{{"remote":{remote.model_dump_json()},"local":{local.model_dump_json()}}}'
+        )
+        return
+    _video_list_remote(include_ingested=True, json_out=False)
+    _video_list_local(json_out=False)
+
+
+def _video_list_remote(include_ingested: bool, json_out: bool) -> None:
+    from .scan import list_camera_videos
+
+    cfg = get_config()
+    result = list_camera_videos(cfg, include_ingested=include_ingested)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.sources:
+        console.print("[dim]no camera volume found[/dim]")
+        return
+    if not result.videos:
+        console.print(
+            "[dim]no videos on camera[/dim]" if include_ingested else "[dim]no new videos[/dim]"
+        )
+        return
+
+    camera_tz = cfg.camera.tzinfo()
+    table = Table(title="camera videos")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("captured (local)")
+    table.add_column("status")
+    for v in result.videos:
+        status = "[green]new[/green]" if v.status == "new" else "[dim]ingested[/dim]"
+        table.add_row(
+            v.source_name,
+            _fmt_size(v.size_bytes),
+            v.start_utc.astimezone(camera_tz).strftime("%Y-%m-%d %H:%M:%S"),
+            status,
+        )
+    console.print(table)
+
+
+def _video_list_local(json_out: bool) -> None:
+    from .scan import list_library_videos
+
+    cfg = get_config()
+    result = list_library_videos(cfg)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.videos:
+        console.print("[dim]no videos in the library[/dim]")
+        return
+
+    camera_tz = cfg.camera.tzinfo()
+    table = Table(title="library videos (local)")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("captured (local)")
+    table.add_column("day")
+    for v in result.videos:
+        table.add_row(
+            v.source_name,
+            _fmt_size(v.size_bytes),
+            v.start_utc.astimezone(camera_tz).strftime("%Y-%m-%d %H:%M:%S"),
+            v.day,
+        )
+    console.print(table)
+
+
+@video_app.command("get")
+def video_get(
+    names: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help="Video filenames from `mt video list`, or days (YYYY-MM-DD) to "
+            "download every file captured that day (omit to download all new)"
+        ),
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-download and refresh files already ingested")
+    ] = False,
+):
+    """Download videos from the camera into the library - all new, the named
+    files, or every file of the named days."""
+    from .ingest.camera import ingest_camera
+
+    cfg = get_config()
+    only_names, missing_days = _expand_video_days(cfg, names)
+    if missing_days:
+        console.print(f"[red]no videos on the camera for: {', '.join(missing_days)}[/red]")
+        raise typer.Exit(1)
+    report = ingest_camera(cfg, only_names=only_names, force=force)
+    _print_ingest_report("camera", report)
+    if report.requested_missing:
+        console.print(f"[red]not found on camera: {', '.join(report.requested_missing)}[/red]")
+        raise typer.Exit(1)
+
+
+def _expand_video_days(cfg: Config, names: list[str] | None):
+    """Expand day-shaped args (YYYY-MM-DD) into that day's camera filenames.
+
+    Returns (only_names_or_None, days_that_matched_nothing). Non-day args pass
+    through untouched; no args at all means "all new" (None).
+    """
+    if not names:
+        return None, []
+    from .scan import list_camera_videos
+
+    expanded: list[str] = []
+    days: list[date] = []
+    for n in names:
+        try:
+            days.append(date.fromisoformat(n))
+        except ValueError:
+            expanded.append(n)
+    missing: list[str] = []
+    if days:
+        camera_tz = cfg.camera.tzinfo()
+        on_card = list_camera_videos(cfg, include_ingested=True).videos
+        for d in days:
+            hits = [
+                v.source_name for v in on_card if v.start_utc.astimezone(camera_tz).date() == d
+            ]
+            if hits:
+                expanded.extend(hits)
+            else:
+                missing.append(d.isoformat())
+    return expanded, missing
+
+
+telemetry_list_app = typer.Typer(
+    help="List MyChron sessions - remote (on the device, over USB/WiFi, default), "
+    "local (downloaded to disk), or all (both, including already handled).",
+    invoke_without_command=True,
+)
+telemetry_app.add_typer(telemetry_list_app, name="list")
+
+
+@telemetry_list_app.callback()
+def telemetry_list_default(
+    ctx: typer.Context,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+
+
+@telemetry_list_app.command("remote")
+def telemetry_list_remote(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing."""
+    _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+
+
+@telemetry_list_app.command("local")
+def telemetry_list_local(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List new MyChron .xrk sessions already downloaded to disk. Copies nothing."""
+    _telemetry_list_local(include_ingested=False, json_out=json_out)
+
+
+@telemetry_list_app.command("all")
+def telemetry_list_all(
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
+    ] = False,
+):
+    """List everything: device sessions (including already-downloaded) and
+    local files (including already-ingested)."""
+    if json_out:
+        from .ingest.aim import list_remote_sessions
+        from .scan import list_telemetry_files
+
+        cfg = get_config()
+        remote = list_remote_sessions(cfg, include_downloaded=True)
+        local = list_telemetry_files(cfg, include_ingested=True)
+        typer.echo(
+            f'{{"remote":{remote.model_dump_json()},"local":{local.model_dump_json()}}}'
+        )
+        return
+    _telemetry_list_remote(include_downloaded=True, json_out=False)
+    _telemetry_list_local(include_ingested=True, json_out=False)
+
+
+def _fmt_lap_ms(text: str | None) -> str:
+    """Device lap time (milliseconds) -> '52.509' / '1:02.345'."""
+    try:
+        ms = int(text or "")
+    except ValueError:
+        return text or "?"
+    if ms <= 0:
+        return "?"
+    minutes, seconds = divmod(ms / 1000.0, 60)
+    return f"{int(minutes)}:{seconds:06.3f}" if minutes else f"{seconds:.3f}"
+
+
+def _fmt_device_dt(meta: dict) -> str:
+    """The catalog's 'date'/'hour' -> '2026-07-30 22:26:00'.
+
+    The MyChron writes day-first dates ('30/07/2026'); anything unparseable
+    is shown verbatim rather than guessed at.
+    """
+    from datetime import datetime
+
+    text = f"{meta.get('date', '')} {meta.get('hour', '')}".strip()
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return text or "?"
+
+
+def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
+    from .ingest.aim import list_remote_sessions
+
+    cfg = get_config()
+    result = list_remote_sessions(cfg, include_downloaded=include_downloaded)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    for note in result.notes:
+        style = "red" if note.startswith("!") else "dim"
+        console.print(note, style=style, markup=False)
+    failed = any(n.startswith("!") for n in result.notes)
+    if not result.sessions:
+        # Only claim an empty device when the listing actually succeeded.
+        if result.transport and not failed:
+            console.print("[dim]no new sessions on the device[/dim]")
+        return
+
+    title = f"MyChron sessions ({result.transport})" if result.transport else "MyChron sessions"
+    table = Table(title=title)
+    table.add_column("session")
+    table.add_column("size", justify="right")
+    table.add_column("captured")
+    table.add_column("laps", justify="right")
+    table.add_column("best", justify="right")
+    if include_downloaded:
+        table.add_column("status")
+    for s in result.sessions:
+        row = [
+            s.name,
+            _fmt_size(s.size_bytes) if s.size_bytes is not None else "?",
+            _fmt_device_dt(s.meta),
+            s.meta.get("nlap") or "?",
+            _fmt_lap_ms(s.meta.get("best")),
+        ]
+        if include_downloaded:
+            row.append("[dim]downloaded[/dim]" if s.downloaded else "[green]new[/green]")
+        table.add_row(*row)
+    console.print(table)
+
+
+def _telemetry_list_local(include_ingested: bool, json_out: bool) -> None:
+    from .scan import list_telemetry_files
+
+    cfg = get_config()
+    result = list_telemetry_files(cfg, include_ingested=include_ingested)
+    if json_out:
+        typer.echo(result.model_dump_json())
+        return
+
+    if not result.files:
+        console.print(
+            "[dim]no sessions found[/dim]" if include_ingested else "[dim]no new sessions[/dim]"
+        )
+        return
+
+    mychron_tz = cfg.mychron.tzinfo()
+    table = Table(title="mychron sessions (local)")
+    table.add_column("name")
+    table.add_column("size", justify="right")
+    table.add_column("captured (local)")
+    table.add_column("status")
+    for f in result.files:
+        status = "[green]new[/green]" if f.status == "new" else "[dim]ingested[/dim]"
+        captured = (
+            f.start_utc.astimezone(mychron_tz).strftime("%Y-%m-%d %H:%M:%S") if f.start_utc else "?"
+        )
+        table.add_row(f.source_name, _fmt_size(f.size_bytes), captured, status)
+    console.print(table)
+
+
+def _device_download(cfg, names: Optional[list[str]], force: bool):
+    """Pull sessions off the MyChron, streaming per-file progress lines."""
+    import sys
+
+    from .ingest.aim import download_sessions
+
+    console.print("[bold]mychron[/bold] (device):")
+
+    def progress(name: str, done: int, total: int) -> None:
+        # In-flight progress only where a human is watching; a scheduled run
+        # must not fill the log with carriage returns.
+        if sys.stderr.isatty():
+            sys.stderr.write(f"\r  {name}  {done:>10,} / {total:,}")
+            sys.stderr.flush()
+            if done >= total:
+                sys.stderr.write("\n")
+
+    report = download_sessions(
+        cfg,
+        names=names,
+        force=force,
+        echo=lambda line: console.print(f"  {line}", markup=False),
+        progress=progress,
+    )
+    if report.skipped_existing:
+        console.print(f"  [dim]{report.skipped_existing} session(s) already downloaded[/dim]")
+    for n in report.missing:
+        console.print(f"  [red]not on the device: {n}[/red]")
+    for e in report.errors:
+        console.print(f"  [red]! {e}[/red]", markup=False)
+    return report
+
+
+@telemetry_app.command("get")
+def telemetry_get(
+    names: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help="Session names from `mt telemetry list` (omit to download all new sessions)"
+        ),
+    ] = None,
+    download: Annotated[
+        bool,
+        typer.Option(
+            "--download/--no-download",
+            help="Pull sessions off the MyChron (USB or WiFi) before ingesting; "
+            "--no-download only ingests files already on disk",
+        ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Re-download and re-ingest sessions already handled"),
+    ] = False,
+):
+    """Download MyChron sessions off the device and ingest them. No camera involvement."""
+    from pathlib import Path as P
+
+    cfg = get_config()
+    only_names = names or None
+    failed = False
+    if download:
+        report = _device_download(cfg, names=names or None, force=force)
+        failed = bool(report.errors or report.missing)
+        if names:
+            # Device names (a_0186.xrz) become local .xrk files on download;
+            # ingest filters by the on-disk names.
+            only_names = [P(p).name for p in report.downloaded] or None
+            if only_names is None:
+                # Nothing newly downloaded for the requested names (already on
+                # disk, or all failed): fall back to the local-name filter so
+                # `telemetry get <name>` still re-ingests with --force. A
+                # device name (.xrz) maps to the .xrk its download produced.
+                only_names = [
+                    P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in names
+                ]
+
+    from .ingest.mychron import ingest_mychron
+
+    report = ingest_mychron(cfg, only_names=only_names, force=force)
+    _print_ingest_report("mychron", report)
+    if report.requested_missing:
+        console.print(f"[red]not found: {', '.join(report.requested_missing)}[/red]")
+        raise typer.Exit(1)
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -228,8 +674,79 @@ def google_setup(
 
     cfg = get_config()
     console.print("[bold]google-setup[/bold]:")
-    for line in setup_google_api(cfg, troubleshoot=troubleshoot):
+    report = setup_google_api(cfg, troubleshoot=troubleshoot)
+    for line in report:
         console.print(f"  {line}", markup=False)
+    # The MSI wizard runs this in a console that closes with the process, so
+    # the report also lands in a log file, and failures ("!" lines) surface as
+    # a nonzero exit the wizard can check instead of assuming success.
+    failed = any(line.lstrip().startswith("!") for line in report)
+    try:
+        # Fixed path (not config-relative): the wizard's custom action reads
+        # it back as %USERPROFILE%\myoverlay\google-setup.log.
+        log = Path.home() / "myoverlay" / "google-setup.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("\n".join(report) + "\n", encoding="utf-8")
+        console.print(f"  (full report saved to {log})", markup=False)
+    except OSError:
+        pass
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command(name="google-auth")
+def google_auth() -> None:
+    """Authorize YouTube uploads: opens Google's consent screen, then saves the
+    refresh token. Uploads nothing - `google-setup` only creates the OAuth
+    client, and until this runs the first upload is what triggers consent."""
+    from .publish import get_credentials
+
+    cfg = get_config()
+    console.print("[bold]google-auth[/bold]:")
+    if not cfg.youtube.client_secret_file.is_file():
+        console.print(
+            f"  ! no OAuth client secret at {cfg.youtube.client_secret_file}"
+            " - run `mt google-setup` first",
+            markup=False,
+        )
+        raise typer.Exit(1)
+    # Say up front whether consent is actually needed, so a silent no-op is
+    # never mistaken for a completed authorization.
+    from .publish import _token_client_mismatch
+
+    reused = False
+    if cfg.youtube.token_file.is_file():
+        from google.oauth2.credentials import Credentials
+
+        from .publish import SCOPES
+
+        try:
+            existing = Credentials.from_authorized_user_file(
+                str(cfg.youtube.token_file), SCOPES
+            )
+        except Exception:  # noqa: BLE001 - unreadable token: just re-authorize
+            existing = None
+        if existing is not None and _token_client_mismatch(cfg, existing):
+            console.print("  existing token belongs to a different OAuth client - re-authorizing")
+        elif existing is not None:
+            reused = True
+            console.print("  existing token is still valid - reusing it")
+    if not reused:
+        console.print("  a browser window will open - click Allow to authorize")
+    try:
+        creds = get_credentials(cfg)
+    except Exception as exc:  # noqa: BLE001 - report, never traceback at the CLI
+        console.print(f"  ! authorization failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+    console.print(
+        f"  + {'token still valid' if reused else 'authorized'}"
+        f" -> token saved to {cfg.youtube.token_file}",
+        markup=False,
+    )
+    if not getattr(creds, "refresh_token", None):
+        # Without a refresh token the watcher cannot upload unattended.
+        console.print("  ? no refresh token returned - re-run after revoking the old grant")
+    console.print("  next: `mt publish` uploads your renders")
 
 
 @app.command(name="join")
@@ -431,7 +948,7 @@ def render(
     ] = None,
 ):
     """Render telemetry overlays onto synced videos (or an edited --plan)."""
-    from .render import render_day
+    from .render import RenderProgress, render_day
     from .slice import parse_timestamp
 
     cfg = get_config()
@@ -473,12 +990,75 @@ def render(
         console.print(f"[dim]output resolution: {cfg.render.resolution} ({cfg.render.target_height()}p)[/dim]")
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
+
+    import contextlib
+
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
+
+    class _RichRenderProgress(RenderProgress):
+        """Two-level live bar: an overall clips-of-day task plus a per-clip
+        frames task that is created when a clip starts and removed when it
+        finishes (only the encoding clip shows a frame bar)."""
+
+        def __init__(self, prog: Progress, day_label: str):
+            self._prog = prog
+            self._label = day_label
+            self._overall = None
+            self._clip = None
+
+        def start_day(self, total_clips):
+            self._overall = self._prog.add_task(
+                f"[bold]{self._label}[/bold] clips", total=total_clips or 1
+            )
+
+        def advance_clip(self):
+            if self._overall is not None:
+                self._prog.advance(self._overall)
+
+        def start_clip(self, name, total_frames):
+            self._clip = self._prog.add_task(f"  {name}", total=total_frames or 1)
+
+        def advance_frame(self):
+            if self._clip is not None:
+                self._prog.advance(self._clip)
+
+        def finish_clip(self):
+            if self._clip is not None:
+                self._prog.remove_task(self._clip)
+                self._clip = None
+
+    # Live bars only make sense on a real terminal; when piped, redirected, or
+    # run in the background, fall back to the plain per-clip summary lines.
+    use_bars = console.is_terminal
     for d in days:
         manifest = lib.load_day(d)
-        lines = render_day(
-            cfg, manifest, lib.day_dir(d), force=force, clip_filter=clip,
-            window_start_s=window_start_s, window_end_s=window_end_s,
+        prog_cm = (
+            Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeRemainingColumn(),
+                console=console,
+                transient=True,
+            )
+            if use_bars
+            else contextlib.nullcontext()
         )
+        with prog_cm as prog:
+            reporter = _RichRenderProgress(prog, str(d)) if use_bars else None
+            lines = render_day(
+                cfg, manifest, lib.day_dir(d), force=force, clip_filter=clip,
+                window_start_s=window_start_s, window_end_s=window_end_s,
+                progress=reporter,
+            )
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")
         for line in lines or ["  nothing to render"]:
@@ -590,9 +1170,12 @@ def publish(
 @app.command()
 def run(
     publish: Annotated[bool, typer.Option(help="Also upload to YouTube")] = False,
-    rs3: Annotated[
+    download: Annotated[
         Optional[bool],
-        typer.Option("--rs3/--no-rs3", help="Trigger Race Studio 3 download (default: [rs3] enabled)"),
+        typer.Option(
+            "--download/--no-download",
+            help="Pull new sessions off the MyChron first (default: [mychron] auto_download)",
+        ),
     ] = None,
     resolution: Annotated[
         Optional[str],
@@ -609,7 +1192,7 @@ def run(
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(2)
-    report = run_pipeline(cfg, publish=publish, trigger_rs3=rs3)
+    report = run_pipeline(cfg, publish=publish, download=download)
     for line in report.lines:
         console.print(line, markup=False)
     attention = report.needs_attention()
@@ -637,7 +1220,7 @@ def watch(
     if install:
         import os
 
-        # When running from the frozen myoverlay.exe, autostart launches the
+        # When running from the frozen MyOverlay.exe, autostart launches the
         # exe itself (everything via the exe) and must carry the same
         # MYOVERLAY_REPO/NO_UPDATE env, which schtasks /TR can't set - so use
         # the per-user Startup .cmd. A dev checkout uses mt.exe via schtasks.
@@ -721,6 +1304,39 @@ def status(
             str(len(m.publishes)),
         )
     console.print(table)
+
+
+@app.command()
+def docs(
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Write to this file (default docs/CLI.md in the repo checkout; '-' for stdout)",
+        ),
+    ] = None,
+):
+    """Regenerate the CLI reference (docs/CLI.md) from the command tree."""
+    from .docs_gen import generate_cli_docs
+
+    text = generate_cli_docs()
+    if output is not None and str(output) == "-":
+        typer.echo(text, nl=False)
+        return
+    if output is None:
+        root = next(
+            (p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()),
+            None,
+        )
+        if root is None:
+            # Frozen exe / installed wheel: no repo checkout to write into.
+            typer.echo(text, nl=False)
+            return
+        output = root / "docs" / "CLI.md"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8", newline="\n")
+    console.print(f"[green]+[/green] {output}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Two 15 s test slices: video start (no data) and the coverage boundary."""
 import subprocess
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -9,7 +10,8 @@ from media_tools.overlay import OverlayRenderer
 from media_tools.render import sample_timeline
 from media_tools.telemetry import load_day_frame
 
-SCRATCH = Path(r"C:\Users\RODRIG~1\AppData\Local\Temp\claude\C--Users-rodrigobrim-repos\84be5903-140d-4b17-8dda-aa781c4819d7\scratchpad")
+SCRATCH = Path(tempfile.gettempdir()) / "myoverlay-research"
+SCRATCH.mkdir(parents=True, exist_ok=True)
 
 cfg = load_config()
 lib = Library(cfg.library_root)
