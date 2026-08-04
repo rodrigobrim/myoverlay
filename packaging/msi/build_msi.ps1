@@ -119,6 +119,15 @@ foreach ($src in @($launcherSrc, $specSrc)) {
     }
 }
 
+# --- uv + mt into the payload root. build_exe.ps1 already stages them, but
+#     they are re-staged here so a payload built before this existed (or one
+#     whose mt.cmd changed) still ships them without a full exe rebuild: they
+#     are plain files beside the exe, not part of the frozen bundle. heat
+#     harvests the payload root into INSTALLFOLDER, which the AppPath
+#     component puts on the machine PATH - that is what makes `uv` and `mt`
+#     commands after an install, resolved from the install directory. ---
+& (Join-Path $repo "packaging\path_tools.ps1") -Payload $payload
+
 # --- WiX toolset (binaries zip, no install required) ---
 if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
     Write-Host "Downloading WiX 3.14 binaries..."
