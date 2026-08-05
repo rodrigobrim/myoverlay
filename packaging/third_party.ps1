@@ -29,13 +29,27 @@ function Test-PinnedVendorDir {
 
 # Download url -> extracted temp dir, staging the zip so a dropped connection
 # can never leave anything a cache check would mistake for a complete download.
+# Retried with backoff: release hosts throttle under load (gyan.dev's 503s
+# took out a CI run), and one reset connection should not fail a whole build.
 function Expand-PinnedZip {
     param([string]$Url)
     $tmpZip = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName() + ".zip")
     $part = "$tmpZip.part"
-    Write-Host "downloading $Url"
-    Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
-    Move-Item $part $tmpZip -Force
+    $attempts = 3
+    for ($try = 1; $try -le $attempts; $try++) {
+        Write-Host "downloading $Url (attempt $try/$attempts)"
+        Remove-Item $part -Force -ErrorAction SilentlyContinue
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
+            Move-Item $part $tmpZip -Force
+            break
+        } catch {
+            Write-Host "  download failed: $($_.Exception.Message)"
+            Remove-Item $part -Force -ErrorAction SilentlyContinue
+            if ($try -eq $attempts) { throw "Could not download $Url after $attempts attempts." }
+            Start-Sleep -Seconds (10 * $try)
+        }
+    }
     $tmpDir = Join-Path $env:TEMP ("tp_" + [IO.Path]::GetRandomFileName())
     Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
     Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue

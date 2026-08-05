@@ -14,7 +14,7 @@
   ],
   "ffmpeg": {
     "version": "9.0",
-    "url": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0-essentials_build.zip"
+    "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0/ffmpeg-9.0-essentials_build.zip"
   },
   "git": {
     "version": "2.55.0",
