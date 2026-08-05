@@ -6,8 +6,9 @@
 # not defaults.
 
 # Root folder where ingested/processed media lives (one subfolder per track
-# day: raw footage, work files, rendered output, session manifest).
-# library_root = "~/myoverlay/render"
+# day: raw footage, work files, rendered output, session manifest). The
+# default is the myoverlay\render folder in your user profile.
+# library_root = "C:/Users/you/myoverlay/render"
 
 # Language of the video output (overlay labels + default YouTube title and
 # description): en | pt | es | ja | ar | fr | it | ru | zh.
@@ -29,8 +30,9 @@
 [mychron]
 # Where downloaded MyChron sessions live. `mt telemetry get` talks to the
 # device directly (USB or WiFi) and writes .xrk files into the FIRST entry;
-# every entry is scanned on ingest.
-# data_dirs = ["~/myoverlay/render/mychron"]
+# every entry is scanned on ingest. The default is the mychron folder inside
+# the media library.
+# data_dirs = ["C:/Users/you/myoverlay/render/mychron"]
 # Force one transport for device downloads: "usb" | "wifi". Omit to try USB
 # first (faster, charges the logger), then WiFi (which joins the MyChron's
 # own access point, replacing the house network while it runs).
