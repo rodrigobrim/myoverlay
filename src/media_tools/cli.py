@@ -76,7 +76,7 @@ def _print_ingest_report(name: str, report) -> None:
 @app.command()
 def ingest(
     source: Annotated[
-        str, typer.Option(help="Which sources to ingest: all, camera, mychron")
+        str, typer.Option(help="Which sources to ingest: all, camera, telemetry")
     ] = "all",
     device: Annotated[
         bool,
@@ -95,10 +95,11 @@ def ingest(
         from .ingest.camera import ingest_camera
 
         _print_ingest_report("camera", ingest_camera(cfg, force=force))
-    if source in ("all", "mychron"):
-        from .ingest.mychron import ingest_mychron
+    # "mychron" stays accepted: it is what --source took before the rename.
+    if source in ("all", "telemetry", "mychron"):
+        from .ingest.telemetry import ingest_telemetry
 
-        _print_ingest_report("mychron", ingest_mychron(cfg, force=force))
+        _print_ingest_report("telemetry", ingest_telemetry(cfg, force=force))
 
 
 @app.command()
@@ -155,8 +156,8 @@ def _fmt_duration(s: float | None) -> str:
 
 
 video_list_app = typer.Typer(
-    help="List videos - remote (on the camera card, default), local (in the "
-    "library), or all (both, including already downloaded).",
+    help="List videos - local (in the library, default), remote (on the camera "
+    "card), or all (both, including already downloaded).",
     invoke_without_command=True,
 )
 video_app.add_typer(video_list_app, name="list")
@@ -170,7 +171,7 @@ def video_list_default(
     ] = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        _video_list_remote(include_ingested=False, json_out=json_out)
+        _video_list_local(json_out=json_out)
 
 
 @video_list_app.command("remote")
@@ -341,8 +342,8 @@ def _expand_video_days(cfg: Config, names: list[str] | None):
 
 
 telemetry_list_app = typer.Typer(
-    help="List MyChron sessions - remote (on the device, over USB/WiFi, default), "
-    "local (downloaded to disk), or all (both, including already handled).",
+    help="List telemetry sessions - local (everything on disk, default), remote "
+    "(on the device, over USB/WiFi), or all (both).",
     invoke_without_command=True,
 )
 telemetry_app.add_typer(telemetry_list_app, name="list")
@@ -356,7 +357,7 @@ def telemetry_list_default(
     ] = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+        _telemetry_list_local(json_out=json_out)
 
 
 @telemetry_list_app.command("remote")
@@ -375,8 +376,9 @@ def telemetry_list_local(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List new MyChron .xrk sessions already downloaded to disk. Copies nothing."""
-    _telemetry_list_local(include_ingested=False, json_out=json_out)
+    """List every .xrk session on disk - the library day folders and the
+    download dir(s) - with its ingested state. Copies nothing."""
+    _telemetry_list_local(json_out=json_out)
 
 
 @telemetry_list_app.command("all")
@@ -386,20 +388,20 @@ def telemetry_list_all(
     ] = False,
 ):
     """List everything: device sessions (including already-downloaded) and
-    local files (including already-ingested)."""
+    every local file."""
     if json_out:
         from .ingest.aim import list_remote_sessions
         from .scan import list_telemetry_files
 
         cfg = get_config()
         remote = list_remote_sessions(cfg, include_downloaded=True)
-        local = list_telemetry_files(cfg, include_ingested=True)
+        local = list_telemetry_files(cfg)
         typer.echo(
             f'{{"remote":{remote.model_dump_json()},"local":{local.model_dump_json()}}}'
         )
         return
     _telemetry_list_remote(include_downloaded=True, json_out=False)
-    _telemetry_list_local(include_ingested=True, json_out=False)
+    _telemetry_list_local(json_out=False)
 
 
 def _fmt_lap_ms(text: str | None) -> str:
@@ -473,33 +475,32 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     console.print(table)
 
 
-def _telemetry_list_local(include_ingested: bool, json_out: bool) -> None:
+def _telemetry_list_local(json_out: bool) -> None:
     from .scan import list_telemetry_files
 
     cfg = get_config()
-    result = list_telemetry_files(cfg, include_ingested=include_ingested)
+    result = list_telemetry_files(cfg)
     if json_out:
         typer.echo(result.model_dump_json())
         return
 
     if not result.files:
-        console.print(
-            "[dim]no sessions found[/dim]" if include_ingested else "[dim]no new sessions[/dim]"
-        )
+        console.print("[dim]no sessions found[/dim]")
         return
 
-    mychron_tz = cfg.mychron.tzinfo()
-    table = Table(title="mychron sessions (local)")
+    logger_tz = cfg.telemetry.tzinfo()
+    table = Table(title="telemetry sessions (local)")
     table.add_column("name")
     table.add_column("size", justify="right")
     table.add_column("captured (local)")
-    table.add_column("status")
+    table.add_column("day")
+    table.add_column("ingested")
     for f in result.files:
-        status = "[green]new[/green]" if f.status == "new" else "[dim]ingested[/dim]"
         captured = (
-            f.start_utc.astimezone(mychron_tz).strftime("%Y-%m-%d %H:%M:%S") if f.start_utc else "?"
+            f.start_utc.astimezone(logger_tz).strftime("%Y-%m-%d %H:%M:%S") if f.start_utc else "?"
         )
-        table.add_row(f.source_name, _fmt_size(f.size_bytes), captured, status)
+        ingested = "[dim]yes[/dim]" if f.ingested else "[green]no[/green]"
+        table.add_row(f.source_name, _fmt_size(f.size_bytes), captured, f.day or "-", ingested)
     console.print(table)
 
 
@@ -509,7 +510,7 @@ def _device_download(cfg, names: Optional[list[str]], force: bool):
 
     from .ingest.aim import download_sessions
 
-    console.print("[bold]mychron[/bold] (device):")
+    console.print("[bold]telemetry[/bold] (device):")
 
     def progress(name: str, done: int, total: int) -> None:
         # In-flight progress only where a human is watching; a scheduled run
@@ -579,10 +580,10 @@ def telemetry_get(
                     P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in names
                 ]
 
-    from .ingest.mychron import ingest_mychron
+    from .ingest.telemetry import ingest_telemetry
 
-    report = ingest_mychron(cfg, only_names=only_names, force=force)
-    _print_ingest_report("mychron", report)
+    report = ingest_telemetry(cfg, only_names=only_names, force=force)
+    _print_ingest_report("telemetry", report)
     if report.requested_missing:
         console.print(f"[red]not found: {', '.join(report.requested_missing)}[/red]")
         raise typer.Exit(1)
@@ -1212,7 +1213,7 @@ def run(
         Optional[bool],
         typer.Option(
             "--download/--no-download",
-            help="Pull new sessions off the MyChron first (default: [mychron] auto_download)",
+            help="Pull new sessions off the MyChron first (default: [telemetry] auto_download)",
         ),
     ] = None,
     resolution: Annotated[

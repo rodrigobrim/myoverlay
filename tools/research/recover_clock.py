@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from media_tools.sync import extract_audio_pcm, audio_feature, rpm_feature, find_offset, AUDIO_RATE
 from media_tools.telemetry import unified_frame
-from media_tools.ingest.mychron import _parse_log_datetime
+from media_tools.ingest.telemetry import _parse_log_datetime
 from libxrk import aim_xrk
 
 CLIP = Path(r"C:\Users\rodrigobrim\Videos\karting\2026-07-13\raw\video\DJI_20260713081722_0062_D.MP4")

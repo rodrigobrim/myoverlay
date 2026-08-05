@@ -1,12 +1,12 @@
 ﻿from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-import media_tools.ingest.mychron as mychron
-from media_tools.ingest.mychron import (
+import media_tools.ingest.telemetry as tel_ingest
+from media_tools.ingest.telemetry import (
     XrkInfo,
     _parse_log_datetime,
     enumerate_telemetry_files,
-    ingest_mychron,
+    ingest_telemetry,
 )
 from media_tools.library import Lap, Library
 
@@ -50,25 +50,25 @@ def test_session_times_are_taken_as_logged(cfg, tmp_path, monkeypatch):
 
     wrong_start = datetime(2047, 10, 27, 6, 59, tzinfo=timezone.utc)
     monkeypatch.setattr(
-        mychron, "parse_xrk", lambda p, tz: fake_info(start_utc=wrong_start, laps=[])
+        tel_ingest, "parse_xrk", lambda p, tz: fake_info(start_utc=wrong_start, laps=[])
     )
-    ingest_mychron(cfg, extra_sources=[tel])
+    ingest_telemetry(cfg, extra_sources=[tel])
 
     lib = Library(cfg.library_root)
-    m = lib.load_day(wrong_start.astimezone(cfg.mychron.tzinfo()).date())
+    m = lib.load_day(wrong_start.astimezone(cfg.telemetry.tzinfo()).date())
     assert len(m.telemetry) == 1
     assert m.telemetry[0].start_utc == wrong_start
 
 
-def test_ingest_mychron_with_mocked_parser(cfg, tmp_path, monkeypatch):
+def test_ingest_telemetry_with_mocked_parser(cfg, tmp_path, monkeypatch):
     tel = tmp_path / "teldata"
     tel.mkdir()
     (tel / "session_a.xrk").write_bytes(b"fake-xrk-a")
     (tel / "notes.txt").write_bytes(b"ignored")
 
-    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+    monkeypatch.setattr(tel_ingest, "parse_xrk", lambda p, tz: fake_info())
 
-    report = ingest_mychron(cfg, extra_sources=[tel])
+    report = ingest_telemetry(cfg, extra_sources=[tel])
     assert len(report.copied) == 1 and not report.errors
 
     lib = Library(cfg.library_root)
@@ -81,7 +81,7 @@ def test_ingest_mychron_with_mocked_parser(cfg, tmp_path, monkeypatch):
     assert (lib.day_dir(date(2026, 7, 12)) / t.file).is_file()
 
     # idempotent
-    report2 = ingest_mychron(cfg, extra_sources=[tel])
+    report2 = ingest_telemetry(cfg, extra_sources=[tel])
     assert report2.copied == [] and report2.skipped_known == 1
 
     # Ingest must never delete or alter the source originals.
@@ -100,8 +100,8 @@ def test_corrupt_xrk_reports_error_and_continues(cfg, tmp_path, monkeypatch):
             raise ValueError("corrupt file")
         return fake_info()
 
-    monkeypatch.setattr(mychron, "parse_xrk", parse)
-    report = ingest_mychron(cfg, extra_sources=[tel])
+    monkeypatch.setattr(tel_ingest, "parse_xrk", parse)
+    report = ingest_telemetry(cfg, extra_sources=[tel])
     assert len(report.copied) == 1
     assert len(report.errors) == 1 and "bad.xrk" in report.errors[0]
 
@@ -113,12 +113,12 @@ def test_xrz_twin_is_skipped(cfg, tmp_path, monkeypatch):
     tel.mkdir()
     (tel / "session_a.xrk").write_bytes(b"real")
     (tel / "session_a.xrz").write_bytes(b"compressed-twin")
-    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+    monkeypatch.setattr(tel_ingest, "parse_xrk", lambda p, tz: fake_info())
 
     _sources, files = enumerate_telemetry_files(cfg, extra_sources=[tel])
     assert [f.name for f in files] == ["session_a.xrk"]
 
-    report = ingest_mychron(cfg, extra_sources=[tel])
+    report = ingest_telemetry(cfg, extra_sources=[tel])
     assert len(report.copied) == 1 and not report.errors
     lib = Library(cfg.library_root)
     m = lib.load_day(date(2026, 7, 12))
@@ -132,7 +132,7 @@ def test_enumerate_does_not_parse(cfg, tmp_path, monkeypatch):
     (tel / "b.xrk").write_bytes(b"bb")
     (tel / "notes.txt").write_bytes(b"ignored")
     monkeypatch.setattr(
-        mychron, "parse_xrk", lambda p, tz: (_ for _ in ()).throw(AssertionError("parsed"))
+        tel_ingest, "parse_xrk", lambda p, tz: (_ for _ in ()).throw(AssertionError("parsed"))
     )
     _sources, files = enumerate_telemetry_files(cfg, extra_sources=[tel])
     assert {f.name for f in files} == {"a.xrk", "b.xrk"}
@@ -144,13 +144,13 @@ def test_only_names_selective_and_missing(cfg, tmp_path, monkeypatch):
     tel.mkdir()
     (tel / "session_a.xrk").write_bytes(b"a")
     (tel / "session_b.xrk").write_bytes(b"b")
-    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+    monkeypatch.setattr(tel_ingest, "parse_xrk", lambda p, tz: fake_info())
 
-    report = ingest_mychron(cfg, extra_sources=[tel], only_names=["SESSION_A.XRK"])
+    report = ingest_telemetry(cfg, extra_sources=[tel], only_names=["SESSION_A.XRK"])
     assert len(report.copied) == 1
     assert report.requested_missing == []
 
-    missing = ingest_mychron(cfg, extra_sources=[tel], only_names=["nope.xrk"])
+    missing = ingest_telemetry(cfg, extra_sources=[tel], only_names=["nope.xrk"])
     assert missing.copied == [] and missing.requested_missing == ["nope.xrk"]
 
 
@@ -158,13 +158,13 @@ def test_force_replaces_telemetry_in_place(cfg, tmp_path, monkeypatch):
     tel = tmp_path / "tel"
     tel.mkdir()
     (tel / "session_a.xrk").write_bytes(b"a")
-    monkeypatch.setattr(mychron, "parse_xrk", lambda p, tz: fake_info())
+    monkeypatch.setattr(tel_ingest, "parse_xrk", lambda p, tz: fake_info())
 
-    ingest_mychron(cfg, extra_sources=[tel])
-    again = ingest_mychron(cfg, extra_sources=[tel])
+    ingest_telemetry(cfg, extra_sources=[tel])
+    again = ingest_telemetry(cfg, extra_sources=[tel])
     assert again.copied == [] and again.skipped_known == 1
 
-    forced = ingest_mychron(cfg, extra_sources=[tel], force=True)
+    forced = ingest_telemetry(cfg, extra_sources=[tel], force=True)
     assert len(forced.copied) == 1
 
     lib = Library(cfg.library_root)

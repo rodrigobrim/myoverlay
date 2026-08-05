@@ -25,7 +25,7 @@ def test_snapshot_sources_sees_telemetry_files(cfg, tmp_path, monkeypatch):
     tel = tmp_path / "tel"
     tel.mkdir()
     (tel / "a.xrk").write_bytes(b"12345")
-    cfg.mychron.data_dirs = [tel]
+    cfg.telemetry.data_dirs = [tel]
     monkeypatch.setattr("media_tools.ingest.camera.find_dcim_sources", lambda: [])
     snap = snapshot_sources(cfg)
     assert snap.telemetry_files == frozenset({("a.xrk", 5)})
@@ -45,12 +45,12 @@ def test_run_pipeline_stage_order_and_report(cfg, monkeypatch):
         lambda cfg: order.append("camera") or FakeIngestReport(),
     )
     monkeypatch.setattr(
-        "media_tools.ingest.mychron.ingest_mychron",
-        lambda cfg: order.append("mychron") or FakeIngestReport(),
+        "media_tools.ingest.telemetry.ingest_telemetry",
+        lambda cfg: order.append("telemetry") or FakeIngestReport(),
     )
 
     report = run_pipeline(cfg, publish=False)
-    assert order == ["camera", "mychron"]
+    assert order == ["camera", "telemetry"]
     assert isinstance(report, PipelineReport)
     # empty library: no per-day stages ran
     assert not [l for l in report.lines if l.startswith("[correlate")]

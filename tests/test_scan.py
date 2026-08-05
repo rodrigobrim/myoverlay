@@ -13,7 +13,7 @@ UTC = timezone.utc
 
 
 def _xrk(start, dur, laps, venue="kgv"):
-    from media_tools.ingest.mychron import XrkInfo
+    from media_tools.ingest.telemetry import XrkInfo
     from media_tools.library import Lap
 
     return XrkInfo(
@@ -30,7 +30,7 @@ def scan_cfg(cfg, tmp_path):
     tel = tmp_path / "tel"
     tel.mkdir()
     cfg.camera.source_dirs = [cam]
-    cfg.mychron.data_dirs = [tel]
+    cfg.telemetry.data_dirs = [tel]
     return cfg, cam, tel
 
 
@@ -50,7 +50,7 @@ def test_scan_correlates_and_flags_orphan(scan_cfg, monkeypatch):
                        [(0, 0, 10), (1, 10, 70), (2, 70, 129), (3, 129, 145)])
         return _xrk(datetime(2026, 7, 17, 5, 0, tzinfo=UTC), 120.0, [])
 
-    monkeypatch.setattr("media_tools.ingest.mychron.parse_xrk", fake_parse)
+    monkeypatch.setattr("media_tools.ingest.telemetry.parse_xrk", fake_parse)
 
     result = scan_new(cfg)
 
@@ -69,7 +69,7 @@ def test_scan_skips_known_and_writes_nothing(scan_cfg, monkeypatch):
     cfg, cam, tel = scan_cfg
     monkeypatch.setattr("media_tools.ingest.camera.probe_duration_s", lambda p: 100.0)
     monkeypatch.setattr(
-        "media_tools.ingest.mychron.parse_xrk",
+        "media_tools.ingest.telemetry.parse_xrk",
         lambda p, tz: _xrk(datetime(2026, 7, 17, 1, 0, tzinfo=UTC), 60.0, []),
     )
 
@@ -93,3 +93,30 @@ def test_scan_skips_known_and_writes_nothing(scan_cfg, monkeypatch):
     assert known.name not in names  # already ingested -> skipped
     assert "DJI_20260716221400_0065_D.MP4" in names
     assert session_json.read_bytes() == before  # scan wrote nothing
+
+
+def test_list_telemetry_covers_library_and_downloads(scan_cfg, monkeypatch):
+    """The local listing is every .xrk on disk: the ingested copies in the day
+    folders and whatever is still waiting in the download dir."""
+    from media_tools.ingest.telemetry import ingest_telemetry
+    from media_tools.scan import list_telemetry_files
+
+    cfg, _cam, tel = scan_cfg
+    monkeypatch.setattr(
+        "media_tools.ingest.telemetry.parse_xrk",
+        lambda p, tz: _xrk(datetime(2026, 7, 17, 1, 14, tzinfo=UTC), 300.0, [(1, 0, 60)]),
+    )
+    (tel / "race.xrk").write_bytes(b"t" * 5)
+    ingest_telemetry(cfg)  # copies race.xrk into <day>/raw/telemetry
+    (tel / "fresh.xrk").write_bytes(b"t" * 7)  # downloaded, not ingested yet
+
+    rows = {f.source_name: f for f in list_telemetry_files(cfg).files}
+
+    assert set(rows) == {"race.xrk", "fresh.xrk"}
+    # Ingest copies rather than moves: race.xrk exists in both places and is
+    # listed once, under the library day it was filed into.
+    assert rows["race.xrk"].ingested is True
+    assert rows["race.xrk"].day == "2026-07-16"
+    assert str(cfg.library_root) in rows["race.xrk"].source_path
+    assert rows["fresh.xrk"].ingested is False
+    assert rows["fresh.xrk"].day is None

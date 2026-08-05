@@ -6,7 +6,7 @@ No AiM software involved.
 
 The device serves zlib-compressed .xrz session files; downloads are
 decompressed on the fly and land as the .xrk libxrk reads, in the first
-`mychron.data_dirs` folder. Ingest then picks them up as usual.
+`telemetry.data_dirs` folder. Ingest then picks them up as usual.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class RemoteSession(BaseModel):
     # Name exactly as the device lists it (e.g. "a_0186.xrz").
     name: str
     size_bytes: int | None = None
-    # A file for this session already exists in mychron.data_dirs.
+    # A file for this session already exists in telemetry.data_dirs.
     downloaded: bool = False
     # The full CSV row, keys exactly as the device names them (lap counts,
     # best lap, track name/coordinates, ... - varies per model/firmware).
@@ -60,7 +60,7 @@ class DownloadReport:
 def _local_stems(cfg: Config) -> set[str]:
     """Stems of every telemetry file already on disk, lowercased."""
     stems: set[str] = set()
-    for src in cfg.mychron.data_dirs:
+    for src in cfg.telemetry_dirs():
         if not src.is_dir():
             continue
         stems.update(p.stem.lower() for p in src.rglob("*") if p.is_file())
@@ -91,7 +91,7 @@ def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> Remot
 
     result = RemoteListResult()
     try:
-        dev = connect(prefer=cfg.mychron.transport, verbose=False)
+        dev = connect(prefer=cfg.telemetry.transport, verbose=False)
     except NoDeviceError as exc:
         result.notes.append(f"! {exc}")
         return result
@@ -128,7 +128,7 @@ def download_sessions(
     echo=None,
     progress=None,
 ) -> DownloadReport:
-    """Download sessions off the MyChron into mychron.data_dirs[0].
+    """Download sessions off the MyChron into telemetry.data_dirs[0].
 
     names=None means every session not already on disk. The device serves
     zlib-compressed .xrz files: each is decompressed and written as
@@ -144,12 +144,12 @@ def download_sessions(
     report = DownloadReport()
     say = echo or (lambda line: None)
 
-    if not cfg.mychron.data_dirs:
-        report.errors.append("no [mychron] data_dirs configured - nowhere to put downloads")
+    if not cfg.telemetry.data_dirs:
+        report.errors.append("no [telemetry] data_dirs configured - nowhere to put downloads")
         return report
 
     try:
-        dev = connect(prefer=cfg.mychron.transport, verbose=False)
+        dev = connect(prefer=cfg.telemetry.transport, verbose=False)
     except NoDeviceError as exc:
         report.errors.append(str(exc))
         return report
@@ -172,7 +172,7 @@ def download_sessions(
         else:
             wanted = list(catalog)
 
-        dest_dir = cfg.mychron.data_dirs[0]
+        dest_dir = cfg.telemetry.data_dirs[0]
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         for name in wanted:

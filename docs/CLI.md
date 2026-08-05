@@ -82,7 +82,7 @@ Copy new camera videos and MyChron sessions into the library (download only).
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--source` | `all` | Which sources to ingest: all, camera, mychron |
+| `--source` | `all` | Which sources to ingest: all, camera, telemetry |
 | `--device` | false | First download new sessions off the MyChron (USB or WiFi) |
 | `--force` | false | Re-download and refresh files already ingested |
 
@@ -164,7 +164,7 @@ Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> pub
 | Option | Default | Description |
 | --- | --- | --- |
 | `--publish` / `--no-publish` | false | Also upload to YouTube |
-| `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: [mychron] auto_download) |
+| `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: [telemetry] auto_download) |
 | `--resolution`, `--res` |  | Output resolution: hd\|fhd\|2k\|4k (default from config) |
 
 ## mt scan
@@ -249,14 +249,14 @@ Download MyChron sessions off the device and ingest them. No camera involvement.
 
 ## mt telemetry list
 
-List MyChron sessions - remote (on the device, over USB/WiFi, default), local (downloaded to disk), or all (both, including already handled).
+List telemetry sessions - local (everything on disk, default), remote (on the device, over USB/WiFi), or all (both).
 
 ## mt telemetry list all
 
     mt telemetry list all [OPTIONS]
 
 List everything: device sessions (including already-downloaded) and
-local files (including already-ingested).
+every local file.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -266,7 +266,8 @@ local files (including already-ingested).
 
     mt telemetry list local [OPTIONS]
 
-List new MyChron .xrk sessions already downloaded to disk. Copies nothing.
+List every .xrk session on disk - the library day folders and the
+download dir(s) - with its ingested state. Copies nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -303,7 +304,7 @@ files, or every file of the named days.
 
 ## mt video list
 
-List videos - remote (on the camera card, default), local (in the library), or all (both, including already downloaded).
+List videos - local (in the library, default), remote (on the camera card), or all (both, including already downloaded).
 
 ## mt video list all
 

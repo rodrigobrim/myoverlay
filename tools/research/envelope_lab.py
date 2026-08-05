@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from media_tools.sync import AUDIO_RATE, FEATURE_HZ, _frame_features, _highpass, _zscore
-from media_tools.ingest.mychron import _parse_log_datetime
+from media_tools.ingest.telemetry import _parse_log_datetime
 from media_tools.telemetry import unified_frame
 from libxrk import aim_xrk
 
