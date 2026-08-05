@@ -145,6 +145,15 @@ def _fmt_size(n: int) -> str:
     return f"{mb / 1000:.2f} GB" if mb >= 1000 else f"{mb:.1f} MB"
 
 
+def _fmt_duration(s: float | None) -> str:
+    if s is None:
+        return "-"
+    total = int(s)
+    h, rest = divmod(total, 3600)
+    m, sec = divmod(rest, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
 video_list_app = typer.Typer(
     help="List videos - remote (on the camera card, default), local (in the "
     "library), or all (both, including already downloaded).",
@@ -1296,7 +1305,7 @@ def watch(
 def status(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
 ):
-    """Show the pipeline state of one or all track days."""
+    """Show the pipeline state of one or all track days, one line per video."""
     cfg = get_config()
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
@@ -1304,23 +1313,35 @@ def status(
         console.print("[dim]library is empty[/dim]")
         return
 
-    table = Table(title=str(cfg.library_root))
-    for col in ("day", "track", "videos", "telemetry", "sessions", "synced", "rendered", "published"):
-        table.add_column(col)
     for d in days:
         m = lib.load_day(d)
-        synced = sum(1 for v in m.videos if v.sync is not None)
-        table.add_row(
-            d.isoformat(),
-            m.track or "-",
-            str(len(m.videos)),
-            str(len(m.telemetry)),
-            str(len(m.sessions)),
-            f"{synced}/{len(m.videos)}",
-            str(len(m.renders)),
-            str(len(m.publishes)),
-        )
-    console.print(table)
+        title = d.isoformat()
+        if m.track:
+            title += f"  {m.track}"
+        title += f"  ({len(m.telemetry)} telemetry, {len(m.sessions)} sessions)"
+        table = Table(title=title)
+        table.add_column("video", overflow="fold")
+        for col in ("length", "session", "synced", "rendered", "published"):
+            table.add_column(col)
+        for v in m.videos:
+            renders = [r for r in m.renders if v.file in r.source_videos]
+            render_files = {r.file for r in renders}
+            pubs = [p for p in m.publishes if p.file in render_files]
+            if v.sync is None:
+                synced = "[red]no[/red]"
+            else:
+                synced = f"[green]{v.sync.method}[/green] ({v.sync.confidence:.2f})"
+            table.add_row(
+                v.source_name,
+                _fmt_duration(v.duration_s),
+                str(v.session_id) if v.session_id is not None else "-",
+                synced,
+                str(len(renders)) if renders else "[dim]0[/dim]",
+                "\n".join(p.video_id for p in pubs) if pubs else "-",
+            )
+        if not m.videos:
+            table.add_row("[dim]no videos[/dim]", "-", "-", "-", "-", "-")
+        console.print(table)
 
 
 @app.command()
