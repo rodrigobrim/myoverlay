@@ -12,9 +12,10 @@ from tkinter import filedialog, ttk
 from pathlib import Path
 from typing import Callable
 
+from ..config import RESOLUTIONS
 from .widgets import CheckedEntry, ReorderableList
 
-QUALITIES = ["hd", "fhd", "2k", "4k"]
+QUALITIES = list(RESOLUTIONS)
 
 
 def _fmt_time(seconds: float) -> str:
