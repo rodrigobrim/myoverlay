@@ -214,6 +214,8 @@ Show the pipeline state of one or all track days.
 
 Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at).
 
+--video alone (no anchor) auto-syncs just that clip.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | no | Day (YYYY-MM-DD); default all |

@@ -163,6 +163,59 @@ def test_remote_listing_formatters():
     assert cli._fmt_lap_ms("0") == "?"
 
 
+def _library_with_video(cfg):
+    from datetime import date, datetime, timedelta, timezone
+
+    from media_tools.library import DayManifest, Library, TrackSession, VideoClip
+
+    start = datetime(2026, 7, 12, 13, 0, tzinfo=timezone.utc)
+    m = DayManifest(
+        date=date(2026, 7, 12),
+        sessions=[TrackSession(id=1, start_utc=start, end_utc=start + timedelta(minutes=20))],
+    )
+    m.videos = [
+        VideoClip(
+            file="raw/video/a.MP4", source_name="a.MP4", size_bytes=1,
+            duration_s=60, start_utc_estimate=start, session_id=1,
+        )
+    ]
+    Library(cfg.library_root).save_day(m)
+
+
+def test_sync_video_alone_runs_auto_sync_on_that_clip(cfg_with_card, monkeypatch):
+    import media_tools.sync as sync_mod
+
+    _library_with_video(cfg_with_card)
+    seen = {}
+
+    def fake_sync_day(cfg, manifest, day_dir, force=False, only=None):
+        seen["only"] = only
+        seen["force"] = force
+        return ["+ a.MP4: synced"]
+
+    monkeypatch.setattr(sync_mod, "sync_day", fake_sync_day)
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4"])
+    assert r.exit_code == 0
+    assert seen["only"] == "a.MP4"
+
+
+def test_sync_video_alone_requires_day_and_existing_clip(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    r = runner.invoke(cli.app, ["sync", "--video", "a.MP4"])
+    assert r.exit_code == 2
+    r2 = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "MISSING.MP4"])
+    assert r2.exit_code == 2
+    assert "no video named" in r2.stdout
+
+
+def test_sync_manual_mode_still_validates(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    # An anchor option without the rest is still the manual-mode error.
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "00:30"])
+    assert r.exit_code == 2
+    assert "manual mode needs" in r.stdout
+
+
 def test_ingest_force_threads_through(cfg_with_card, monkeypatch):
     seen = {}
 

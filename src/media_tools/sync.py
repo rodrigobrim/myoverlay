@@ -593,6 +593,7 @@ def sync_day(
     day_dir: Path,
     force: bool = False,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    only: str | None = None,
 ) -> list[str]:
     """Audio-sync every clip of a day against the day's full telemetry frame.
 
@@ -601,6 +602,9 @@ def sync_day(
     whose correlation is inconclusive get seeded from the day's median
     camera-clock drift once at least one clip synced confidently — DJI clock
     drift is stable within a track day.
+
+    `only` restricts the sync to the clip with that source name; naming a
+    clip explicitly implies re-syncing it even without force.
     """
     from .library import SyncInfo
     from .telemetry import load_day_frame
@@ -612,7 +616,9 @@ def sync_day(
         return ["no telemetry for this day; nothing to sync"]
 
     for clip in manifest.videos:
-        if clip.sync is not None and not force:
+        if only is not None and clip.source_name != only:
+            continue
+        if clip.sync is not None and not force and only is None:
             continue
         try:
             # Bound the search around the camera's own estimate: with many
@@ -662,6 +668,8 @@ def sync_day(
         drift = drifts[len(drifts) // 2]
         seed_conf = 0.9 * min(c.sync.confidence for c in solved)
         for clip in manifest.videos:
+            if only is not None and clip.source_name != only:
+                continue
             if clip.sync is None:
                 clip.sync = SyncInfo(
                     video_start_utc=clip.start_utc_estimate + timedelta(seconds=drift),
