@@ -140,6 +140,29 @@ def _run_gcloud(args: list[str], **kw):
     return subprocess.run([*gcloud_cmd(), *args], **kw)
 
 
+def _active_account() -> str:
+    """The signed-in gcloud account, "" when there is none. Never prompts:
+    gcloud keeps its own credential under %APPDATA%\\gcloud, so this only
+    reads what is already there."""
+    who = _run_gcloud(
+        ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"],
+        capture_output=True, text=True,
+    )
+    return (who.stdout or "").strip() if who.returncode == 0 else ""
+
+
+def _project_state(project: str) -> str | None:
+    """Lifecycle state of `project` ("ACTIVE", "DELETE_REQUESTED", ...), or
+    None when it cannot be read (no credential, offline, no such project).
+    describe still succeeds on a project scheduled for deletion, so the state
+    matters, not the exit code."""
+    d = _run_gcloud(
+        ["projects", "describe", project, "--format=value(lifecycleState)"],
+        capture_output=True, text=True,
+    )
+    return (d.stdout or "").strip() or None if d.returncode == 0 else None
+
+
 def _unique_project_id() -> str:
     """A globally-unique project id. gcloud ids must be 6-30 chars, lowercase
     letters/digits/hyphens, start with a letter. The display name stays
@@ -162,11 +185,7 @@ def _resolve_project(cfg: Config, report: list[str]) -> str | None:
     #    project scheduled for deletion, and reusing one lands the Console
     #    automation on a dead project ("Project scheduled for deletion").
     if configured and configured != "myoverlay":
-        d = _run_gcloud(
-            ["projects", "describe", configured, "--format=value(lifecycleState)"],
-            capture_output=True, text=True,
-        )
-        if d.returncode == 0 and (d.stdout or "").strip() == "ACTIVE":
+        if _project_state(configured) == "ACTIVE":
             report.append(f"reusing configured project '{configured}'")
             return configured
     # b) our own project whose display name is 'myoverlay' -> reuse
@@ -247,22 +266,15 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
         )
         return False
 
-    def active_account() -> str:
-        who = _run_gcloud(
-            ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"],
-            capture_output=True, text=True,
-        )
-        return (who.stdout or "").strip()
-
     # 1. Sign in if there is no active account (opens a browser once).
     report.append("checking your Google sign-in (gcloud)...")
-    if not active_account():
+    if not _active_account():
         report.append("opening a browser to sign in to Google (one time)...")
         _run_gcloud(["auth", "login", "--brief"])
-        if not active_account():
+        if not _active_account():
             report.append("! sign-in did not complete; re-run `mt google-setup`")
             return False
-    report.append(f"signed in as {active_account()}")
+    report.append(f"signed in as {_active_account()}")
 
     # 2. Resolve/create the project (unique id, display name 'myoverlay') and
     #    remember it in-memory + in config so the rest of setup and publish use
@@ -290,21 +302,93 @@ def ensure_project(cfg: Config, report: list[str]) -> bool:
 
 
 def setup_google_api(
-    cfg: Config, troubleshoot: bool = False, log_path: Path | None = None
+    cfg: Config,
+    troubleshoot: bool = False,
+    log_path: Path | None = None,
+    force: bool = False,
 ) -> list[str]:
     """Configure the Google side of `mt publish` end to end. Returns a report;
     never raises (the manual Console path always remains as fallback).
 
     With log_path set, every report line is also appended to that file as it
-    happens - the MSI wizard tails it to show live status."""
+    happens - the MSI wizard tails it to show live status. With force, the
+    browser phase runs even when the account is already configured."""
     report = _TeeReport(log_path)
     try:
-        return _setup_google_api(cfg, troubleshoot, report)
+        return _setup_google_api(cfg, troubleshoot, report, force)
     finally:
         report.close()
 
 
-def _setup_google_api(cfg: Config, troubleshoot: bool, report: _TeeReport) -> list[str]:
+def _already_configured(cfg: Config, project: str) -> bool:
+    """True when the OAuth client this project needs already exists here.
+
+    A client secret naming the project is the whole answer: Google refuses
+    to create a client before the consent screen is configured, and this
+    tool only creates one after publishing that screen to production, so a
+    matching secret implies both earlier steps succeeded.
+    """
+    secret = cfg.youtube.client_secret_file
+    return bool(project) and secret.is_file() and _secret_project(secret) == project
+
+
+def _nothing_to_do(cfg: Config, report: list[str]) -> bool:
+    """True when setup can stop before doing anything interactive.
+
+    Runs FIRST, ahead of ensure_project, and never prompts. gcloud's own
+    credential is separate from the app's, so a machine can hold a perfectly
+    configured app (client secret, project id in config) while gcloud has no
+    credential at all - a restored profile, a copied ~\\myoverlay, a wiped
+    gcloud config. Ordering this after ensure_project made that machine open
+    a sign-in browser purely to run checks that would then conclude there
+    was nothing to do.
+
+    So the API re-verification is best-effort: it happens when gcloud is
+    already signed in, and is skipped (not forced) when it is not.
+    """
+    project = cfg.youtube.project_id
+    if project == "myoverlay":  # the placeholder, not a resolved id
+        return False
+    if not _already_configured(cfg, project):
+        return False
+
+    if gcloud_available() and _active_account():
+        state = _project_state(project)
+        if state is not None and state != "ACTIVE":
+            # Deleted or pending deletion: there IS work to do (resolve or
+            # create another project), so fall through to the full flow.
+            report.append(f"configured project '{project}' is {state}")
+            return False
+        if state is None:
+            report.append(f"could not re-check project '{project}' (offline?)")
+    else:
+        report.append("gcloud is not signed in here; skipping the project re-check")
+
+    report.append(f"Google is already set up for project '{project}'")
+    report.append(f"  client secret: {cfg.youtube.client_secret_file}")
+    report.append("  nothing to do - run `MyOverlay google-setup --force` to")
+    report.append("  reconfigure it anyway (e.g. after deleting the client)")
+    return True
+
+
+def _setup_google_api(
+    cfg: Config, troubleshoot: bool, report: _TeeReport, force: bool = False
+) -> list[str]:
+    # Nothing to do -> no sign-in, no browser, no window. This runs before
+    # anything interactive: the old flow launched Chrome first and only
+    # noticed inside the Console session, after navigating it, that the
+    # client secret was already there - minutes of automation, and possibly
+    # a manual sign-in, to reach a step with nothing to do.
+    if not force and _nothing_to_do(cfg, report):
+        return report
+
+    # gcloud preamble: sign in, create/reuse the project, enable the API.
+    if not ensure_project(cfg, report):
+        return report
+    project = cfg.youtube.project_id or "myoverlay"
+
+    # Checked here rather than at the top: an account that needs no browser
+    # work must not be failed over a browser library it will never use.
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -312,11 +396,6 @@ def _setup_google_api(cfg: Config, troubleshoot: bool, report: _TeeReport) -> li
             "! playwright not installed; run: uv sync && uv run playwright install chromium"
         )
         return report
-
-    # gcloud preamble: sign in, create/reuse the project, enable the API.
-    if not ensure_project(cfg, report):
-        return report
-    project = cfg.youtube.project_id or "myoverlay"
 
     ts = _Shoot(cfg, troubleshoot)
     profile_dir = _gcp_data_dir(cfg) / "gcp_browser_profile"

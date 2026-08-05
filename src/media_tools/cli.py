@@ -667,10 +667,20 @@ def google_setup(
             "to understand/refine the procedure when Google shifts the UI",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Reconfigure even when the account is already set up "
+            "(mints a new OAuth client; the old secret is kept as .bak)",
+        ),
+    ] = False,
 ):
     """Configure the Google side of `mt publish` by driving the Cloud Console
     (consent screen + Desktop OAuth client + client_secret.json download).
-    Sign-in is the one manual step: do it in the window that opens."""
+    Sign-in is the one manual step: do it in the window that opens.
+
+    Already configured? It says so and exits without opening a browser."""
     from .gcp_console import setup_google_api
 
     cfg = get_config()
@@ -688,7 +698,9 @@ def google_setup(
             log.write_text("", encoding="utf-8")
     except OSError:
         log = None
-    report = setup_google_api(cfg, troubleshoot=troubleshoot, log_path=log)
+    report = setup_google_api(
+        cfg, troubleshoot=troubleshoot, log_path=log, force=force
+    )
     for line in report:
         console.print(f"  {line}", markup=False)
     if log is not None:

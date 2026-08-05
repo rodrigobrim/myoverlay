@@ -2,10 +2,16 @@
 
 import json
 
+import pytest
+
+from media_tools import gcp_console
+from media_tools.config import Config
 from media_tools.gcp_console import (
+    _already_configured,
     _claim_secret_path,
     _rotate_secret_aside,
     _secret_project,
+    setup_google_api,
 )
 
 
@@ -76,3 +82,120 @@ def test_claim_secret_path_is_a_noop_without_an_existing_secret(tmp_path):
     _claim_secret_path(dest, report)
 
     assert dest.parent.is_dir() and not dest.exists() and report == []
+
+
+def _cfg_with_secret(tmp_path, project: str | None) -> Config:
+    cfg = Config(library_root=tmp_path / "lib")
+    cfg.youtube.project_id = "myoverlay-live01"
+    cfg.youtube.client_secret_file = tmp_path / "client_secret.json"
+    if project:
+        _write_secret(cfg.youtube.client_secret_file, project)
+    return cfg
+
+
+def test_already_configured_only_for_a_matching_secret(tmp_path):
+    assert _already_configured(_cfg_with_secret(tmp_path, "myoverlay-live01"),
+                               "myoverlay-live01")
+    # A secret for another project cannot authorize this one.
+    assert not _already_configured(_cfg_with_secret(tmp_path, "myoverlay-old99"),
+                                   "myoverlay-live01")
+    # No secret at all: the client still has to be created.
+    assert not _already_configured(_cfg_with_secret(tmp_path, None),
+                                   "myoverlay-live01")
+
+
+def _record_browser(monkeypatch, signed_in: bool = True, state: str | None = "ACTIVE"):
+    """Record what setup would do instead of doing it: browser sessions, and
+    whether the interactive gcloud phase was entered. setup_google_api never
+    raises (it reports instead), so the checks are on what it called."""
+    launched: list[str] = []
+    monkeypatch.setattr(gcp_console, "gcloud_available", lambda: True)
+    monkeypatch.setattr(
+        gcp_console, "_active_account", lambda: "me@example.com" if signed_in else ""
+    )
+    monkeypatch.setattr(gcp_console, "_project_state", lambda project: state)
+    monkeypatch.setattr(
+        gcp_console,
+        "ensure_project",
+        lambda cfg, report: launched.append("ensure_project") or True,
+    )
+    monkeypatch.setattr(
+        gcp_console,
+        "_automated_pass",
+        lambda pw, cfg, project, profile_dir, report, ts: launched.append(project),
+    )
+    return launched
+
+
+def test_setup_skips_everything_when_already_configured(tmp_path, monkeypatch):
+    """A configured account must cost no browser and no sign-in handoff: the
+    old flow only noticed inside the Console session, after the launch."""
+    launched = _record_browser(monkeypatch)
+    cfg = _cfg_with_secret(tmp_path, "myoverlay-live01")
+
+    report = setup_google_api(cfg)
+
+    assert launched == []  # not even the gcloud phase
+    assert any("already set up" in line for line in report)
+    assert not any(line.lstrip().startswith("!") for line in report)
+
+
+def test_setup_skip_does_not_need_playwright(tmp_path, monkeypatch):
+    """The skip is decided before the browser library is imported, so a
+    configured account is never failed over a browser it will not open."""
+    launched = _record_browser(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "playwright.sync_api", None)
+    cfg = _cfg_with_secret(tmp_path, "myoverlay-live01")
+
+    report = setup_google_api(cfg)
+
+    assert launched == []
+    assert not any("playwright" in line for line in report)
+
+
+def test_setup_skip_never_prompts_for_a_gcloud_sign_in(tmp_path, monkeypatch):
+    """gcloud's credential is separate from the app's, so a configured app can
+    sit on a machine where gcloud has none (restored profile, wiped gcloud
+    config). Re-verification is skipped there rather than forcing a sign-in
+    for checks whose answer is 'nothing to do'."""
+    launched = _record_browser(monkeypatch, signed_in=False)
+    cfg = _cfg_with_secret(tmp_path, "myoverlay-live01")
+
+    report = setup_google_api(cfg)
+
+    assert launched == []
+    assert any("not signed in" in line for line in report)
+    assert any("already set up" in line for line in report)
+
+
+def test_setup_reconfigures_when_the_project_is_gone(tmp_path, monkeypatch):
+    """A secret for a project scheduled for deletion is not 'configured':
+    there is real work to do, so the full flow runs."""
+    pytest.importorskip("playwright.sync_api")
+    launched = _record_browser(monkeypatch, state="DELETE_REQUESTED")
+    cfg = _cfg_with_secret(tmp_path, "myoverlay-live01")
+
+    report = setup_google_api(cfg)
+
+    assert launched == ["ensure_project", "myoverlay-live01"]
+    assert any("DELETE_REQUESTED" in line for line in report)
+
+
+def test_force_runs_the_browser_even_when_configured(tmp_path, monkeypatch):
+    pytest.importorskip("playwright.sync_api")
+    launched = _record_browser(monkeypatch)
+    cfg = _cfg_with_secret(tmp_path, "myoverlay-live01")
+
+    setup_google_api(cfg, force=True)
+
+    assert launched == ["ensure_project", "myoverlay-live01"]
+
+
+def test_setup_runs_the_browser_when_the_secret_is_missing(tmp_path, monkeypatch):
+    pytest.importorskip("playwright.sync_api")
+    launched = _record_browser(monkeypatch)
+    cfg = _cfg_with_secret(tmp_path, None)
+
+    setup_google_api(cfg)
+
+    assert launched == ["ensure_project", "myoverlay-live01"]
