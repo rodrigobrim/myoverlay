@@ -25,12 +25,14 @@ MyOverlay slice 2026-07-13 "12:01-14:02" "31:00-33:10"
 On every start the launcher checks the GitHub repo for new commits and pulls
 them, so the pipeline stays current without reinstalling (`--no-update` or
 `MYOVERLAY_NO_UPDATE=1` skips the check). The first run creates
-`config.toml` and prints its location — edit `library_root` and the MyChron
-download folder (`[mychron] data_dirs`) before the first real use. For YouTube upload each
-person needs their own Google OAuth client (see the main README).
+`config.toml` and prints its location — it works untouched (every option is
+commented out at its default); uncomment lines only to change them. For
+YouTube upload each person needs their own Google OAuth client (see the
+main README).
 
-The app's data lives in `~\myoverlay`: `config.toml`, the Google
-credentials (`client_secret.json`, `google-token`) and the pipeline working
+The app's data lives in `~\myoverlay`: `config.toml`, the media library at
+`~\myoverlay\render` (default `library_root`), the Google credentials
+(`client_secret.json`, `google-token`) and the pipeline working
 copy at `~\myoverlay\repo` (override with `MYOVERLAY_REPO`; point
 `MYOVERLAY_REPO_URL` at a fork to test branches). Data from an older
 install under `%LOCALAPPDATA%\MyOverlay` is moved there automatically on
@@ -119,10 +121,12 @@ The setup wizard asks for:
 
 The choices are written to `install_settings.yaml` next to the installed
 exe; the launcher applies them when it creates `config.toml` on first run
-(language, resolution, and it copies the validated client secret to the
-repo as `client_secret.json`). The chosen destination is recorded as
-`[tools] install_dir` in `config.toml` (refreshed on every launch), so the
-pipeline finds the bundled ffmpeg and Google Cloud SDK by full path.
+(language, resolution, and it copies the validated client secret next to it
+as `client_secret.json`). A NON-default destination is recorded as
+`[tools] install_dir` in `config.toml` (refreshed on every launch; the
+default `C:\Program Files\MyOverlay` lives in the code and is never
+written), so the pipeline finds the bundled ffmpeg and Google Cloud SDK by
+full path.
 
 That recording, like the `MYOVERLAY_*` env vars, comes from the launcher —
 which is frozen into the exe and only changes on a rebuild. `media_tools.tools`
@@ -133,10 +137,11 @@ directory, so new pipeline code running under an older exe still finds them.
 
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
-the software installed: app files, shortcuts, `install_settings.yaml`, and
-the data dirs: `~\myoverlay` (pipeline clone, config.toml, Google
-credentials) plus the legacy `%LOCALAPPDATA%\MyOverlay`. A checkbox on the
-remove-options page additionally
-uninstalls the Google Cloud SDK (unchecked by default). The media library
-(`library_root` — videos/telemetry) and downloaded MyChron data are never
-touched.
+the software installed: app files, shortcuts, `install_settings.yaml`, the
+app's own items in `~\myoverlay` (pipeline clone, config.toml, Google
+credentials, setup log, browser profile) and the whole legacy
+`%LOCALAPPDATA%\MyOverlay`. A checkbox on the remove-options page
+additionally uninstalls the Google Cloud SDK (unchecked by default). The
+media library (`~\myoverlay\render` — videos/telemetry, including
+downloaded MyChron data) is never touched, nor is anything else in
+`~\myoverlay` the app does not recognize as its own.

@@ -1,0 +1,116 @@
+# MyOverlay configuration.
+#
+# Every option the pipeline understands is listed here with its default value
+# commented out. The app works with this file untouched; uncomment a line only
+# to CHANGE it from the default. Lines marked "example:" are illustrations,
+# not defaults.
+
+# Root folder where ingested/processed media lives (one subfolder per track
+# day: raw footage, work files, rendered output, session manifest).
+# library_root = "~/myoverlay/render"
+
+# Language of the video output (overlay labels + default YouTube title and
+# description): en | pt | es | ja | ar | fr | it | ru | zh.
+# The config file, CLI and logs stay in English.
+# language = "en"
+
+[camera]
+# Removable volumes with a DCIM folder are detected automatically; add fixed
+# paths here if needed (e.g. a folder you copy files into manually).
+# source_dirs = []
+# Video file types picked up from the camera.
+# extensions = [".mp4", ".mov"]
+# IANA timezone the camera clock is set to; omit for system local time.
+# example: timezone = "America/Sao_Paulo"
+# How far a clip's timestamp may fall outside a telemetry session window and
+# still be assigned to it (camera clocks drift), in seconds.
+# clock_tolerance_s = 900.0
+
+[mychron]
+# Where downloaded MyChron sessions live. `mt telemetry get` talks to the
+# device directly (USB or WiFi) and writes .xrk files into the FIRST entry;
+# every entry is scanned on ingest.
+# data_dirs = ["~/myoverlay/render/mychron"]
+# Force one transport for device downloads: "usb" | "wifi". Omit to try USB
+# first (faster, charges the logger), then WiFi (which joins the MyChron's
+# own access point, replacing the house network while it runs).
+# example: transport = "usb"
+# Zero-touch device download: `mt run` / the watcher pull new sessions off
+# the MyChron whenever one is reachable.
+# auto_download = false
+# download_interval_s = 600.0
+# Telemetry file types to ingest. Only the .xrk log is a session; its
+# compressed .xrz twin would duplicate every session.
+# extensions = [".xrk"]
+# Timezone of the MyChron 'Log Date'/'Log Time' metadata; omit for system
+# local time.
+# example: timezone = "America/Sao_Paulo"
+# Correct a wrongly-set device clock: a moment the device recorded as
+# clock_reads actually happened at clock_actual (both in the logger's
+# timezone). The difference is applied to every parsed session time.
+# example: clock_reads = 2047-10-29T00:00:00
+# example: clock_actual = 2026-07-13T00:00:00
+
+[watch]
+# The watcher (`mt watch`) checks for a newly plugged camera / new files this
+# often, in seconds.
+# poll_s = 30.0
+# Grace period after a device appears, so the OS finishes mounting before
+# ingest starts, in seconds.
+# settle_s = 5.0
+
+[render]
+# Frame rate of the overlay graphics layer (the footage keeps its own fps).
+# overlay_fps = 10.0
+# Video encoder: libx264 (CPU, works everywhere) | h264_nvenc / hevc_nvenc
+# (NVIDIA GPUs, many times faster at 4K). crf maps to -cq for nvenc.
+# codec = "libx264"
+# Quality (lower = better/larger).
+# crf = 20
+# Encoder speed/size preset.
+# preset = "medium"
+# ffmpeg scaler for resizing footage (mainly the 1080p->2K upscale): lanczos
+# is sharper than the default bilinear at negligible cost.
+# scale_flags = "lanczos"
+# Output resolution preset: hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p).
+# resolution = "2k"
+# Laps faster than this many seconds are physically impossible for the
+# circuit (cut track / timing glitch): flagged invalid, never best/delta ref.
+# min_lap_s = 0.0
+# Top of the RPM gauge.
+# max_rpm = 16000
+# Font for the overlay text; omit for the built-in default.
+# example: font_path = "C:/Windows/Fonts/arialbd.ttf"
+# Clips synced below this confidence are not rendered (use `mt sync --video
+# ... --lap ... --at ...` to pin them manually).
+# min_sync_confidence = 0.5
+# When you forget to stop recording after the race, this listens to the
+# video's engine sound to find where the kart was switched off, then trims
+# the video to just after your last lap. Disable to skip the scan and keep
+# the full recording (renders a bit faster).
+# scan-video-for-race-end = true
+
+[youtube]
+# Upload visibility. API uploads from unaudited Google Cloud projects are
+# locked private by Google regardless of this setting.
+# privacy = "private"
+# Omit the templates to get defaults in the configured `language`; set them
+# to override. Placeholders: {track} {date} {session} {best_lap} {lap}
+# example: title_template = "Karting {track} {date} - session {session} (best lap {best_lap})"
+# example: description_template = "Recorded {date} at {track}.\nBest lap: {best_lap}"
+# example: playlist_id = "PL..."
+# OAuth client secret and token produced by `MyOverlay google-setup` /
+# `google-auth`. Relative paths resolve against the app data dir
+# (~/myoverlay when installed, the checkout root in dev).
+# client_secret_file = "client_secret.json"
+# token_file = "google-token"
+# Google Cloud project used by `MyOverlay google-setup`. With the default
+# name, setup creates the project (or reuses yours) and records its real id
+# here.
+# project_id = "myoverlay"
+
+[tools]
+# Install directory of the app; the bundled ffmpeg and Google Cloud SDK are
+# located under it. The launcher records the real location automatically
+# when it differs (e.g. a custom install folder).
+# install_dir = "C:/Program Files/MyOverlay"

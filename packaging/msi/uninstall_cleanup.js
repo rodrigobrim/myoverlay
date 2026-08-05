@@ -1,11 +1,13 @@
 // MSI uninstall custom actions (deferred, impersonated - they act on the
 // uninstalling user's profile).
 //
-// RemoveAppData: wipe the app's data dirs - ~\myoverlay (pipeline clone,
-// config.toml, google-token, client secret, setup log) and the pre-home-layout
-// %LOCALAPPDATA%\myoverlay (older installs; still holds the sign-in browser
-// profile). The media library (library_root - videos/telemetry) lives
-// elsewhere and is NEVER touched.
+// RemoveAppData: remove the app's OWN items from ~\myoverlay (pipeline
+// clone, config.toml, google-token, client secret, setup log, browser
+// profile) - NEVER the whole directory: the media library lives inside it by
+// default (~\myoverlay\render - irreplaceable footage/telemetry) and
+// anything unrecognized stays untouched with it. The pre-home-layout
+// %LOCALAPPDATA%\myoverlay (older installs) is still wiped whole; it never
+// held media.
 //
 // RemoveGCloud: silently run the Google Cloud SDK uninstaller. Only invoked
 // when the user ticked the checkbox on the remove-options page.
@@ -13,18 +15,30 @@
 function RemoveAppData() {
     var sh = new ActiveXObject("WScript.Shell");
     var fso = new ActiveXObject("Scripting.FileSystemObject");
-    var dirs = [
-        sh.ExpandEnvironmentStrings("%USERPROFILE%") + "\\myoverlay",
-        sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\myoverlay"
+    var home = sh.ExpandEnvironmentStrings("%USERPROFILE%") + "\\myoverlay";
+    var appItems = [
+        "repo", "gcp_browser_profile", "config.toml", "google-token",
+        "client_secret.json", "google-setup.log"
     ];
-    for (var i = 0; i < dirs.length; i++) {
+    for (var i = 0; i < appItems.length; i++) {
+        var p = home + "\\" + appItems[i];
         try {
-            if (fso.FolderExists(dirs[i])) {
-                fso.DeleteFolder(dirs[i], true); // force: .git objects are read-only
+            if (fso.FolderExists(p)) {
+                fso.DeleteFolder(p, true); // force: .git objects are read-only
+            } else if (fso.FileExists(p)) {
+                fso.DeleteFile(p, true);
             }
         } catch (e) {
             // Non-fatal: leftover files never block the uninstall.
         }
+    }
+    try {
+        var legacy = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\myoverlay";
+        if (fso.FolderExists(legacy)) {
+            fso.DeleteFolder(legacy, true);
+        }
+    } catch (e2) {
+        // Non-fatal.
     }
     return 1;
 }
