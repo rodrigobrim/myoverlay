@@ -8,9 +8,9 @@ On every start it:
   1. clones the repo on first run (into ~\\myoverlay\\repo), or fast-forward
      pulls new commits; data from an older install under %LOCALAPPDATA%
      \\MyOverlay is moved to ~\\myoverlay once;
-  2. creates ~\\myoverlay\\config.toml from config.example.toml on first run
-     (the Google credentials live next to it: client_secret.json and
-     google-token);
+  2. creates ~\\myoverlay\\config.toml on first run from the repo's shipped
+     config.toml template (every option commented out; the Google
+     credentials live next to it: client_secret.json and google-token);
   3. puts the bundled git/ffmpeg on PATH;
   4. imports the *pulled* media_tools package and forwards the command line
      to its CLI - so `MyOverlay run`, `MyOverlay slice ...` etc. behave
@@ -122,10 +122,14 @@ def migrate_legacy_layout(home: Path, repo: Path) -> None:
             say(f"moving your MyOverlay data to {home}")
             shutil.move(str(old_repo), str(repo))
         moves = [
-            (repo / "config.toml", home / "config.toml"),
             (repo / "token.json", home / "google-token"),
             (repo / "client_secret.json", home / "client_secret.json"),
         ]
+        # config.toml is only a USER file in pre-rename clones (they shipped
+        # config.example.toml as the template). In current clones the tracked
+        # template itself is named config.toml and must stay in the repo.
+        if (repo / "config.example.toml").is_file():
+            moves.insert(0, (repo / "config.toml", home / "config.toml"))
         for src, dst in moves:
             if src.exists() and not dst.exists():
                 shutil.move(str(src), str(dst))
@@ -159,8 +163,9 @@ def _resync(git: Path, repo: Path) -> bool:
 
     Only ever called for clones this launcher created: it is a disposable
     cache of the code, so local commits/edits to tracked files are not
-    something to preserve. config.toml and token.json are gitignored, so
-    they survive untouched.
+    something to preserve (that includes the shipped config.toml template;
+    the USER config lives in ~\\myoverlay, outside the clone). Untracked
+    files like credentials survive untouched.
     """
     fetch = run_git(git, ["fetch", "origin"], cwd=repo, timeout=300)
     if fetch.returncode != 0:
@@ -364,15 +369,20 @@ def installer_settings() -> dict:
 
 def _apply_installer_settings(cfg: Path, settings: dict) -> None:
     """Seed a just-created config.toml with the setup wizard's choices."""
+    # The template ships every option commented out, so a wizard choice both
+    # sets the value AND uncomments the line ('# language = "en"' as much as
+    # 'language = "en"').
     text = cfg.read_text(encoding="utf-8-sig")
     lang = settings.get("language")
     if lang:
-        text = re.sub(r'(?m)^language = ".*"$', f'language = "{lang}"', text, count=1)
+        text = re.sub(
+            r'(?m)^#?\s*language = ".*"$', f'language = "{lang}"', text, count=1
+        )
         say(f"video output language: {lang}")
     res = settings.get("resolution")
     if res:
         text = re.sub(
-            r'(?m)^resolution = ".*?"', f'resolution = "{res}"', text, count=1
+            r'(?m)^#?\s*resolution = ".*?"$', f'resolution = "{res}"', text, count=1
         )
         say(f"default output resolution: {res}")
     cfg.write_text(text, encoding="utf-8")
@@ -396,19 +406,29 @@ def _runtime_install_dir() -> str | None:
     return str(Path(sys.executable).resolve().parent)
 
 
+# The code default for [tools] install_dir (see ToolsConfig): only a
+# DIFFERENT location is worth writing into config.toml.
+DEFAULT_INSTALL_DIR = "C:/Program Files/MyOverlay"
+
+
 def _upsert_install_dir(cfg: Path, install_dir: str) -> None:
     """Write [tools] install_dir into config.toml, refreshing a stale value.
 
     Idempotent: a no-op when the value is already current, so it doesn't
-    rewrite the file on every launch. Forward slashes keep the TOML string
-    valid without backslash escaping. Modeled on gcp_console._persist_project_id.
+    rewrite the file on every launch - and the default install location is
+    never written at all (it lives in the code; config.toml only carries
+    deviations). Forward slashes keep the TOML string valid without backslash
+    escaping. Modeled on gcp_console._persist_project_id.
     """
     value = install_dir.replace("\\", "/").rstrip("/")
     try:
         text = cfg.read_bytes().decode("utf-8-sig")
     except OSError:
         return
-    if re.search(r"(?m)^\s*install_dir\s*=", text):
+    has_active = re.search(r"(?m)^\s*install_dir\s*=", text)
+    if value == DEFAULT_INSTALL_DIR and not has_active:
+        return  # default location, nothing overridden: keep the line commented
+    if has_active:
         if re.search(rf'(?m)^\s*install_dir\s*=\s*"{re.escape(value)}"\s*$', text):
             return  # already current
         text = re.sub(r"(?m)^(\s*)install_dir\s*=.*$", rf'\1install_dir = "{value}"', text)
@@ -427,20 +447,21 @@ def _upsert_install_dir(cfg: Path, install_dir: str) -> None:
 
 def ensure_config(repo: Path, data_dir: Path) -> None:
     cfg = data_dir / "config.toml"
-    example = repo / "config.example.toml"
+    # The repo ships config.toml itself as the template: every option listed,
+    # defaults commented out, valid as-is. (In a dev checkout data_dir IS the
+    # repo, so cfg and the template are the same file and no copy happens.)
+    template = repo / "config.toml"
     settings = installer_settings()
     if not cfg.is_file():
-        if not example.is_file():
+        if not template.is_file():
             return
-        shutil.copy2(example, cfg)
+        shutil.copy2(template, cfg)
         _apply_installer_settings(cfg, settings)
         say("=" * 62)
         say("Created your configuration file:")
         say(f"    {cfg}")
-        say("Open it in Notepad and set at least:")
-        say("    library_root      (where processed videos will live)")
-        say("    [mychron] data_dirs  (where MyChron downloads are kept)")
-        say("For YouTube upload, see the README section 'YouTube setup'.")
+        say("It works as-is; every option inside is documented - uncomment a")
+        say("line only to change it from the default.")
         say("=" * 62)
 
     # Record (and keep current, across reinstalls) where the frozen app runs

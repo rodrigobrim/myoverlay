@@ -17,9 +17,10 @@ spec.loader.exec_module(launcher)
 def _make_repo(tmp_path: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
-    shutil.copy2(REPO / "config.example.toml", repo / "config.example.toml")
+    # The repo root's config.toml is the shipped template (all options
+    # commented out); the launcher copies it as the user's config.
     cfg = repo / "config.toml"
-    shutil.copy2(repo / "config.example.toml", cfg)
+    shutil.copy2(REPO / "config.toml", cfg)
     return repo, cfg
 
 
@@ -70,7 +71,7 @@ def _install_dir_value(text: str) -> str:
 
 
 def test_install_dir_inserted_under_existing_tools_section(tmp_path):
-    # config.example.toml already ships a [tools] section (commented body).
+    # The template already ships a [tools] section (commented body).
     repo, cfg = _make_repo(tmp_path)
     launcher._upsert_install_dir(cfg, "C:/Apps/MyOverlay")
     text = cfg.read_text(encoding="utf-8")
@@ -110,11 +111,33 @@ def test_install_dir_noop_when_already_current(tmp_path):
 
 def test_install_dir_backslashes_normalized(tmp_path):
     repo, cfg = _make_repo(tmp_path)
-    launcher._upsert_install_dir(cfg, "C:\\Program Files\\MyOverlay")
+    launcher._upsert_install_dir(cfg, "D:\\Custom Apps\\MyOverlay")
     text = cfg.read_text(encoding="utf-8")
-    assert 'install_dir = "C:/Program Files/MyOverlay"' in text
+    assert 'install_dir = "D:/Custom Apps/MyOverlay"' in text
     # Still valid TOML.
     _install_dir_value(text)
+
+
+def test_install_dir_default_location_never_written(tmp_path):
+    # The default install dir lives in the code (ToolsConfig); config.toml
+    # only carries deviations, so a stock install leaves the line commented.
+    repo, cfg = _make_repo(tmp_path)
+    before = cfg.read_text(encoding="utf-8")
+    launcher._upsert_install_dir(cfg, "C:\\Program Files\\MyOverlay")
+    assert cfg.read_text(encoding="utf-8") == before
+    assert _install_dir_value(before) == "C:\\Program Files\\MyOverlay"
+
+
+def test_template_is_all_defaults(tmp_path):
+    # The shipped template must be valid TOML whose parse equals a fully
+    # default Config: every option present but commented out.
+    import tomllib
+
+    from media_tools.config import Config
+
+    text = (REPO / "config.toml").read_bytes().decode("utf-8-sig")
+    parsed = Config.model_validate(tomllib.loads(text))
+    assert parsed == Config()
 
 
 def test_parse_settings_yaml_flat_map(tmp_path):

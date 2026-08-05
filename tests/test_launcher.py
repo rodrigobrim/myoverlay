@@ -268,21 +268,32 @@ def test_branch_option_unknown_branch_exits(tmp_path, origin):
         mod.ensure_repo(git_exe, repo, str(origin), skip_update=False, branch="nope")
 
 
-def test_ensure_config_seeds_from_example(tmp_path):
+def test_ensure_config_seeds_from_template(tmp_path):
     mod = load_launcher()
     repo = tmp_path / "repo"
     repo.mkdir()
     home = tmp_path / "home"
     home.mkdir()
-    (repo / "config.example.toml").write_text("library_root = 'CHANGE_ME'\n")
+    (repo / "config.toml").write_text("# library_root = 'CHANGE_ME'\n")
 
     mod.ensure_config(repo, home)
-    assert (home / "config.toml").read_text() == "library_root = 'CHANGE_ME'\n"
+    assert (home / "config.toml").read_text() == "# library_root = 'CHANGE_ME'\n"
 
     # An existing config is never overwritten.
     (home / "config.toml").write_text("library_root = 'D:/karting'\n")
     mod.ensure_config(repo, home)
     assert (home / "config.toml").read_text() == "library_root = 'D:/karting'\n"
+
+
+def test_ensure_config_dev_checkout_is_noop(tmp_path):
+    # Unmanaged dev checkout: data_dir IS the repo, so the tracked template
+    # is already the config; nothing is copied or rewritten.
+    mod = load_launcher()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml").write_text("# language = 'en'\n")
+    mod.ensure_config(repo, repo)
+    assert (repo / "config.toml").read_text() == "# language = 'en'\n"
 
 
 def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
@@ -293,6 +304,9 @@ def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
     appdata = tmp_path / "AppData"
     old_repo = appdata / "MyOverlay" / "repo"
     old_repo.mkdir(parents=True)
+    # Pre-rename clones shipped config.example.toml; its presence is what
+    # marks config.toml as a USER file safe to move out.
+    (old_repo / "config.example.toml").write_text("# template\n")
     (old_repo / "config.toml").write_text("library_root = 'D:/karting'\n")
     (old_repo / "token.json").write_text("{}")
     (old_repo / "client_secret.json").write_text('{"installed": {}}')
@@ -312,3 +326,22 @@ def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
     (home / "config.toml").write_text("library_root = 'E:/other'\n")
     mod.migrate_legacy_layout(home, repo)
     assert (home / "config.toml").read_text() == "library_root = 'E:/other'\n"
+
+
+def test_migrate_never_moves_the_tracked_template(tmp_path, monkeypatch):
+    """Current clones ship config.toml as the tracked template (no
+    config.example.toml); migration must leave it in the repo even when the
+    user's home config is missing."""
+    mod = load_launcher()
+    appdata = tmp_path / "AppData"
+    (appdata / "MyOverlay").mkdir(parents=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(appdata))
+
+    home = tmp_path / "home" / "myoverlay"
+    repo = home / "repo"
+    repo.mkdir(parents=True)
+    (repo / "config.toml").write_text("# language = 'en'\n")
+
+    mod.migrate_legacy_layout(home, repo)
+    assert (repo / "config.toml").is_file()
+    assert not (home / "config.toml").exists()

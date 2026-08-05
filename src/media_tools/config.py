@@ -25,6 +25,18 @@ def _local_tzinfo() -> tzinfo:
     return tz
 
 
+def _expand(v):
+    """Expand a leading ~ in configured paths (config.toml documents its path
+    defaults in ~/... form; tomllib hands them over verbatim)."""
+    if isinstance(v, str):
+        return Path(v).expanduser()
+    if isinstance(v, Path):
+        return v.expanduser()
+    if isinstance(v, list):
+        return [_expand(x) for x in v]
+    return v
+
+
 class CameraConfig(BaseModel):
     # Extra directories to scan besides auto-detected removable DCIM volumes
     # (useful for testing and for cameras mounted at fixed paths).
@@ -45,8 +57,10 @@ class MychronConfig(BaseModel):
     # where `mt telemetry get` writes device downloads; every entry is
     # scanned on ingest.
     data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path.home() / "Videos" / "karting" / "mychron"]
+        default_factory=lambda: [Path.home() / "myoverlay" / "render" / "mychron"]
     )
+
+    _expand_paths = field_validator("data_dirs", mode="before")(_expand)
     # Force one transport for device downloads: "usb" | "wifi";
     # null tries USB first (faster, charges the logger), then WiFi.
     transport: str | None = None
@@ -109,6 +123,8 @@ class RenderConfig(BaseModel):
     min_lap_s: float = 0.0
     max_rpm: int = 16000
     font_path: Path | None = None
+
+    _expand_paths = field_validator("font_path", mode="before")(_expand)
     # Clips synced below this confidence are not rendered (use `mt sync
     # --clip ... --video-start ...` to pin them manually).
     min_sync_confidence: float = 0.5
@@ -142,22 +158,35 @@ class YouTubeConfig(BaseModel):
     # Relative paths resolve against the process cwd: the launcher chdirs to
     # ~\myoverlay (installed) or the checkout root (dev) before the CLI runs.
     token_file: Path = Path("google-token")
+
+    _expand_paths = field_validator("client_secret_file", "token_file", mode="before")(
+        _expand
+    )
     # Cloud project used by `mt google-setup`. Default "myoverlay": the setup
     # creates it (or reuses it if it already exists) under your Google account.
     project_id: str = "myoverlay"
 
 
 class ToolsConfig(BaseModel):
-    # Install directory of the frozen app, recorded by the launcher so the
-    # pipeline can locate the bundled ffmpeg / Google Cloud SDK by full path.
-    # None in dev checkouts and zip deploys (bare-name PATH resolution applies).
-    install_dir: Path | None = None
+    # Install directory of the frozen app: the pipeline locates the bundled
+    # ffmpeg / Google Cloud SDK under it. The launcher rewrites it only when
+    # the real location differs (custom install folder). Every candidate is
+    # existence-checked at use, so on dev checkouts and zip deploys the
+    # default quietly degrades to bare-name PATH resolution.
+    install_dir: Path | None = Field(
+        default_factory=lambda: Path("C:/Program Files/MyOverlay")
+    )
+
+    _expand_paths = field_validator("install_dir", mode="before")(_expand)
 
 
 class Config(BaseModel):
     # Root folder where ingested/processed media lives (one subfolder per track
-    # day). Defaults to ~/Videos/karting when unset in config.toml.
-    library_root: Path = Field(default_factory=lambda: Path.home() / "Videos" / "karting")
+    # day). Defaults to ~/myoverlay/render when unset in config.toml - inside
+    # the app data dir, next to config.toml and the repo clone.
+    library_root: Path = Field(default_factory=lambda: Path.home() / "myoverlay" / "render")
+
+    _expand_paths = field_validator("library_root", mode="before")(_expand)
     # Output language for the overlay labels and YouTube title/description
     # defaults. Everything else (config, CLI, logs) stays in English.
     language: str = "en"
@@ -195,7 +224,8 @@ def load_config(path: Path | None = None) -> Config:
     file = find_config_file(path)
     if file is None:
         raise FileNotFoundError(
-            "No config.toml found. Copy config.example.toml to config.toml and edit paths."
+            "No config.toml found. The app ships one with every option "
+            "commented out (repo root); run the app once to create yours."
         )
     # utf-8-sig: Windows editors (and PowerShell) often write a UTF-8 BOM,
     # which tomllib rejects.

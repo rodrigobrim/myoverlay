@@ -14,9 +14,9 @@ __pycache__/
 token*.json
 .env
 
-# Machine-specific configuration (paths, track settings, YouTube privacy).
-# config.example.toml is the template that IS committed.
-config.toml
+# config.toml at the repo root IS committed: it is the shipped template
+# (every option commented out). Machine-specific configs live in
+# ~/myoverlay/config.toml, outside the repo.
 
 # Runtime output the pipeline writes while running
 *.log
