@@ -68,7 +68,7 @@
 # ffmpeg scaler for resizing footage (mainly the 1080p->2K upscale): lanczos
 # is sharper than the default bilinear at negligible cost.
 # scale_flags = "lanczos"
-# Output resolution preset: hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p).
+# Output resolution preset: sd (420p) | hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p).
 # resolution = "2k"
 # Laps faster than this many seconds are physically impossible for the
 # circuit (cut track / timing glitch): flagged invalid, never best/delta ref.

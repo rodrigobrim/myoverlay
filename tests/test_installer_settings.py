@@ -140,6 +140,36 @@ def test_template_is_all_defaults(tmp_path):
     assert parsed == Config()
 
 
+def test_wizard_resolution_combo_single_sourced():
+    # resolutions.json is the single source of truth for the resolution
+    # presets: config.RESOLUTIONS must be exactly its parse, and the wizard's
+    # ComboBox must take its items from the build-time generated include
+    # (build_msi.ps1), never hardcode them in the .wxs.
+    from media_tools.config import RESOLUTIONS
+
+    src = json.loads(
+        (REPO / "src" / "media_tools" / "resolutions.json").read_text(encoding="utf-8")
+    )
+    assert src == RESOLUTIONS
+
+    wxs = (REPO / "packaging" / "msi" / "WizardUI.wxs").read_text(encoding="utf-8")
+    assert "<?include resolutions.wxi ?>" in wxs
+    for name in RESOLUTIONS:
+        assert f'ListItem Text="{name} (' not in wxs
+
+    ps1 = (REPO / "packaging" / "msi" / "build_msi.ps1").read_text(encoding="utf-8")
+    assert "resolutions.json" in ps1 and "resolutions.wxi" in ps1
+
+    # The config.toml template's comment enumerates the presets for humans;
+    # keep it in step with the source of truth.
+    template = (REPO / "config.toml").read_bytes().decode("utf-8-sig")
+    line = next(
+        ln for ln in template.splitlines() if "Output resolution preset" in ln
+    )
+    for name, height in RESOLUTIONS.items():
+        assert f"{name} ({height}p)" in line
+
+
 def test_parse_settings_yaml_flat_map(tmp_path):
     text = (
         "# MyOverlay install settings\n"

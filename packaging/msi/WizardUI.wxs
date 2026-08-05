@@ -253,12 +253,9 @@
         <Control Id="Explain" Type="Text" X="25" Y="60" Width="320" Height="40" NoPrefix="yes" Text="[P_RES_EXPLAIN]" />
         <Control Id="ResLabel" Type="Text" X="25" Y="106" Width="100" Height="12" NoPrefix="yes" Text="[P_RES_LABEL]" />
         <Control Id="ResCombo" Type="ComboBox" X="25" Y="120" Width="180" Height="16" Property="RESOLUTION" ComboList="yes" Sorted="no">
-          <ComboBox Property="RESOLUTION">
-            <ListItem Text="hd (720p)" Value="hd" />
-            <ListItem Text="fhd (1080p)" Value="fhd" />
-            <ListItem Text="2k (1440p)" Value="2k" />
-            <ListItem Text="4k (2160p)" Value="4k" />
-          </ComboBox>
+          <!-- ListItems generated at build time from src\media_tools\resolutions.json
+               (single source of truth) into resolutions.wxi - see build_msi.ps1. -->
+          <?include resolutions.wxi ?>
         </Control>
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
