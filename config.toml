@@ -41,17 +41,9 @@
 # the MyChron whenever one is reachable.
 # auto_download = false
 # download_interval_s = 600.0
-# Telemetry file types to ingest. Only the .xrk log is a session; its
-# compressed .xrz twin would duplicate every session.
-# extensions = [".xrk"]
 # Timezone of the MyChron 'Log Date'/'Log Time' metadata; omit for system
 # local time.
 # example: timezone = "America/Sao_Paulo"
-# Correct a wrongly-set device clock: a moment the device recorded as
-# clock_reads actually happened at clock_actual (both in the logger's
-# timezone). The difference is applied to every parsed session time.
-# example: clock_reads = 2047-10-29T00:00:00
-# example: clock_actual = 2026-07-13T00:00:00
 
 [watch]
 # The watcher (`mt watch`) checks for a newly plugged camera / new files this

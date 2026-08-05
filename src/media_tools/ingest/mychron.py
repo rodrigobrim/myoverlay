@@ -156,7 +156,9 @@ def _gps_start_utc(path: Path, log) -> datetime | None:
 
 
 def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[Path]:
-    exts = {e.lower() for e in cfg.mychron.extensions} - SKIP_SUFFIXES
+    # A session IS its .xrk; the compressed .xrz twin the device also offers
+    # would duplicate every session, so it is ignored unconditionally.
+    exts = {".xrk"} - SKIP_SUFFIXES
     files: list[Path] = []
     for src in list(cfg.mychron.data_dirs) + list(extra_sources or []):
         if not src.is_dir():
@@ -226,14 +228,10 @@ def ingest_mychron(
 
             info = parse_xrk(path, logger_tz)
             if info.start_utc is not None:
-                # Correct a wrongly-set device clock (mychron.clock_reads/
-                # clock_actual) - but only for timestamps that are actually
-                # implausible (far in the future). Once the user fixes the
-                # device clock, newer sessions carry sane dates and must NOT
-                # be shifted. The mtime fallback below is real time already.
+                # A wrongly-set device clock is NOT corrected here: sessions
+                # land on whatever day the logger claims, and mismatches are
+                # resolved by manually correlating files and videos by name.
                 start_utc = info.start_utc
-                if start_utc > datetime.now(timezone.utc) + timedelta(days=90):
-                    start_utc = start_utc + cfg.mychron.clock_offset()
             else:
                 start_utc = datetime.fromtimestamp(
                     path.stat().st_mtime, tz=timezone.utc
