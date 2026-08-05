@@ -11,8 +11,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import Config, load_config
+from .config import RESOLUTIONS, Config, load_config
 from .library import Library
+
+_RES_HELP = f"Output resolution: {'|'.join(RESOLUTIONS)} (default from config)"
 
 app = typer.Typer(help="Zero-touch karting video + telemetry pipeline.", no_args_is_help=True)
 video_app = typer.Typer(help="Camera video utilities (list / selective download).", no_args_is_help=True)
@@ -997,7 +999,7 @@ def render(
     force: Annotated[bool, typer.Option(help="Re-render already rendered videos")] = False,
     resolution: Annotated[
         Optional[str],
-        typer.Option("--resolution", "--res", help="Output resolution: hd|fhd|2k|4k (default from config)"),
+        typer.Option("--resolution", "--res", help=_RES_HELP),
     ] = None,
     scan_race_end: Annotated[
         Optional[bool],
@@ -1274,7 +1276,7 @@ def run(
     ] = None,
     resolution: Annotated[
         Optional[str],
-        typer.Option("--resolution", "--res", help="Output resolution: hd|fhd|2k|4k (default from config)"),
+        typer.Option("--resolution", "--res", help=_RES_HELP),
     ] = None,
 ):
     """Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish]."""

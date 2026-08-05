@@ -8,6 +8,7 @@ logger clocks are interpreted using the configured timezones.
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from datetime import tzinfo
@@ -84,8 +85,12 @@ class WatchConfig(BaseModel):
 
 # Named output-resolution presets -> frame height. The source is scaled
 # (up or down) to the chosen height; picking a preset is the explicit intent
-# to output at that resolution.
-RESOLUTIONS: dict[str, int] = {"hd": 720, "fhd": 1080, "2k": 1440, "4k": 2160}
+# to output at that resolution. resolutions.json is the single source of
+# truth, also consumed by the CLI help (and thus docs/CLI.md), the GUI
+# quality combo, and the MSI wizard build (build_msi.ps1).
+RESOLUTIONS: dict[str, int] = json.loads(
+    Path(__file__).with_name("resolutions.json").read_text(encoding="utf-8")
+)
 
 
 class RenderConfig(BaseModel):
@@ -103,7 +108,7 @@ class RenderConfig(BaseModel):
     # ffmpeg scaler for resizing the footage (mainly the 1080p->2K upscale):
     # lanczos is sharper than the default bilinear at a negligible cost.
     scale_flags: str = "lanczos"
-    # Output resolution preset: hd (720p) | fhd (1080p) | 2k (1440p) | 4k (2160p).
+    # Output resolution preset; one of RESOLUTIONS (resolutions.json).
     resolution: str = "2k"
     # Laps faster than this are physically impossible for the circuit
     # (cut track / timing glitch): flagged invalid, never best/delta ref.
