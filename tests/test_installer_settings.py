@@ -157,6 +157,15 @@ def test_wizard_resolution_combo_single_sourced():
     for name in RESOLUTIONS:
         assert f'ListItem Text="{name} (' not in wxs
 
+    # resolutions.json lists the presets smallest-first and the combos must
+    # show them that way. MSI's Sorted bit means "keep the authored order";
+    # without it Windows Installer re-sorts the items alphabetically.
+    assert sorted(RESOLUTIONS.values()) == list(RESOLUTIONS.values())
+    assert 'Sorted="no"' not in wxs
+    for combo in ('Id="ResCombo"', 'Id="LangCombo"'):
+        line = next(ln for ln in wxs.splitlines() if combo in ln)
+        assert 'Sorted="yes"' in line
+
     ps1 = (REPO / "packaging" / "msi" / "build_msi.ps1").read_text(encoding="utf-8")
     assert "resolutions.json" in ps1 and "resolutions.wxi" in ps1
 

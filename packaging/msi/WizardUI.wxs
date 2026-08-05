@@ -131,7 +131,11 @@
         <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_LANG_DESC]" />
         <Control Id="Explain" Type="Text" X="25" Y="60" Width="320" Height="40" NoPrefix="yes" Text="[P_LANG_EXPLAIN]" />
         <Control Id="LangLabel" Type="Text" X="25" Y="106" Width="100" Height="12" NoPrefix="yes" Text="[P_LANG_LABEL]" />
-        <Control Id="LangCombo" Type="ComboBox" X="25" Y="120" Width="180" Height="16" Property="OUTPUT_LANGUAGE" ComboList="yes" Sorted="no">
+        <!-- MSI's Sorted bit is counter-intuitive: SET means "display in the
+             ComboBox table's Order column order" (i.e. as authored), UNSET
+             means Windows Installer re-sorts the items alphabetically. So
+             keeping authored order requires Sorted="yes" on both combos. -->
+        <Control Id="LangCombo" Type="ComboBox" X="25" Y="120" Width="180" Height="16" Property="OUTPUT_LANGUAGE" ComboList="yes" Sorted="yes">
           <ComboBox Property="OUTPUT_LANGUAGE">
             <ListItem Text="English" Value="en" />
             <ListItem Text="Portuguese (Português)" Value="pt" />
@@ -252,7 +256,7 @@
         <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_RES_DESC]" />
         <Control Id="Explain" Type="Text" X="25" Y="60" Width="320" Height="40" NoPrefix="yes" Text="[P_RES_EXPLAIN]" />
         <Control Id="ResLabel" Type="Text" X="25" Y="106" Width="100" Height="12" NoPrefix="yes" Text="[P_RES_LABEL]" />
-        <Control Id="ResCombo" Type="ComboBox" X="25" Y="120" Width="180" Height="16" Property="RESOLUTION" ComboList="yes" Sorted="no">
+        <Control Id="ResCombo" Type="ComboBox" X="25" Y="120" Width="180" Height="16" Property="RESOLUTION" ComboList="yes" Sorted="yes">
           <!-- ListItems generated at build time from src\media_tools\resolutions.json
                (single source of truth) into resolutions.wxi - see build_msi.ps1. -->
           <?include resolutions.wxi ?>
