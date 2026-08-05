@@ -1,6 +1,8 @@
 """google-setup helpers that touch the filesystem (no browser involved)."""
 
 import json
+import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -9,8 +11,11 @@ from media_tools.config import Config
 from media_tools.gcp_console import (
     _already_configured,
     _claim_secret_path,
+    _engine_exe,
+    _has_google_session,
     _rotate_secret_aside,
     _secret_project,
+    _session_cookie_state,
     setup_google_api,
 )
 
@@ -120,9 +125,12 @@ def _record_browser(monkeypatch, signed_in: bool = True, state: str | None = "AC
         lambda cfg, report: launched.append("ensure_project") or True,
     )
     monkeypatch.setattr(
+        gcp_console, "_engine_exe", lambda pw, report: Path("chrome.exe")
+    )
+    monkeypatch.setattr(
         gcp_console,
         "_automated_pass",
-        lambda pw, cfg, project, profile_dir, report, ts: launched.append(project),
+        lambda pw, cfg, project, profile_dir, report, ts, exe: launched.append(project),
     )
     return launched
 
@@ -199,3 +207,103 @@ def test_setup_runs_the_browser_when_the_secret_is_missing(tmp_path, monkeypatch
     setup_google_api(cfg)
 
     assert launched == ["ensure_project", "myoverlay-live01"]
+
+
+def test_setup_stops_when_no_browser_engine_resolves(tmp_path, monkeypatch):
+    """No engine means no attempt at all - the old per-attempt engine search
+    ran the whole two-attempt dance before admitting it had no browser."""
+    pytest.importorskip("playwright.sync_api")
+    launched = _record_browser(monkeypatch)
+    monkeypatch.setattr(gcp_console, "_engine_exe", lambda pw, report: None)
+    cfg = _cfg_with_secret(tmp_path, None)
+
+    report = setup_google_api(cfg)
+
+    assert launched == ["ensure_project"]  # the browser phase never started
+    assert not any("myoverlay-live01" == line for line in launched)
+
+
+class _FakeChromium:
+    def __init__(self, path):
+        self.executable_path = str(path)
+
+
+def test_engine_exe_prefers_the_installed_browser(tmp_path, monkeypatch):
+    """Both phases must land on ONE binary: a profile written by the installed
+    Chrome and reopened by bundled chromium loses the session, which surfaced
+    only as the Console bouncing back to sign-in after a successful login."""
+    installed = tmp_path / "chrome.exe"
+    installed.touch()
+    bundled = tmp_path / "bundled" / "chrome.exe"
+    bundled.parent.mkdir()
+    bundled.touch()
+    monkeypatch.setattr(gcp_console, "_browser_exe", lambda: installed)
+
+    pw = type("PW", (), {"chromium": _FakeChromium(bundled)})()
+    assert _engine_exe(pw, []) == installed
+
+
+def test_engine_exe_falls_back_to_bundled_chromium(tmp_path, monkeypatch):
+    bundled = tmp_path / "chrome.exe"
+    bundled.touch()
+    monkeypatch.setattr(gcp_console, "_browser_exe", lambda: None)
+
+    pw = type("PW", (), {"chromium": _FakeChromium(bundled)})()
+    assert _engine_exe(pw, []) == bundled
+
+
+def test_engine_exe_reports_when_nothing_is_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(gcp_console, "_browser_exe", lambda: None)
+
+    report: list[str] = []
+    pw = type("PW", (), {"chromium": _FakeChromium(tmp_path / "missing.exe")})()
+
+    assert _engine_exe(pw, report) is None
+    assert any(line.startswith("!") for line in report)
+
+
+def _cookie_db(profile_dir: Path, names: list[str]) -> None:
+    db = profile_dir / "Default" / "Network" / "Cookies"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE cookies (host_key TEXT, name TEXT)")
+    con.executemany(
+        "INSERT INTO cookies VALUES (?, ?)", [(".google.com", n) for n in names]
+    )
+    con.commit()
+    con.close()
+
+
+def _prefs(profile_dir: Path) -> None:
+    p = profile_dir / "Default" / "Preferences"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"account_info": [{"email": "me@example.com"}]}), "utf-8")
+
+
+def test_session_cookie_state_is_none_without_a_readable_db(tmp_path):
+    assert _session_cookie_state(tmp_path) is None
+
+
+def test_readable_cookie_db_overrules_preferences(tmp_path):
+    """Preferences records a browser-level sign-in that need not have produced
+    a web session. Trusting it first reported success on a profile the Console
+    then bounced - so a readable cookie DB wins, in both directions."""
+    _prefs(tmp_path)
+    _cookie_db(tmp_path, ["NID", "CONSENT"])  # pre-login cookies only
+
+    assert _session_cookie_state(tmp_path) is False
+    assert _has_google_session(tmp_path) is False
+
+
+def test_session_cookie_is_enough_without_preferences(tmp_path):
+    _cookie_db(tmp_path, ["SID", "SAPISID"])
+
+    assert _has_google_session(tmp_path) is True
+
+
+def test_preferences_are_the_fallback_when_the_db_is_unreadable(tmp_path):
+    """Edge keeps the cookie DB exclusively locked while it runs; Preferences
+    is the only signal left there."""
+    _prefs(tmp_path)
+
+    assert _has_google_session(tmp_path) is True

@@ -408,11 +408,12 @@ def _setup_google_api(
     report.append("opening the automated browser for the Google Cloud Console...")
     try:
         with sync_playwright() as pw:
+            exe = _engine_exe(pw, report)
             # Two attempts: when the first bounces to Google sign-in, the
             # login handoff (plain browser, same profile) runs between them.
-            for attempt in (1, 2):
+            for attempt in (1, 2) if exe is not None else ():
                 try:
-                    _automated_pass(pw, cfg, project, profile_dir, report, ts)
+                    _automated_pass(pw, cfg, project, profile_dir, report, ts, exe)
                     break
                 except _NeedsLogin:
                     # Two distinct dead ends, two distinct messages: after the
@@ -420,14 +421,18 @@ def _setup_google_api(
                     # the window that opens" read as an instruction about a
                     # window that was never coming.
                     if attempt == 2:
+                        # The handoff verified a session in the profile, yet the
+                        # Console still refuses it - so the advice is not "sign
+                        # in again" (that already worked) but "this account or
+                        # this profile is the problem".
                         report.append(
-                            "! the Console still bounces to sign-in after the login "
-                            "handoff - re-run `mt google-setup` and finish the sign-in "
-                            "in the window it opens (it closes itself once the Cloud "
-                            "Console loads)"
+                            "! the Console still bounces to sign-in even though the "
+                            "profile now holds a Google session - the account may not "
+                            f"have Cloud Console access; delete {profile_dir} and "
+                            "re-run `mt google-setup` to sign in as another account"
                         )
                         break
-                    if not _manual_login(profile_dir, report):
+                    if not _manual_login(profile_dir, exe, report):
                         report.append(
                             "! sign-in did not complete - re-run `mt google-setup`"
                         )
@@ -440,16 +445,19 @@ def _setup_google_api(
 
 
 def _automated_pass(
-    pw, cfg: Config, project: str, profile_dir: Path, report: list[str], ts: _Shoot
+    pw,
+    cfg: Config,
+    project: str,
+    profile_dir: Path,
+    report: list[str],
+    ts: _Shoot,
+    exe: Path,
 ) -> None:
     """One automated browser session over the whole flow. Raises _NeedsLogin
     when the profile has no (valid) Google session."""
     # Headed + persistent profile: the Google session established by the
     # manual-login handoff lives in the profile and is reused silently here.
-    # Engine order: bundled chromium, then installed Chrome, then Edge.
-    # (The bundled build can fail to start on some Windows editions -
-    # observed as a side-by-side configuration error on Win10 Home -
-    # and the OS-installed browsers are the reliable fallback there.)
+    # `exe` is the same binary the handoff used - see _engine_exe.
     # Flags that suppress the browser-chrome overlays that were blocking the
     # run: the Translate bubble, the "sign in to Chrome / Continue as ..."
     # promo, the default-browser and first-run prompts, and sync nags.
@@ -460,26 +468,17 @@ def _automated_pass(
         "--disable-features=Translate,TranslateUI,SigninInterceptBubble,"
         "AccountConsistency,ProfilePickerOnStartup",
     ]
-    browser = None
-    engine_errors: list[str] = []
-    for channel in (None, "chrome", "msedge"):
-        try:
-            browser = pw.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                channel=channel,
-                headless=False,
-                accept_downloads=True,
-                viewport={"width": 1400, "height": 900},
-                args=launch_args,
-            )
-            if channel:
-                report.append(f"using installed browser: {channel}")
-            break
-        except Exception as exc:  # noqa: BLE001 - try the next engine
-            engine_errors.append(f"{channel or 'bundled chromium'}: {exc}".splitlines()[0])
-    if browser is None:
-        report.append("! no usable browser engine:")
-        report.extend(f"  {e}" for e in engine_errors)
+    try:
+        browser = pw.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            executable_path=str(exe),
+            headless=False,
+            accept_downloads=True,
+            viewport={"width": 1400, "height": 900},
+            args=launch_args,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        report.append(f"! could not start {exe.name}: {str(exc).splitlines()[0]}")
         return
     try:
         page = browser.pages[0] if browser.pages else browser.new_page()
@@ -505,6 +504,35 @@ def _browser_exe() -> Path | None:
     for c in candidates:
         if c.is_file():
             return c
+    return None
+
+
+def _engine_exe(pw, report: list[str]) -> Path | None:
+    """The ONE browser binary both phases use.
+
+    The sign-in handoff and the automated pass share a user_data_dir, and a
+    profile written by one Chromium build is not reliably read by another: the
+    human signs in for real, the other build then opens the same profile, finds
+    no session, and the run bounces straight back to sign-in with nothing to
+    show for it. Resolving the binary once removes that mismatch. Installed
+    Chrome/Edge comes first because the handoff needs a plain installed browser
+    anyway; bundled chromium is the fallback for a machine with neither.
+    """
+    exe = _browser_exe()
+    if exe is not None:
+        report.append(f"browser engine: {exe}")
+        return exe
+    try:
+        bundled = Path(pw.chromium.executable_path)
+    except Exception:  # noqa: BLE001 - no bundled build available
+        bundled = None
+    if bundled is not None and bundled.is_file():
+        report.append(f"browser engine: bundled chromium ({bundled})")
+        return bundled
+    report.append(
+        "! no usable browser engine - install Google Chrome, or run: "
+        "uv run playwright install chromium"
+    )
     return None
 
 
@@ -541,22 +569,18 @@ def _signed_in_prefs(profile_dir: Path) -> bool:
     return False
 
 
-def _has_google_session(profile_dir: Path) -> bool:
-    """True once the profile holds a signed-in Google session.
+def _session_cookie_state(profile_dir: Path) -> bool | None:
+    """Whether the profile's cookie DB holds a Google session: True/False when
+    a DB could be read, None when none could (absent, locked, mid-write).
 
-    Preferences (never locked) is checked first; the cookie DB is the fallback
-    for engines that still allow shared reads (e.g. Edge). The cookie DB is
-    WAL-mode and buffers writes: an `immutable=1` read of the main file alone
-    misses a just-set session cookie that still lives in the -wal sidecar, so
-    copy the DB together with its -wal/-shm to a temp dir and read the copy,
-    which replays the WAL and sees the fresh cookie.
+    The cookie DB is WAL-mode and buffers writes: an `immutable=1` read of the
+    main file alone misses a just-set session cookie that still lives in the
+    -wal sidecar, so copy the DB together with its -wal/-shm to a temp dir and
+    read the copy, which replays the WAL and sees the fresh cookie.
     """
     import shutil
     import sqlite3
     import tempfile
-
-    if _signed_in_prefs(profile_dir):
-        return True
 
     for rel in ("Default/Network/Cookies", "Network/Cookies", "Default/Cookies"):
         db = profile_dir / rel
@@ -580,11 +604,27 @@ def _has_google_session(profile_dir: Path) -> bool:
                     ).fetchone()
                 finally:
                     con.close()
-            if row:
-                return True
+            return row is not None
         except Exception:  # noqa: BLE001 - locked/absent/mid-write is fine
             continue
-    return False
+    return None
+
+
+def _has_google_session(profile_dir: Path) -> bool:
+    """True once the profile holds a signed-in Google session.
+
+    The cookie DB is authoritative and is asked FIRST: `account_info` in
+    Preferences is written by a browser-level sign-in that need not have
+    produced a usable web session, so trusting it first reports success on a
+    profile the Console will bounce. Preferences stays as the fallback for the
+    case the DB cannot be read at all - engines like Edge hold it under an
+    exclusive lock while running, though callers should be asking this once the
+    browser has exited, where no lock is held.
+    """
+    state = _session_cookie_state(profile_dir)
+    if state is not None:
+        return state
+    return _signed_in_prefs(profile_dir)
 
 
 def _profile_browser_pids(profile_dir: Path) -> set[int]:
@@ -677,24 +717,30 @@ def _close_profile_browsers(profile_dir: Path) -> None:
     time.sleep(2)  # let the OS release the profile lock file
 
 
-def _manual_login(profile_dir: Path, report: list[str]) -> bool:
+def _manual_login(profile_dir: Path, exe: Path, report: list[str]) -> bool:
     """Google rejects sign-in inside an automation-controlled browser, so open
     a PLAIN browser on the same profile and let the human sign in there. We
-    watch for the sign-in (profile files, or the Cloud Console window title
-    for engines like Edge whose profile carries no signal) and close the window
-    OURSELVES once it appears - the user just signs in, nothing to close. The
-    retry pass then reuses the session; no credential is ever typed by us."""
+    watch for the Cloud Console window title and close the window OURSELVES
+    once it appears - the user just signs in, nothing to close. The retry pass
+    then reuses the session; no credential is ever typed by us.
+
+    Returns whether the profile actually ends up holding a Google session."""
     import subprocess
 
-    exe = _browser_exe()
-    if exe is None:
-        report.append("! no installed Chrome/Edge found for the sign-in step")
-        return False
     report.append(
         "Google blocks sign-in inside automated browsers - opening a normal "
         "browser window instead. Sign in there; it closes on its own once "
         "detected, or just close the window yourself when done."
     )
+    if _browser_exe() is None:
+        # Bundled chromium is the engine only when no browser is installed.
+        # Google often refuses sign-in there ("this browser or app may not be
+        # secure"), which is unrecoverable from inside the flow - say so now
+        # rather than letting it read as a mysterious failed login.
+        report.append(
+            "  (signing in via bundled chromium - if Google refuses it, install "
+            "Google Chrome and re-run `mt google-setup`)"
+        )
     try:
         proc = subprocess.Popen(
             [
@@ -710,21 +756,32 @@ def _manual_login(profile_dir: Path, report: list[str]) -> bool:
         report.append(f"! manual-login browser failed: {exc!r}")
         return False
 
-    # Poll: close ourselves the moment the session cookie lands; also honor a
-    # user who closes the window by hand; give up after 10 minutes.
+    # Poll only signals that mean the sign-in is OVER: the Cloud Console window
+    # title (the handoff carries a continue URL into the Console, so that title
+    # cannot appear before sign-in succeeds), or a user who closed the window by
+    # hand. The profile-file probes used to be OR'd in here and fired mid-login,
+    # killing the window before the password step; they are the post-exit
+    # verification below instead, where they are cheap and unambiguous.
     deadline = time.monotonic() + 600
     while time.monotonic() < deadline:
         if proc.poll() is not None:  # user closed it themselves
-            time.sleep(2)
-            return True
-        if _has_google_session(profile_dir) or _console_window_open(profile_dir):
+            break
+        if _console_window_open(profile_dir):
             report.append("sign-in detected - closing the login window")
-            _close_profile_browsers(profile_dir)
-            return True
+            break
         time.sleep(3)
+    else:
+        report.append("! sign-in not detected within 10 min")
 
-    report.append("! sign-in not detected within 10 min")
+    time.sleep(3)  # let the session cookie reach disk before the browser dies
     _close_profile_browsers(profile_dir)
+    # Verified here, with the browser gone and the cookie DB unlocked. Without
+    # this the only symptom of a sign-in that did not take was the retry pass
+    # bouncing to sign-in again - a dead end reported minutes later, at a point
+    # where nothing about the actual cause was left to say.
+    if _has_google_session(profile_dir):
+        return True
+    report.append("! the profile holds no Google session after the sign-in window closed")
     return False
 
 
