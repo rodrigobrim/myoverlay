@@ -27,12 +27,14 @@
 # still be assigned to it (camera clocks drift), in seconds.
 # clock_tolerance_s = 900.0
 
-[mychron]
-# Where downloaded MyChron sessions live. `mt telemetry get` talks to the
+[telemetry]
+# Where downloaded telemetry sessions live. `mt telemetry get` talks to the
 # device directly (USB or WiFi) and writes .xrk files into the FIRST entry;
-# every entry is scanned on ingest. The default is the mychron folder inside
-# the media library.
-# data_dirs = ["C:/Users/you/myoverlay/render/mychron"]
+# every entry is scanned on ingest. The default is the telemetry folder inside
+# the media library. A pre-rename `mychron` folder there is still scanned too,
+# so upgrading moves nothing. (This section was called [mychron]; that name
+# still works.)
+# data_dirs = ["C:/Users/you/myoverlay/render/telemetry"]
 # Force one transport for device downloads: "usb" | "wifi". Omit to try USB
 # first (faster, charges the logger), then WiFi (which joins the MyChron's
 # own access point, replacing the house network while it runs).

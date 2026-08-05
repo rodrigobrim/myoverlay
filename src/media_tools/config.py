@@ -52,12 +52,12 @@ class CameraConfig(BaseModel):
         return ZoneInfo(self.timezone) if self.timezone else _local_tzinfo()
 
 
-class MychronConfig(BaseModel):
-    # Where downloaded MyChron sessions live on disk. The first entry is
+class TelemetryConfig(BaseModel):
+    # Where downloaded telemetry sessions live on disk. The first entry is
     # where `mt telemetry get` writes device downloads; every entry is
     # scanned on ingest.
     data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path.home() / "myoverlay" / "render" / "mychron"]
+        default_factory=lambda: [Path.home() / "myoverlay" / "render" / "telemetry"]
     )
 
     _expand_paths = field_validator("data_dirs", mode="before")(_expand)
@@ -178,11 +178,26 @@ class Config(BaseModel):
     # defaults. Everything else (config, CLI, logs) stays in English.
     language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
-    mychron: MychronConfig = Field(default_factory=MychronConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    def telemetry_dirs(self) -> list[Path]:
+        """Every directory holding downloaded (not yet ingested) telemetry.
+
+        `telemetry.data_dirs` plus the pre-rename `mychron` folder wherever it
+        still exists: installs made before the rename keep their sessions
+        there, and that folder is also what tells the device client which
+        sessions are already downloaded. Nothing is moved - old files stay
+        readable, new downloads land in data_dirs[0].
+        """
+        dirs = list(self.telemetry.data_dirs)
+        legacy = self.library_root / "mychron"
+        if legacy.is_dir() and legacy not in dirs:
+            dirs.append(legacy)
+        return dirs
 
     @field_validator("language")
     @classmethod
@@ -217,4 +232,9 @@ def load_config(path: Path | None = None) -> Config:
     # utf-8-sig: Windows editors (and PowerShell) often write a UTF-8 BOM,
     # which tomllib rejects.
     data = tomllib.loads(file.read_bytes().decode("utf-8-sig"))
+    # [mychron] was renamed to [telemetry]; a config written before the rename
+    # keeps working unchanged. An explicit [telemetry] wins outright.
+    legacy = data.pop("mychron", None)
+    if legacy is not None and "telemetry" not in data:
+        data["telemetry"] = legacy
     return Config.model_validate(data)

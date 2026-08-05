@@ -43,7 +43,7 @@ class FakeTransport:
 @pytest.fixture
 def dl_cfg(cfg, tmp_path):
     d = tmp_path / "downloads"
-    cfg.mychron.data_dirs = [d]
+    cfg.telemetry.data_dirs = [d]
     return cfg, d
 
 

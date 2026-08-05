@@ -6,7 +6,7 @@ from pathlib import Path
 
 from media_tools.config import load_config
 from media_tools.library import Library
-from media_tools.ingest.mychron import ingest_mychron
+from media_tools.ingest.telemetry import ingest_telemetry
 
 cfg = load_config()
 lib = Library(cfg.library_root)
@@ -35,7 +35,7 @@ m = lib.load_day(date(2026, 7, 13))
 m.telemetry = []
 m.sessions = []
 lib.save_day(m)
-report = ingest_mychron(cfg, extra_sources=[target_dir / "raw" / "telemetry"])
+report = ingest_telemetry(cfg, extra_sources=[target_dir / "raw" / "telemetry"])
 print("re-parse:", len(report.copied), "session(s),", len(report.errors), "error(s)")
 for line in report.errors:
     print("  !", line)

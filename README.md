@@ -26,7 +26,7 @@ skips anything already done, so all commands are safe to re-run.
 3. The repo ships `config.toml` with every option commented out at its
    default; it works untouched. Uncomment a line only to change it, e.g.:
    - `library_root` — where processed track days live (default `~/myoverlay/render`)
-   - `mychron.data_dirs` — where downloaded MyChron sessions are kept
+   - `telemetry.data_dirs` — where downloaded MyChron sessions are kept
    - timezones if your camera/logger clocks aren't on system local time
 4. For YouTube uploads: create a project in Google Cloud Console, enable the
    *YouTube Data API v3*, create a **Desktop** OAuth client, save the JSON as
@@ -64,7 +64,7 @@ MyOverlay watch --install    # auto-start the watcher at logon (launches via the
 
 With the watcher running the only human actions per track day are physical:
 plug in the camera (or its SD card) and have the MyChron plugged in over USB
-or in WiFi range. With `[mychron] auto_download = true` the watcher also
+or in WiFi range. With `[telemetry] auto_download = true` the watcher also
 pulls new sessions off the MyChron periodically, speaking AiM's own protocol
 directly — no AiM software involved.
 
@@ -94,7 +94,7 @@ track day).
   MyChron6 is implemented; other AiM models use different download paths.
 - The `.xrk` parser (`libxrk`) reads GPS, RPM, temperatures and lap markers;
   the session's absolute start time comes from the file's `Log Date`/`Log
-  Time` metadata interpreted in `mychron.timezone`.
+  Time` metadata interpreted in `telemetry.timezone`.
 
 ## Development
 

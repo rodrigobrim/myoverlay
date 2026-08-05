@@ -30,13 +30,13 @@ def run_pipeline(
     cfg: Config, publish: bool = False, download: bool | None = None
 ) -> PipelineReport:
     """Full chain. download=None means: pull MyChron data off the device
-    whenever [mychron] auto_download is enabled in config - the pipeline
+    whenever [telemetry] auto_download is enabled in config - the pipeline
     takes every action itself by default."""
     if download is None:
-        download = cfg.mychron.auto_download
+        download = cfg.telemetry.auto_download
     from .correlate import correlate_day
     from .ingest.camera import ingest_camera
-    from .ingest.mychron import ingest_mychron
+    from .ingest.telemetry import ingest_telemetry
     from .render import render_day
     from .sync import sync_day
 
@@ -45,12 +45,12 @@ def run_pipeline(
     if download:
         from .ingest.aim import download_sessions
 
-        report.add("mychron:download", download_sessions(cfg).lines())
+        report.add("telemetry:download", download_sessions(cfg).lines())
 
     cam = ingest_camera(cfg)
     report.add("ingest:camera", cam.copied + [f"! {e}" for e in cam.errors])
-    myc = ingest_mychron(cfg)
-    report.add("ingest:mychron", myc.copied + [f"! {e}" for e in myc.errors])
+    tel = ingest_telemetry(cfg)
+    report.add("ingest:telemetry", tel.copied + [f"! {e}" for e in tel.errors])
 
     lib = Library(cfg.library_root)
     for d in lib.day_dates():
@@ -85,7 +85,7 @@ class SourcesSnapshot:
 
 def snapshot_sources(cfg: Config) -> SourcesSnapshot:
     from .ingest.camera import find_dcim_sources
-    from .ingest.mychron import scan_sources
+    from .ingest.telemetry import scan_sources
 
     return SourcesSnapshot(
         dcim_volumes=frozenset(str(p) for p in find_dcim_sources()),
@@ -117,8 +117,8 @@ def watch(cfg: Config, publish: bool, on_report, once: bool = False) -> None:
         time.sleep(cfg.watch.poll_s)
 
         download = (
-            cfg.mychron.auto_download
-            and time.monotonic() - last_download > cfg.mychron.download_interval_s
+            cfg.telemetry.auto_download
+            and time.monotonic() - last_download > cfg.telemetry.download_interval_s
         )
         current = snapshot_sources(cfg)
         if has_new_material(last, current) or download:

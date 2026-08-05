@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from media_tools.config import CameraConfig, Config, MychronConfig
+from media_tools.config import CameraConfig, Config, TelemetryConfig
 
 
 @pytest.fixture(autouse=True)
@@ -16,5 +16,5 @@ def cfg(tmp_path: Path) -> Config:
     return Config(
         library_root=tmp_path / "library",
         camera=CameraConfig(source_dirs=[], timezone="America/Sao_Paulo"),
-        mychron=MychronConfig(data_dirs=[], timezone="America/Sao_Paulo"),
+        telemetry=TelemetryConfig(data_dirs=[], timezone="America/Sao_Paulo"),
     )

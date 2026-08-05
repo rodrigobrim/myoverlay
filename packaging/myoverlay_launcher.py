@@ -250,7 +250,9 @@ def _checkout_branch(git: Path, repo: Path, branch: str) -> None:
 def ensure_repo(
     git: Path, repo: Path, url: str, skip_update: bool, branch: str | None = None
 ) -> None:
-    if not (repo / ".git").is_dir():
+    # .git is a directory in a normal clone and a file in a git worktree
+    # (it points at the real one): both are checkouts we must not clone over.
+    if not (repo / ".git").exists():
         say(f"first run: downloading the pipeline from {url}")
         repo.parent.mkdir(parents=True, exist_ok=True)
         proc = run_git(git, ["clone", url, str(repo)], timeout=600)

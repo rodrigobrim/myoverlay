@@ -2,7 +2,7 @@
 import numpy as np
 from pathlib import Path
 from media_tools.sync import AUDIO_RATE
-from media_tools.ingest.mychron import _parse_log_datetime
+from media_tools.ingest.telemetry import _parse_log_datetime
 from libxrk import aim_xrk
 from zoneinfo import ZoneInfo
 
