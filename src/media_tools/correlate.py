@@ -29,7 +29,15 @@ def _overlap_s(a_start: datetime, a_end: datetime, b_start: datetime, b_end: dat
     return (earliest_end - latest_start).total_seconds()
 
 
-def correlate_day(manifest: DayManifest, clock_tolerance_s: float = 900.0) -> CorrelateReport:
+def correlate_day(
+    manifest: DayManifest,
+    clock_tolerance_s: float = 900.0,
+    only_file: str | None = None,
+) -> CorrelateReport:
+    """`only_file` restricts (re-)assignment to that clip; every other clip
+    keeps its current session_id and is just re-registered on the rebuilt
+    sessions. Sessions themselves always rebuild from telemetry (their ids are
+    deterministic: time-ordered), so existing assignments stay valid."""
     report = CorrelateReport()
 
     timed = [t for t in manifest.telemetry if t.start_utc and t.end_utc]
@@ -56,6 +64,11 @@ def correlate_day(manifest: DayManifest, clock_tolerance_s: float = 900.0) -> Co
     # Assign clips to the session with the largest overlap (within tolerance).
     tolerance = timedelta(seconds=clock_tolerance_s)
     for clip in manifest.videos:
+        if only_file is not None and clip.file != only_file:
+            session = next((s for s in sessions if s.id == clip.session_id), None)
+            if session is not None and clip.file not in session.video_files:
+                session.video_files.append(clip.file)
+            continue
         clip_start = clip.start_utc_estimate
         clip_end = clip_start + timedelta(seconds=clip.duration_s or 0.0)
         # A synced clip has an exact start; use it and drop the tolerance.

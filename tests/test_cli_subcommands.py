@@ -208,7 +208,24 @@ def test_sync_video_alone_requires_day_and_existing_clip(cfg_with_card):
     assert r.exit_code == 2
     r2 = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "MISSING.MP4"])
     assert r2.exit_code == 2
-    assert "no video named" in r2.stdout
+    assert "no video matching" in r2.stdout
+
+
+def test_sync_video_accepts_substring(cfg_with_card, monkeypatch):
+    import media_tools.sync as sync_mod
+
+    _library_with_video(cfg_with_card)
+    seen = {}
+
+    def fake_sync_day(cfg, manifest, day_dir, force=False, only=None):
+        seen["only"] = only
+        return []
+
+    monkeypatch.setattr(sync_mod, "sync_day", fake_sync_day)
+    # A substring resolves to the full source name before reaching sync_day.
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a."])
+    assert r.exit_code == 0
+    assert seen["only"] == "a.MP4"
 
 
 def test_sync_manual_mode_still_validates(cfg_with_card):
@@ -217,6 +234,82 @@ def test_sync_manual_mode_still_validates(cfg_with_card):
     r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "00:30"])
     assert r.exit_code == 2
     assert "manual mode needs" in r.stdout
+
+
+def _library_with_two_synced_videos(cfg):
+    from datetime import date, datetime, timedelta, timezone
+
+    from media_tools.library import (
+        DayManifest, Library, SyncInfo, TrackSession, VideoClip,
+    )
+
+    start = datetime(2026, 7, 12, 13, 0, tzinfo=timezone.utc)
+    m = DayManifest(
+        date=date(2026, 7, 12),
+        sessions=[TrackSession(id=1, start_utc=start, end_utc=start + timedelta(minutes=20))],
+    )
+    m.videos = [
+        VideoClip(
+            file=f"raw/video/{name}", source_name=name, size_bytes=1,
+            duration_s=60, start_utc_estimate=start, session_id=1,
+            sync=SyncInfo(video_start_utc=start, confidence=1.0, method="audio"),
+        )
+        for name in ("a.MP4", "b.MP4")
+    ]
+    Library(cfg.library_root).save_day(m)
+
+
+def test_plan_video_filters_to_one_item(cfg_with_card):
+    _library_with_two_synced_videos(cfg_with_card)
+    r = runner.invoke(cli.app, ["plan", "2026-07-12", "--json", "--video", "b"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert [it["item_id"] for it in data["items"]] == ["b"]
+
+    # An ambiguous substring must list the candidates, never guess.
+    r2 = runner.invoke(cli.app, ["plan", "2026-07-12", "--video", "MP4"])
+    assert r2.exit_code == 2
+    assert "matches 2 videos" in r2.stdout
+
+
+def test_plan_video_unsynced_is_an_error(cfg_with_card):
+    _library_with_video(cfg_with_card)  # video without a sync
+    r = runner.invoke(cli.app, ["plan", "2026-07-12", "--video", "a.MP4"])
+    assert r.exit_code == 1
+    assert "not planable" in r.stdout
+
+
+def test_best_lap_video_resolves_the_session(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    r = runner.invoke(cli.app, ["best-lap", "2026-07-12", "--video", "a", "--json"])
+    assert r.exit_code == 0
+    assert json.loads(r.stdout) == {"1": "-:--.--"}
+
+    r2 = runner.invoke(cli.app, ["best-lap", "2026-07-12", "--video", "a", "--session", "1"])
+    assert r2.exit_code == 2
+    assert "not both" in r2.stdout
+
+
+def test_correlate_video_requires_day(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    r = runner.invoke(cli.app, ["correlate", "--video", "a.MP4"])
+    assert r.exit_code == 2
+    assert "--video needs DAY" in r.stdout
+    r2 = runner.invoke(cli.app, ["correlate", "2026-07-12", "--video", "MISSING"])
+    assert r2.exit_code == 2
+    assert "no video matching" in r2.stdout
+
+
+def test_status_video_filters_rows(cfg_with_card):
+    _library_with_two_synced_videos(cfg_with_card)
+    r = runner.invoke(cli.app, ["status", "--video", "b"])
+    assert r.exit_code == 0
+    assert "b.MP4" in r.stdout
+    assert "a.MP4" not in r.stdout
+
+    r2 = runner.invoke(cli.app, ["status", "--video", "MISSING"])
+    assert r2.exit_code == 0
+    assert "no videos matching" in r2.stdout
 
 
 def test_ingest_force_threads_through(cfg_with_card, monkeypatch):

@@ -23,17 +23,22 @@ Best lap (the single source of truth) per session, S/F-relap-aware.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--session` |  | Session id; default all |
+| `--video`, `--clip` |  | Best lap of this video's session (source name or substring) |
 | `--json` | false |  |
 
 ## mt correlate
 
-    mt correlate [DAY]
+    mt correlate [OPTIONS] [DAY]
 
 Group ingested files into track sessions and assign videos to them.
 
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | no | Day (YYYY-MM-DD); default all |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--video`, `--clip` |  | Re-assign only this video (source name or substring); others keep their session |
 
 ## mt docs
 
@@ -98,7 +103,7 @@ Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one video.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--videos`, `--clips` |  | Comma-separated source-name substrings to join as ONE session (e.g. 0065,0066). Omit to auto-detect all split runs. |
+| `--videos`, `--video`, `--clips` |  | Comma-separated source-name substrings to join as ONE session (e.g. 0065,0066). Omit to auto-detect all split runs. |
 | `--gap-s` | `8.0` | Max seconds between segments to treat as one recording |
 | `--dry-run` | false | Show what would be joined |
 
@@ -116,6 +121,7 @@ Build the render-plan queue (review Gate 2) - one item per synced video.
 | --- | --- | --- |
 | `--json` | false | Machine-readable JSON (for the GUI) |
 | `--emit` |  | Write the plan to this file (default work/render_plan.json) |
+| `--video`, `--clip` |  | Plan only this video (source name or substring) |
 
 ## mt publish
 
@@ -200,13 +206,17 @@ Cut slices out of a rendered overlay video into out/slices/.
 
 ## mt status
 
-    mt status [DAY]
+    mt status [OPTIONS] [DAY]
 
 Show the pipeline state of one or all track days, one line per video.
 
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | no | Day (YYYY-MM-DD); default all |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--video`, `--clip` |  | Show only videos whose name contains this substring |
 
 ## mt sync
 

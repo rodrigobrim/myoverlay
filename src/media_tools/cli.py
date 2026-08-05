@@ -146,6 +146,25 @@ def _fmt_size(n: int) -> str:
     return f"{mb / 1000:.2f} GB" if mb >= 1000 else f"{mb:.1f} MB"
 
 
+def _resolve_video(manifest, needle: str, day):
+    """Resolve a --video value to ONE clip of the day: an exact source name
+    wins, else a unique substring of the source name or file; anything
+    ambiguous lists the candidates instead of guessing."""
+    exact = [v for v in manifest.videos if v.source_name == needle]
+    if exact:
+        return exact[0]
+    matches = [v for v in manifest.videos if needle in v.source_name or needle in v.file]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        console.print(f"[red]no video matching '{needle}' on {day}[/red]")
+    else:
+        console.print(f"[red]'{needle}' matches {len(matches)} videos on {day}:[/red]")
+        for v in matches:
+            console.print(f"  {v.source_name}")
+    raise typer.Exit(2)
+
+
 def _fmt_duration(s: float | None) -> str:
     if s is None:
         return "-"
@@ -599,6 +618,10 @@ def plan(
         Optional[Path],
         typer.Option("--emit", help="Write the plan to this file (default work/render_plan.json)"),
     ] = None,
+    clip: Annotated[
+        Optional[str],
+        typer.Option("--video", "--clip", help="Plan only this video (source name or substring)"),
+    ] = None,
 ):
     """Build the render-plan queue (review Gate 2) - one item per synced video."""
     from .reviewplan import build_plan, save_plan
@@ -609,6 +632,16 @@ def plan(
     manifest = lib.load_day(d)
     day_dir = lib.day_dir(d)
     plan_obj = build_plan(cfg, day_dir, manifest)
+    if clip:
+        target = _resolve_video(manifest, clip, d)
+        want = Path(target.file).stem
+        plan_obj.items = [it for it in plan_obj.items if it.item_id == want]
+        if not plan_obj.items:
+            console.print(
+                f"[red]{target.source_name} is not planable - it has no (confident) sync; "
+                f"run `mt sync {day} --video {target.source_name}` first[/red]"
+            )
+            raise typer.Exit(1)
     if json_out:
         typer.echo(plan_obj.model_dump_json())
         return
@@ -626,6 +659,10 @@ def plan(
 def best_lap_cmd(
     day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
     session: Annotated[Optional[int], typer.Option("--session", help="Session id; default all")] = None,
+    clip: Annotated[
+        Optional[str],
+        typer.Option("--video", "--clip", help="Best lap of this video's session (source name or substring)"),
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ):
     """Best lap (the single source of truth) per session, S/F-relap-aware."""
@@ -639,6 +676,18 @@ def best_lap_cmd(
     d = date.fromisoformat(day)
     manifest = lib.load_day(d)
     day_dir = lib.day_dir(d)
+    if clip is not None:
+        if session is not None:
+            console.print("[red]use either --session or --video, not both[/red]")
+            raise typer.Exit(2)
+        target = _resolve_video(manifest, clip, d)
+        if target.session_id is None:
+            console.print(
+                f"[red]{target.source_name} is not assigned to a session - "
+                f"run `mt correlate {day}` first[/red]"
+            )
+            raise typer.Exit(1)
+        session = target.session_id
     out: dict[int, str] = {}
     for s in manifest.sessions:
         if session is not None and s.id != session:
@@ -783,6 +832,7 @@ def join_cmd(
         Optional[str],
         typer.Option(
             "--videos",
+            "--video",
             "--clips",
             help="Comma-separated source-name substrings to join as ONE session "
             "(e.g. 0065,0066). Omit to auto-detect all split runs.",
@@ -816,16 +866,28 @@ def join_cmd(
 @app.command()
 def correlate(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
+    clip: Annotated[
+        Optional[str],
+        typer.Option(
+            "--video",
+            "--clip",
+            help="Re-assign only this video (source name or substring); others keep their session",
+        ),
+    ] = None,
 ):
     """Group ingested files into track sessions and assign videos to them."""
     from .correlate import correlate_day
 
     cfg = get_config()
     lib = Library(cfg.library_root)
+    if clip and not day:
+        console.print("[red]--video needs DAY[/red]")
+        raise typer.Exit(2)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
     for d in days:
         manifest = lib.load_day(d)
-        report = correlate_day(manifest, cfg.camera.clock_tolerance_s)
+        only_file = _resolve_video(manifest, clip, d).file if clip else None
+        report = correlate_day(manifest, cfg.camera.clock_tolerance_s, only_file=only_file)
         lib.save_day(manifest)
         console.print(
             f"[bold]{d}[/bold]: {report.sessions} session(s), "
@@ -880,11 +942,7 @@ def sync(
             )
             raise typer.Exit(2)
         manifest = lib.load_day(date.fromisoformat(day))
-        matches = [v for v in manifest.videos if v.source_name == clip]
-        if not matches:
-            console.print(f"[red]no video named {clip} on {day}[/red]")
-            raise typer.Exit(2)
-        target = matches[0]
+        target = _resolve_video(manifest, clip, day)
 
         if lap is not None:
             # Lap anchor: telemetry lap N of the clip's session starts at
@@ -904,7 +962,7 @@ def sync(
                         break
             if lap_utc is None:
                 console.print(
-                    f"[red]no telemetry lap {lap} in {clip}'s session "
+                    f"[red]no telemetry lap {lap} in {target.source_name}'s session "
                     f"(id {target.session_id}); run 'mt correlate {day}' first[/red]"
                 )
                 raise typer.Exit(2)
@@ -914,7 +972,7 @@ def sync(
 
         target.sync = SyncInfo(video_start_utc=vs, confidence=1.0, method="manual")
         lib.save_day(manifest)
-        console.print(f"[green]pinned {clip} -> {vs.isoformat()} (manual)[/green]")
+        console.print(f"[green]pinned {target.source_name} -> {vs.isoformat()} (manual)[/green]")
         return
 
     if clip:
@@ -922,9 +980,7 @@ def sync(
             console.print("[red]--video needs DAY[/red]")
             raise typer.Exit(2)
         manifest = lib.load_day(days[0])
-        if not any(v.source_name == clip for v in manifest.videos):
-            console.print(f"[red]no video named {clip} on {day}[/red]")
-            raise typer.Exit(2)
+        clip = _resolve_video(manifest, clip, day).source_name
 
     for d in days:
         manifest = lib.load_day(d)
@@ -1317,6 +1373,10 @@ def watch(
 @app.command()
 def status(
     day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
+    clip: Annotated[
+        Optional[str],
+        typer.Option("--video", "--clip", help="Show only videos whose name contains this substring"),
+    ] = None,
 ):
     """Show the pipeline state of one or all track days, one line per video."""
     cfg = get_config()
@@ -1333,6 +1393,8 @@ def status(
     for d in sorted(days):
         m = lib.load_day(d)
         for v in m.videos:
+            if clip and clip not in v.source_name and clip not in v.file:
+                continue
             renders = [r for r in m.renders if v.file in r.source_videos]
             render_files = {r.file for r in renders}
             pubs = [p for p in m.publishes if p.file in render_files]
@@ -1350,7 +1412,10 @@ def status(
                 "\n".join(p.video_id for p in pubs) if pubs else "-",
             )
     if not table.rows:
-        console.print("[dim]no videos in the library[/dim]")
+        if clip:
+            console.print(f"[dim]no videos matching '{clip}'[/dim]")
+        else:
+            console.print("[dim]no videos in the library[/dim]")
         return
     console.print(table)
 

@@ -77,6 +77,30 @@ def test_synced_clip_uses_exact_time_without_tolerance():
     assert report.assigned_videos == 1
 
 
+def test_only_file_reassigns_one_clip_and_keeps_the_rest():
+    m = DayManifest(date=date(2026, 7, 12))
+    m.telemetry = [
+        make_telemetry("s1.xrk", utc(13, 0), utc(13, 15)),
+        make_telemetry("s2.xrk", utc(15, 0), utc(15, 20)),
+    ]
+    m.videos = [
+        make_clip("a.MP4", utc(13, 2)),
+        make_clip("b.MP4", utc(15, 2)),
+    ]
+    correlate_day(m, clock_tolerance_s=300)
+
+    # b gets a manual sync that moves it into session 1; a full re-correlate
+    # would also touch a, but --video restricts the pass to b.
+    m.videos[1].sync = SyncInfo(video_start_utc=utc(13, 3), confidence=1.0, method="manual")
+    m.videos[0].session_id = None  # sabotage: must survive an only-b pass
+    report = correlate_day(m, clock_tolerance_s=300, only_file="raw/video/b.MP4")
+
+    assert m.videos[1].session_id == 1
+    assert m.videos[0].session_id is None  # untouched, not re-assigned
+    assert report.assigned_videos == 1
+    assert "raw/video/b.MP4" in m.sessions[0].video_files
+
+
 def test_rerun_is_stable():
     m = DayManifest(date=date(2026, 7, 12))
     m.telemetry = [make_telemetry("s1.xrk", utc(13, 0), utc(13, 15))]
