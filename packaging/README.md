@@ -104,20 +104,24 @@ The setup wizard asks for:
    is shown when everything is present; a missing blocking dependency
    detours to a dead-end page listing it, whose only options are Back
    (return; Next re-checks) and Cancel (exits setup).
-2. **Google Cloud SDK** — the official Windows installer
-   (`GoogleCloudSDKInstaller.exe`, bundled into the MSI at build time) is
-   launched and must complete before the wizard continues (an
-   "already installed" checkbox skips it).
+2. **Components** — the bundled software, with the version read from the
+   vendored binaries at build time. FFmpeg and Git are required (ticked,
+   disabled); the Google Cloud SDK is optional (`INSTALL_GCLOUD`), needed
+   only for YouTube upload. The SDK ships as Google's own archive and is
+   expanded on this machine by `ExpandGCloud`.
 3. **Install destination folder** — where the app (and all bundled tools:
    ffmpeg, git, the Google Cloud SDK) is installed. Defaults to
    `Program Files\MyOverlay`; a Browse button and path validation are the
    stock WiX folder dialogs.
 4. **Start Menu / Desktop shortcuts** (they launch `MyOverlay run`).
-5. **Google API configuration** — step-by-step Cloud Console instructions,
-   a Validate button that checks the client_secret JSON is a Desktop-app
-   OAuth client, and a Skip button that warns YouTube publishing will be
-   unavailable.
-6. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
+5. **Default output resolution** (hd/fhd/2k/4k combo, default 2k).
+
+There is no Google API page: the wizard collects nothing about Google and
+validates nothing. `MyOverlay google-setup` does the whole job after the
+files land (see below), and produces `client_secret.json` itself. The
+`GOOGLE_CLIENT_SECRET` / `GOOGLE_SKIPPED` properties are leftovers of the
+old manual page — always empty, so the launcher branches reading them are
+dead code.
 
 The choices are written to `install_settings.yaml` next to the installed
 exe; the launcher applies them when it creates `config.toml` on first run
@@ -137,11 +141,22 @@ directory, so new pipeline code running under an older exe still finds them.
 
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
-the software installed: app files, shortcuts, `install_settings.yaml`, the
-app's own items in `~\myoverlay` (pipeline clone, config.toml, Google
-credentials, setup log, browser profile) and the whole legacy
-`%LOCALAPPDATA%\MyOverlay`. A checkbox on the remove-options page
-additionally uninstalls the Google Cloud SDK (unchecked by default). The
-media library (`~\myoverlay\render` — videos/telemetry, including
-downloaded MyChron data) is never touched, nor is anything else in
-`~\myoverlay` the app does not recognize as its own.
+the application: app files, shortcuts and `install_settings.yaml`. Nothing
+in `~\myoverlay` goes with it by default — `config.toml`, the pipeline
+clone, the Google credentials and the media library `render\` all stay, so
+a reinstall picks up where you left off.
+
+Three checkboxes on the remove-options page, all unticked, each gating its
+own custom action:
+
+| Checkbox | Deletes |
+|---|---|
+| local copy of the repository | `~\myoverlay\repo` and the legacy `%LOCALAPPDATA%\myoverlay\repo` (that directory goes too, but only if it ends up empty) |
+| Google sign-in and credentials | `client_secret.json`, `google-token`, `gcp_browser_profile\`, `google-setup.log` |
+| Google Cloud SDK | runs the SDK's own uninstaller |
+
+The credentials box warns what it costs: Google reveals an OAuth client
+secret only at creation, so deleting `client_secret.json` destroys the only
+copy and the next install has to mint a new client and re-authorize
+YouTube. `config.toml` and `render\` have no checkbox at all — delete
+`~\myoverlay` by hand to hand the machine over to someone else.

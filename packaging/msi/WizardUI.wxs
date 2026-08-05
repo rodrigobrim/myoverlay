@@ -347,10 +347,17 @@
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
         <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}[P_RO_TITLE]" />
         <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="[P_RO_DESC]" />
-        <Control Id="Explain" Type="Text" X="25" Y="52" Width="320" Height="52" NoPrefix="yes" Text="[P_RO_EXPLAIN]" />
-        <Control Id="GCloudCheck" Type="CheckBox" X="25" Y="110" Width="320" Height="17" Property="REMOVE_GCLOUD" CheckBoxValue="1" Text="[P_RO_GCLOUD]" />
-        <Control Id="GCloudNote" Type="Text" X="37" Y="128" Width="308" Height="20" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_RO_GCLOUD_NOTE]" />
-        <Control Id="DataNote" Type="Text" X="25" Y="156" Width="320" Height="40" NoPrefix="yes" Text="[P_RO_DATA]" />
+        <!-- Every box starts unticked (its property is left unset), so an
+             uninstall removes the application and nothing else. Each one
+             gates its own custom action - see Product.wxs. -->
+        <Control Id="Explain" Type="Text" X="25" Y="50" Width="320" Height="32" NoPrefix="yes" Text="[P_RO_EXPLAIN]" />
+        <Control Id="RepoCheck" Type="CheckBox" X="25" Y="86" Width="320" Height="17" Property="REMOVE_REPO" CheckBoxValue="1" Text="[P_RO_REPO]" />
+        <Control Id="RepoNote" Type="Text" X="37" Y="103" Width="308" Height="18" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_RO_REPO_NOTE]" />
+        <Control Id="GoogleCheck" Type="CheckBox" X="25" Y="124" Width="320" Height="17" Property="REMOVE_GOOGLE_FILES" CheckBoxValue="1" Text="[P_RO_GOOGLE]" />
+        <Control Id="GoogleNote" Type="Text" X="37" Y="141" Width="308" Height="26" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_RO_GOOGLE_NOTE]" />
+        <Control Id="GCloudCheck" Type="CheckBox" X="25" Y="170" Width="320" Height="17" Property="REMOVE_GCLOUD" CheckBoxValue="1" Text="[P_RO_GCLOUD]" />
+        <Control Id="GCloudNote" Type="Text" X="37" Y="187" Width="308" Height="18" NoPrefix="yes" Text="{\WixUI_Font_Small}[P_RO_GCLOUD_NOTE]" />
+        <Control Id="DataNote" Type="Text" X="25" Y="210" Width="320" Height="20" NoPrefix="yes" Text="[P_RO_DATA]" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="[P_BACK]" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="[P_NEXT]" />

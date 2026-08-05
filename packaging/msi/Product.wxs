@@ -46,7 +46,13 @@
          only 'Change'), so the remove-options page - with the gcloud checkbox
          - is always presented before uninstalling. -->
     <Property Id="ARPNOREMOVE" Value="1" />
+    <!-- Opt-in cleanup choices from the remove-options page. Secure so the
+         UI values reach the elevated execute sequence; left unset (so every
+         box starts unticked) - an uninstall removes the application and
+         touches nothing in ~\myoverlay on its own. -->
     <Property Id="REMOVE_GCLOUD" Secure="yes" />
+    <Property Id="REMOVE_REPO" Secure="yes" />
+    <Property Id="REMOVE_GOOGLE_FILES" Secure="yes" />
 
     <!-- Application icon (branding) for the shortcuts and the Programs and
          Features entry. -->
@@ -266,14 +272,18 @@
       <ComponentRef Id="SettingsCleanup" />
     </Feature>
 
-    <!-- Uninstall cleanup: remove the app's own items (clone/config/token
-         under ~\myoverlay plus the legacy %LOCALAPPDATA%\MyOverlay dir, and
-         the Google Cloud SDK when the checkbox was ticked). The media
-         library (~\myoverlay\render - videos/telemetry) is never touched.
-         Skipped on major upgrades. -->
+    <!-- Uninstall cleanup: strictly opt-in. Each action runs only when its
+         box was ticked on the remove-options page (all unticked by default),
+         so an uninstall on its own removes the application and leaves
+         ~\myoverlay alone - settings, credentials, sign-in, the clone and
+         the media library. See uninstall_cleanup.js. Skipped on major
+         upgrades. -->
     <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />
-    <CustomAction Id="RemoveAppData" BinaryKey="UninstallCleanupJs"
-                  JScriptCall="RemoveAppData" Execute="deferred"
+    <CustomAction Id="RemoveRepo" BinaryKey="UninstallCleanupJs"
+                  JScriptCall="RemoveRepo" Execute="deferred"
+                  Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveGoogleFiles" BinaryKey="UninstallCleanupJs"
+                  JScriptCall="RemoveGoogleFiles" Execute="deferred"
                   Impersonate="yes" Return="ignore" />
     <CustomAction Id="RemoveGCloud" BinaryKey="UninstallCleanupJs"
                   JScriptCall="RemoveGCloud" Execute="deferred"
@@ -320,12 +330,13 @@
            produces on its own). With only the literal check, a wizard
            uninstall stripped the product but never ran these cleanups. -->
       <Custom Action="RemoveGCloud" After="InstallInitialize">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_GCLOUD="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
-      <Custom Action="RemoveAppData" After="RemoveGCloud">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RemoveRepo" After="RemoveGCloud">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_REPO="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RemoveGoogleFiles" After="RemoveRepo">(REMOVE="ALL" OR (!Main=3 AND &amp;Main=2)) AND REMOVE_GOOGLE_FILES="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <!-- The expanded SDK has no MSI components, so the installer's own file
            removal never touches it - this is the only thing that deletes it.
            Runs whenever the SDK feature goes away, including on a major
            upgrade (where the new version expands its own copy). -->
-      <Custom Action="SetRemoveBundledGCloudData" After="RemoveAppData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
+      <Custom Action="SetRemoveBundledGCloudData" After="RemoveGoogleFiles">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
       <Custom Action="RemoveBundledGCloud" After="SetRemoveBundledGCloudData">REMOVE="ALL" OR (!GCloudSdk=3 AND &amp;GCloudSdk=2)</Custom>
     </InstallExecuteSequence>
 
