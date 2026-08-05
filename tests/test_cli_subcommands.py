@@ -1,4 +1,5 @@
 import json
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,8 @@ from typer.testing import CliRunner
 import media_tools.cli as cli
 import media_tools.ingest.aim as aim
 import media_tools.ingest.camera as camera
-import media_tools.ingest.mychron as mychron
-from media_tools.config import CameraConfig, Config, MychronConfig
+import media_tools.ingest.telemetry as tel_ingest
+from media_tools.config import CameraConfig, Config, TelemetryConfig
 
 runner = CliRunner()
 
@@ -27,27 +28,29 @@ def cfg_with_card(tmp_path, monkeypatch):
     cfg = Config(
         library_root=tmp_path / "library",
         camera=CameraConfig(source_dirs=[card], timezone="America/Sao_Paulo"),
-        mychron=MychronConfig(data_dirs=[], timezone="America/Sao_Paulo"),
+        telemetry=TelemetryConfig(data_dirs=[], timezone="America/Sao_Paulo"),
     )
     monkeypatch.setattr(cli, "get_config", lambda: cfg)
     return cfg
 
 
 def test_video_list_remote_local_and_all(cfg_with_card):
-    r = runner.invoke(cli.app, ["video", "list", "--json"])
+    r = runner.invoke(cli.app, ["video", "list", "remote", "--json"])
     assert r.exit_code == 0
     data = json.loads(r.stdout)
     assert len(data["videos"]) == 2
     assert all(v["status"] == "new" for v in data["videos"])
-    # Bare `video list` and `video list remote` are the same view.
-    remote = json.loads(runner.invoke(cli.app, ["video", "list", "remote", "--json"]).stdout)
-    assert remote == data
-
-    # Ingest one: default/remote hides it, `local` shows it, `all` shows both.
-    camera.ingest_camera(cfg_with_card, only_names=["DJI_20260712141530_0001_D.MP4"])
+    # Bare `video list` is the local view: nothing ingested yet.
     default = json.loads(runner.invoke(cli.app, ["video", "list", "--json"]).stdout)
-    assert [v["source_name"] for v in default["videos"]] == ["DJI_20260712145010_0002_D.MP4"]
+    assert default["videos"] == []
+
+    # Ingest one: remote hides it, default/`local` show it, `all` shows both.
+    camera.ingest_camera(cfg_with_card, only_names=["DJI_20260712141530_0001_D.MP4"])
+    remote = json.loads(runner.invoke(cli.app, ["video", "list", "remote", "--json"]).stdout)
+    assert [v["source_name"] for v in remote["videos"]] == ["DJI_20260712145010_0002_D.MP4"]
+    default = json.loads(runner.invoke(cli.app, ["video", "list", "--json"]).stdout)
     local = json.loads(runner.invoke(cli.app, ["video", "list", "local", "--json"]).stdout)
+    assert default == local
     assert [v["source_name"] for v in local["videos"]] == ["DJI_20260712141530_0001_D.MP4"]
     assert local["videos"][0]["day"] == "2026-07-12"
     everything = json.loads(runner.invoke(cli.app, ["video", "list", "all", "--json"]).stdout)
@@ -93,9 +96,9 @@ def test_telemetry_get_downloads_from_device_and_ingests(cfg_with_card, monkeypa
 
     def fake_ingest(cfg, **kw):
         seen["kw"] = kw
-        return mychron.IngestReport()
+        return tel_ingest.IngestReport()
 
-    monkeypatch.setattr(mychron, "ingest_mychron", fake_ingest)
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", fake_ingest)
     # A telemetry download must never touch camera ingest.
     monkeypatch.setattr(camera, "ingest_camera", lambda *a, **k: (_ for _ in ()).throw(AssertionError("camera touched")))
 
@@ -117,9 +120,9 @@ def test_telemetry_get_named_sessions_ingest_their_downloads(cfg_with_card, monk
 
     def fake_ingest(cfg, **kw):
         seen["kw"] = kw
-        return mychron.IngestReport()
+        return tel_ingest.IngestReport()
 
-    monkeypatch.setattr(mychron, "ingest_mychron", fake_ingest)
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", fake_ingest)
     r = runner.invoke(cli.app, ["telemetry", "get", "a_0186.xrz"])
     assert r.exit_code == 0
     # The device name maps to the .xrk the download produced.
@@ -132,7 +135,7 @@ def test_telemetry_get_no_download_skips_device(cfg_with_card, monkeypatch):
         "download_sessions",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("device driven")),
     )
-    monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", lambda cfg, **kw: tel_ingest.IngestReport())
     r = runner.invoke(cli.app, ["telemetry", "get", "--no-download"])
     assert r.exit_code == 0
 
@@ -145,7 +148,7 @@ def test_telemetry_get_device_error_fails(cfg_with_card, monkeypatch):
             errors=["No MyChron found."]
         ),
     )
-    monkeypatch.setattr(mychron, "ingest_mychron", lambda cfg, **kw: mychron.IngestReport())
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", lambda cfg, **kw: tel_ingest.IngestReport())
     r = runner.invoke(cli.app, ["telemetry", "get"])
     assert r.exit_code == 1
 
@@ -163,6 +166,59 @@ def test_remote_listing_formatters():
     assert cli._fmt_lap_ms("0") == "?"
 
 
+def _library_with_video(cfg):
+    from datetime import date, datetime, timedelta, timezone
+
+    from media_tools.library import DayManifest, Library, TrackSession, VideoClip
+
+    start = datetime(2026, 7, 12, 13, 0, tzinfo=timezone.utc)
+    m = DayManifest(
+        date=date(2026, 7, 12),
+        sessions=[TrackSession(id=1, start_utc=start, end_utc=start + timedelta(minutes=20))],
+    )
+    m.videos = [
+        VideoClip(
+            file="raw/video/a.MP4", source_name="a.MP4", size_bytes=1,
+            duration_s=60, start_utc_estimate=start, session_id=1,
+        )
+    ]
+    Library(cfg.library_root).save_day(m)
+
+
+def test_sync_video_alone_runs_auto_sync_on_that_clip(cfg_with_card, monkeypatch):
+    import media_tools.sync as sync_mod
+
+    _library_with_video(cfg_with_card)
+    seen = {}
+
+    def fake_sync_day(cfg, manifest, day_dir, force=False, only=None):
+        seen["only"] = only
+        seen["force"] = force
+        return ["+ a.MP4: synced"]
+
+    monkeypatch.setattr(sync_mod, "sync_day", fake_sync_day)
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4"])
+    assert r.exit_code == 0
+    assert seen["only"] == "a.MP4"
+
+
+def test_sync_video_alone_requires_day_and_existing_clip(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    r = runner.invoke(cli.app, ["sync", "--video", "a.MP4"])
+    assert r.exit_code == 2
+    r2 = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "MISSING.MP4"])
+    assert r2.exit_code == 2
+    assert "no video named" in r2.stdout
+
+
+def test_sync_manual_mode_still_validates(cfg_with_card):
+    _library_with_video(cfg_with_card)
+    # An anchor option without the rest is still the manual-mode error.
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "00:30"])
+    assert r.exit_code == 2
+    assert "manual mode needs" in r.stdout
+
+
 def test_ingest_force_threads_through(cfg_with_card, monkeypatch):
     seen = {}
 
@@ -172,11 +228,64 @@ def test_ingest_force_threads_through(cfg_with_card, monkeypatch):
 
     def fake_myc(cfg, **kw):
         seen["myc"] = kw
-        return mychron.IngestReport()
+        return tel_ingest.IngestReport()
 
     monkeypatch.setattr(camera, "ingest_camera", fake_cam)
-    monkeypatch.setattr(mychron, "ingest_mychron", fake_myc)
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", fake_myc)
     r = runner.invoke(cli.app, ["ingest", "--force"])
     assert r.exit_code == 0
     assert seen["cam"]["force"] is True
     assert seen["myc"]["force"] is True
+
+
+def test_telemetry_list_defaults_to_local(cfg_with_card, tmp_path, monkeypatch):
+    """Bare `telemetry list` is the local view: every .xrk on disk, ingested
+    state included - and it never reaches for the device."""
+    downloads = tmp_path / "telemetry"
+    downloads.mkdir()
+    (downloads / "a_0186.xrk").write_bytes(b"t" * 9)
+    cfg_with_card.telemetry.data_dirs = [downloads]
+    monkeypatch.setattr(
+        tel_ingest, "parse_xrk", lambda p, tz: (_ for _ in ()).throw(ValueError("stub"))
+    )
+    monkeypatch.setattr(
+        aim,
+        "list_remote_sessions",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("device touched")),
+    )
+
+    default = json.loads(runner.invoke(cli.app, ["telemetry", "list", "--json"]).stdout)
+    local = json.loads(runner.invoke(cli.app, ["telemetry", "list", "local", "--json"]).stdout)
+
+    assert default == local
+    assert [f["source_name"] for f in default["files"]] == ["a_0186.xrk"]
+    assert default["files"][0]["ingested"] is False
+
+
+def test_telemetry_list_local_shows_ingested_sessions(cfg_with_card, tmp_path, monkeypatch):
+    """The reason for the listing: a session already ingested is still shown,
+    flagged ingested, instead of vanishing from every local view."""
+    from media_tools.library import DayManifest, Library, TelemetryLog
+
+    day = cfg_with_card.library_root / "2026-07-30" / "raw" / "telemetry"
+    day.mkdir(parents=True)
+    (day / "a_0186.xrk").write_bytes(b"t" * 9)
+    lib = Library(cfg_with_card.library_root)
+    manifest = DayManifest(date=date(2026, 7, 30))
+    manifest.telemetry.append(
+        TelemetryLog(
+            file="raw/telemetry/a_0186.xrk", source_name="a_0186.xrk", size_bytes=9,
+            start_utc=datetime(2026, 7, 30, 22, 26, tzinfo=timezone.utc),
+            end_utc=datetime(2026, 7, 30, 22, 46, tzinfo=timezone.utc),
+        )
+    )
+    lib.save_day(manifest)
+    monkeypatch.setattr(
+        tel_ingest, "parse_xrk", lambda p, tz: (_ for _ in ()).throw(ValueError("stub"))
+    )
+
+    result = json.loads(runner.invoke(cli.app, ["telemetry", "list", "--json"]).stdout)
+
+    assert [f["source_name"] for f in result["files"]] == ["a_0186.xrk"]
+    assert result["files"][0]["ingested"] is True
+    assert result["files"][0]["day"] == "2026-07-30"

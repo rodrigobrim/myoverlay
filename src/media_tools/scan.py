@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from .config import Config
 from .correlate import _overlap_s
 from .ingest import camera as _cam
-from .ingest import mychron as _my
+from .ingest import telemetry as _tel
 from .library import Library
 from .overlay import fmt_laptime
 from .telemetry import best_lap
@@ -85,7 +85,10 @@ class TelemetryFileEntry(BaseModel):
     source_name: str
     size_bytes: int
     source_path: str
-    status: str  # "new" | "ingested"
+    ingested: bool
+    # Library day folder holding it (YYYY-MM-DD), None while it is still
+    # sitting in a download dir.
+    day: str | None = None
     start_utc: datetime | None = None
 
 
@@ -130,20 +133,33 @@ def list_library_videos(cfg: Config) -> LibraryVideoListResult:
     return LibraryVideoListResult(videos=videos)
 
 
-def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> TelemetryListResult:
-    """Read-only listing of .xrk files in the download dir(s) (default: only new).
+def list_telemetry_files(cfg: Config) -> TelemetryListResult:
+    """Read-only listing of every .xrk on disk, ingested or not.
+
+    Two places hold telemetry and both are listed: the download dir(s), where
+    sessions land off the device and wait, and <library>/<day>/raw/telemetry,
+    where ingest files them. Ingest copies rather than moves, so a session
+    usually lives in both - it is listed once, under its library day.
 
     Parses each file's header for its session date (the same clock-corrected
     start_utc ingest/scan use) - slower than a bare directory scan, but this
     is a preview a human reads, not a hot path. A corrupt/unparseable file
     still gets listed, just with no date.
     """
-    sources, files = _my.enumerate_telemetry_files(cfg)
-    logger_tz = cfg.mychron.tzinfo()
+    lib_sources, lib_files = _tel.enumerate_library_telemetry(cfg)
+    dl_sources, dl_files = _tel.enumerate_telemetry_files(cfg)
+    logger_tz = cfg.telemetry.tzinfo()
+
     entries: list[TelemetryFileEntry] = []
-    for f in files:
-        if not (include_ingested or not f.ingested):
+    seen: set[tuple[str, int]] = set()
+    # Library copies first: they carry the day, and the download-dir original
+    # of an ingested session is the same bytes under a less useful path.
+    for f, day in [(f, _day_of(cfg, f.path)) for f in lib_files] + [
+        (f, None) for f in dl_files
+    ]:
+        if (f.name, f.size) in seen:
             continue
+        seen.add((f.name, f.size))
         try:
             _info, start, _end = _telemetry_window(cfg, f.path, logger_tz)
         except Exception:  # noqa: BLE001 - a corrupt .xrk must not break the listing
@@ -157,17 +173,28 @@ def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> Telemet
                 source_name=f.name,
                 size_bytes=f.size,
                 source_path=str(f.path),
-                status="ingested" if f.ingested else "new",
+                ingested=f.ingested,
+                day=day,
                 start_utc=start,
             )
         )
-    return TelemetryListResult(sources=[str(s) for s in sources], files=entries)
+    entries.sort(key=lambda e: (e.start_utc is None, e.start_utc, e.source_name))
+    sources = [str(s) for s in lib_sources + dl_sources]
+    return TelemetryListResult(sources=sources, files=entries)
+
+
+def _day_of(cfg: Config, path) -> str | None:
+    """Library day folder a file sits under (<library>/<day>/raw/telemetry)."""
+    try:
+        return path.relative_to(cfg.library_root).parts[0]
+    except ValueError:
+        return None
 
 
 def _telemetry_window(cfg: Config, path, logger_tz):
     """(XrkInfo, start_utc, end_utc), applying the same mtime fallback as
-    ingest_mychron so the preview times line up."""
-    info = _my.parse_xrk(path, logger_tz)
+    ingest_telemetry so the preview times line up."""
+    info = _tel.parse_xrk(path, logger_tz)
     start = info.start_utc
     if start is None:
         start = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc) - timedelta(
@@ -180,10 +207,10 @@ def scan_new(cfg: Config) -> ScanResult:
     lib = Library(cfg.library_root)
 
     # --- new telemetry (name+size not already ingested) ---
-    logger_tz = cfg.mychron.tzinfo()
+    logger_tz = cfg.telemetry.tzinfo()
     known_tel = lib.known_telemetry()
     tel_entries: list[tuple[ScanTelemetry, datetime, datetime]] = []
-    for path in _my.scan_sources(cfg):
+    for path in _tel.scan_sources(cfg):
         size = path.stat().st_size
         if (path.name, size) in known_tel:
             continue

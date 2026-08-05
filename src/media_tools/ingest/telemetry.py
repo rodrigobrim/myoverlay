@@ -1,7 +1,7 @@
-"""MyChron ingestion: pick up new .xrk sessions from the download dir(s).
+"""Telemetry ingestion: pick up new .xrk sessions from the download dir(s).
 
 `mt telemetry get` (ingest/aim.py) downloads sessions off the MyChron into
-mychron.data_dirs. We scan those directories (plus any extras), parse each
+telemetry.data_dirs. We scan those directories (plus any extras), parse each
 new file with libxrk, and copy it into the library day folder derived from
 the session's log date. Identity = filename + size, so re-running is a no-op.
 """
@@ -160,7 +160,7 @@ def scan_sources(cfg: Config, extra_sources: list[Path] | None = None) -> list[P
     # would duplicate every session, so it is ignored unconditionally.
     exts = {".xrk"} - SKIP_SUFFIXES
     files: list[Path] = []
-    for src in list(cfg.mychron.data_dirs) + list(extra_sources or []):
+    for src in cfg.telemetry_dirs() + list(extra_sources or []):
         if not src.is_dir():
             continue
         files.extend(
@@ -180,7 +180,7 @@ def enumerate_telemetry_files(
     only on ingest). Returns (sources, files).
     """
     lib = Library(cfg.library_root)
-    sources = list(cfg.mychron.data_dirs) + list(extra_sources or [])
+    sources = cfg.telemetry_dirs() + list(extra_sources or [])
     known = lib.known_telemetry()
 
     files: list[TelemetryFile] = []
@@ -197,7 +197,42 @@ def enumerate_telemetry_files(
     return sources, files
 
 
-def ingest_mychron(
+def enumerate_library_telemetry(cfg: Config) -> tuple[list[Path], list[TelemetryFile]]:
+    """List the .xrk copies ingest wrote into the library day folders.
+
+    The counterpart of enumerate_telemetry_files: those are the sessions
+    waiting in the download dir(s), these are the ones already filed under
+    <library>/<day>/raw/telemetry. Same read-only contract. Returns
+    (day telemetry dirs, files).
+    """
+    lib = Library(cfg.library_root)
+    known = lib.known_telemetry()
+    sources: list[Path] = []
+    files: list[TelemetryFile] = []
+    for d in lib.day_dates():
+        day_tel = lib.day_dir(d) / "raw" / "telemetry"
+        if not day_tel.is_dir():
+            continue
+        sources.append(day_tel)
+        for path in sorted(day_tel.rglob("*")):
+            if not path.is_file() or path.suffix.lower() != ".xrk":
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            # A file can sit in the day folder without a manifest row (copied
+            # by hand, or ingest interrupted between copy and save): the
+            # manifest, not the location, is what "ingested" means.
+            files.append(
+                TelemetryFile(
+                    path=path, name=path.name, size=size, ingested=(path.name, size) in known
+                )
+            )
+    return sources, files
+
+
+def ingest_telemetry(
     cfg: Config,
     extra_sources: list[Path] | None = None,
     only_names: Collection[str] | None = None,
@@ -205,7 +240,7 @@ def ingest_mychron(
 ) -> IngestReport:
     report = IngestReport()
     lib = Library(cfg.library_root)
-    logger_tz = cfg.mychron.tzinfo()
+    logger_tz = cfg.telemetry.tzinfo()
 
     sources, files = enumerate_telemetry_files(cfg, extra_sources)
     report.sources_scanned = [str(s) for s in sources]
