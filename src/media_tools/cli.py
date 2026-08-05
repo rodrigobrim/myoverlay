@@ -850,7 +850,10 @@ def sync(
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
 ):
-    """Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at)."""
+    """Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at).
+
+    --video alone (no anchor) auto-syncs just that clip.
+    """
     from datetime import datetime as dt, timedelta
 
     from .library import SyncInfo
@@ -860,7 +863,7 @@ def sync(
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
 
-    if clip or video_start or lap is not None:
+    if video_start or lap is not None or at is not None:
         if not (clip and day and (video_start or lap is not None)):
             console.print(
                 "[red]manual mode needs DAY, --video and either --video-start or --lap/--at[/red]"
@@ -904,9 +907,18 @@ def sync(
         console.print(f"[green]pinned {clip} -> {vs.isoformat()} (manual)[/green]")
         return
 
+    if clip:
+        if not day:
+            console.print("[red]--video needs DAY[/red]")
+            raise typer.Exit(2)
+        manifest = lib.load_day(days[0])
+        if not any(v.source_name == clip for v in manifest.videos):
+            console.print(f"[red]no video named {clip} on {day}[/red]")
+            raise typer.Exit(2)
+
     for d in days:
         manifest = lib.load_day(d)
-        lines = sync_day(cfg, manifest, lib.day_dir(d), force=force)
+        lines = sync_day(cfg, manifest, lib.day_dir(d), force=force, only=clip)
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")
         for line in lines or ["  nothing to sync"]:

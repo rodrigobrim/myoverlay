@@ -241,3 +241,68 @@ def test_sync_day_seeds_unsynced_clips(cfg, tmp_path, monkeypatch):
     drift = (m.videos[1].sync.video_start_utc - m.videos[1].start_utc_estimate).total_seconds()
     assert drift == pytest.approx(30.0)
     assert any("seeded" in line for line in report)
+
+
+def test_sync_day_only_syncs_named_clip(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    import media_tools.sync as sync_mod
+    from media_tools.library import (
+        DayManifest, SyncInfo, TelemetryLog, TrackSession, VideoClip,
+    )
+    from media_tools.sync import SyncResult
+    from media_tools.telemetry import DayFrame
+
+    day_dir = tmp_path / "day"
+    day_dir.mkdir()
+    start = datetime(2026, 7, 12, 13, 0, tzinfo=timezone.utc)
+    session = TrackSession(id=1, start_utc=start, end_utc=start + timedelta(minutes=20))
+    m = DayManifest(date=date(2026, 7, 12), sessions=[session])
+    m.telemetry = [
+        TelemetryLog(
+            file="raw/telemetry/s.xrk",
+            source_name="s.xrk",
+            size_bytes=1,
+            start_utc=start,
+            end_utc=session.end_utc,
+            session_id=1,
+        )
+    ]
+    m.videos = [
+        VideoClip(
+            file="raw/video/a.MP4", source_name="a.MP4", size_bytes=1,
+            duration_s=60, start_utc_estimate=start + timedelta(seconds=30), session_id=1,
+        ),
+        VideoClip(
+            file="raw/video/b.MP4", source_name="b.MP4", size_bytes=1,
+            duration_s=60, start_utc_estimate=start + timedelta(minutes=5), session_id=1,
+        ),
+    ]
+    # a.MP4 already has a (stale) sync: naming it must re-sync without force.
+    m.videos[0].sync = SyncInfo(
+        video_start_utc=start, confidence=0.5, method="audio-fine"
+    )
+
+    fake_day = DayFrame(
+        df=pd.DataFrame({"t_s": [0.0, 1.0], "speed_ms": [1.0, 2.0]}),
+        start_utc=start,
+        laps=[],
+    )
+    monkeypatch.setattr("media_tools.telemetry.load_day_frame", lambda d, m2: fake_day)
+    monkeypatch.setattr(sync_mod, "extract_audio_pcm", lambda p: p)
+
+    synced_paths = []
+
+    def fake_estimate(df, pcm, est_lag_s=None, clock_tolerance_s=None):
+        synced_paths.append(str(pcm))
+        return SyncResult(lag_s=60.0, confidence=0.8, method="fine")
+
+    monkeypatch.setattr(sync_mod, "estimate_offset", fake_estimate)
+
+    sync_mod.sync_day(cfg, m, day_dir, only="a.MP4")
+    # only the named clip was audio-synced, and it was re-synced despite
+    # already having a sync
+    assert len(synced_paths) == 1 and "a.MP4" in synced_paths[0]
+    assert m.videos[0].sync.video_start_utc == start + timedelta(seconds=60)
+    # the other clip was left alone: not synced, not drift-seeded
+    assert m.videos[1].sync is None
