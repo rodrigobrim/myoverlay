@@ -165,12 +165,10 @@ def list_telemetry_files(cfg: Config, include_ingested: bool = False) -> Telemet
 
 
 def _telemetry_window(cfg: Config, path, logger_tz):
-    """(XrkInfo, start_utc, end_utc), applying the same wrong-clock correction
-    and mtime fallback as ingest_mychron so the preview times line up."""
+    """(XrkInfo, start_utc, end_utc), applying the same mtime fallback as
+    ingest_mychron so the preview times line up."""
     info = _my.parse_xrk(path, logger_tz)
     start = info.start_utc
-    if start is not None and start > datetime.now(timezone.utc) + timedelta(days=90):
-        start = start + cfg.mychron.clock_offset()
     if start is None:
         start = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc) - timedelta(
             seconds=info.duration_s

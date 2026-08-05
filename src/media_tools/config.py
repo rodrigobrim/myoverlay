@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from datetime import datetime, timedelta, tzinfo
+from datetime import tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -69,24 +69,11 @@ class MychronConfig(BaseModel):
     # (WiFi downloads replace the house network while they run).
     auto_download: bool = False
     download_interval_s: float = 600.0
-    # .xrz files are compressed twins of the .xrk; ingesting both would
-    # duplicate every session.
-    extensions: list[str] = Field(default_factory=lambda: [".xrk"])
     # Timezone of the MyChron 'Log Date'/'Log Time' metadata; null = system local.
     timezone: str | None = None
-    # Correct a wrongly-set device clock: a moment the device recorded as
-    # clock_reads actually happened at clock_actual (both in the logger's
-    # timezone). The difference is applied to every parsed session time.
-    clock_reads: datetime | None = None
-    clock_actual: datetime | None = None
 
     def tzinfo(self) -> tzinfo:
         return ZoneInfo(self.timezone) if self.timezone else _local_tzinfo()
-
-    def clock_offset(self) -> timedelta:
-        if self.clock_reads and self.clock_actual:
-            return self.clock_actual - self.clock_reads
-        return timedelta(0)
 
 
 class WatchConfig(BaseModel):

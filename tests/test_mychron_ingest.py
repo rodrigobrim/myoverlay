@@ -38,34 +38,12 @@ def test_parse_log_datetime_formats():
     assert _parse_log_datetime({}, tz) is None
 
 
-def test_clock_offset_skips_sane_dates(cfg, tmp_path, monkeypatch):
-    """After the user fixes the device clock, new sessions carry real dates
-    and must NOT be shifted by the legacy correction anchor."""
-    from datetime import date, timedelta
+def test_session_times_are_taken_as_logged(cfg, tmp_path, monkeypatch):
+    """No clock correction: a session lands on whatever day the logger
+    claims, even an implausible one. Mismatches are resolved by manually
+    correlating files and videos by name."""
+    from datetime import date
 
-    cfg.mychron.clock_reads = datetime(2047, 10, 27)
-    cfg.mychron.clock_actual = datetime(2026, 7, 13)
-    tel = tmp_path / "tel"
-    tel.mkdir()
-    (tel / "sane.xrk").write_bytes(b"x")
-
-    sane_start = datetime.now(timezone.utc) - timedelta(days=2)
-    monkeypatch.setattr(
-        mychron, "parse_xrk", lambda p, tz: fake_info(start_utc=sane_start, laps=[])
-    )
-    ingest_mychron(cfg, extra_sources=[tel])
-
-    lib = Library(cfg.library_root)
-    day = lib.load_day(sane_start.astimezone(cfg.mychron.tzinfo()).date())
-    assert len(day.telemetry) == 1
-    assert day.telemetry[0].start_utc == sane_start  # untouched
-
-
-def test_clock_offset_corrects_session_times(cfg, tmp_path, monkeypatch):
-    from datetime import date, timedelta
-
-    cfg.mychron.clock_reads = datetime(2047, 10, 27)
-    cfg.mychron.clock_actual = datetime(2026, 7, 13)
     tel = tmp_path / "tel"
     tel.mkdir()
     (tel / "s.xrk").write_bytes(b"x")
@@ -77,9 +55,9 @@ def test_clock_offset_corrects_session_times(cfg, tmp_path, monkeypatch):
     ingest_mychron(cfg, extra_sources=[tel])
 
     lib = Library(cfg.library_root)
-    m = lib.load_day(date(2026, 7, 13))
+    m = lib.load_day(wrong_start.astimezone(cfg.mychron.tzinfo()).date())
     assert len(m.telemetry) == 1
-    assert m.telemetry[0].start_utc == datetime(2026, 7, 13, 6, 59, tzinfo=timezone.utc)
+    assert m.telemetry[0].start_utc == wrong_start
 
 
 def test_ingest_mychron_with_mocked_parser(cfg, tmp_path, monkeypatch):
@@ -129,9 +107,8 @@ def test_corrupt_xrk_reports_error_and_continues(cfg, tmp_path, monkeypatch):
 
 
 def test_xrz_twin_is_skipped(cfg, tmp_path, monkeypatch):
-    """A session is its .xrk; a compressed .xrz twin is never enumerated,
-    even when a config lists .xrz in extensions."""
-    cfg.mychron.extensions = [".xrk", ".xrz"]
+    """A session is its .xrk; the compressed .xrz twin is ignored
+    unconditionally (hardcoded, not configurable)."""
     tel = tmp_path / "tel"
     tel.mkdir()
     (tel / "session_a.xrk").write_bytes(b"real")
