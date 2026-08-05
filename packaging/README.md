@@ -30,10 +30,10 @@ commented out at its default); uncomment lines only to change them. For
 YouTube upload each person needs their own Google OAuth client (see the
 main README).
 
-The app's data lives in `~\myoverlay`: `config.toml`, the media library at
-`~\myoverlay\render` (default `library_root`), the Google credentials
+The app's data lives in `~\MyOverlay`: `config.toml`, the media library at
+`~\MyOverlay\render` (default `library_root`), the Google credentials
 (`client_secret.json`, `google-token`) and the pipeline working
-copy at `~\myoverlay\repo` (override with `MYOVERLAY_REPO`; point
+copy at `~\MyOverlay\repo` (override with `MYOVERLAY_REPO`; point
 `MYOVERLAY_REPO_URL` at a fork to test branches). Data from an older
 install under `%LOCALAPPDATA%\MyOverlay` is moved there automatically on
 first run.
@@ -142,7 +142,7 @@ directory, so new pipeline code running under an older exe still finds them.
 **Uninstall** (Programs and Features > Change > Remove — the Uninstall
 button is hidden so the options page is always shown) removes everything
 the application: app files, shortcuts and `install_settings.yaml`. Nothing
-in `~\myoverlay` goes with it by default — `config.toml`, the pipeline
+in `~\MyOverlay` goes with it by default — `config.toml`, the pipeline
 clone, the Google credentials and the media library `render\` all stay, so
 a reinstall picks up where you left off.
 
@@ -151,7 +151,7 @@ own custom action:
 
 | Checkbox | Deletes |
 |---|---|
-| local copy of the repository | `~\myoverlay\repo` and the legacy `%LOCALAPPDATA%\myoverlay\repo` (that directory goes too, but only if it ends up empty) |
+| local copy of the repository | `~\MyOverlay\repo` and the legacy `%LOCALAPPDATA%\MyOverlay\repo` (that directory goes too, but only if it ends up empty) |
 | Google sign-in and credentials | `client_secret.json`, `google-token`, `gcp_browser_profile\`, `google-setup.log` |
 | Google Cloud SDK | runs the SDK's own uninstaller |
 
@@ -159,4 +159,4 @@ The credentials box warns what it costs: Google reveals an OAuth client
 secret only at creation, so deleting `client_secret.json` destroys the only
 copy and the next install has to mint a new client and re-authorize
 YouTube. `config.toml` and `render\` have no checkbox at all — delete
-`~\myoverlay` by hand to hand the machine over to someone else.
+`~\MyOverlay` by hand to hand the machine over to someone else.

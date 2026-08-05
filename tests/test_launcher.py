@@ -297,7 +297,7 @@ def test_ensure_config_dev_checkout_is_noop(tmp_path):
 
 
 def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
-    """An old %LOCALAPPDATA%\\MyOverlay install moves to ~\\myoverlay once:
+    """An old %LOCALAPPDATA%\\MyOverlay install moves to ~\\MyOverlay once:
     the clone to <home>/repo, config and credentials out of the clone into
     <home> (token.json becomes google-token)."""
     mod = load_launcher()
@@ -312,7 +312,7 @@ def test_migrate_legacy_layout_moves_everything(tmp_path, monkeypatch):
     (old_repo / "client_secret.json").write_text('{"installed": {}}')
     monkeypatch.setenv("LOCALAPPDATA", str(appdata))
 
-    home = tmp_path / "home" / "myoverlay"
+    home = tmp_path / "home" / "MyOverlay"
     repo = home / "repo"
     mod.migrate_legacy_layout(home, repo)
 
@@ -337,7 +337,7 @@ def test_migrate_never_moves_the_tracked_template(tmp_path, monkeypatch):
     (appdata / "MyOverlay").mkdir(parents=True)
     monkeypatch.setenv("LOCALAPPDATA", str(appdata))
 
-    home = tmp_path / "home" / "myoverlay"
+    home = tmp_path / "home" / "MyOverlay"
     repo = home / "repo"
     repo.mkdir(parents=True)
     (repo / "config.toml").write_text("# language = 'en'\n")
