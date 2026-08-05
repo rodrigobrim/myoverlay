@@ -26,7 +26,7 @@
     <!-- Wizard choices. Secure: passed from the UI to the elevated execute
          sequence of this per-machine install. -->
     <Property Id="OUTPUT_LANGUAGE" Value="en" Secure="yes" />
-    <Property Id="RESOLUTION" Value="2k" Secure="yes" />
+    <Property Id="RESOLUTION" Value="fhd" Secure="yes" />
     <!-- Lets the DestinationDlg (WizardUI.wxs) edit/browse the install path and
          drives WixUIValidatePath / BrowseDlg (WixUIExtension). Must name the
          Directory the user is choosing. -->
