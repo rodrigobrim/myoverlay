@@ -22,7 +22,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .library import ConsumedSegment, DayManifest, VideoClip
-from .tools import ffmpeg_exe, ffprobe_exe
+from .tools import ffmpeg_exe, probe_streams
 
 # Two consecutive segments belong to one recording when the second starts
 # within this many seconds of the first ending. Real split rollovers are ~1-2s;
@@ -36,28 +36,16 @@ def _probe_video_params(path: Path) -> tuple[str, str, str, str] | None:
     Two segments can be stream-copied into one file only when these match, so
     this is the guard against a corrupt/lossy join.
     """
-    try:
-        out = subprocess.run(
-            [
-                ffprobe_exe(), "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name,width,height,r_frame_rate",
-                "-of", "default=nw=1", str(path),
-            ],
-            capture_output=True, text=True, timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+    streams = probe_streams(
+        path, "codec_name,width,height,r_frame_rate", select="v:0"
+    )
+    if not streams:
         return None
-    if out.returncode != 0:
-        return None
-    d: dict[str, str] = {}
-    for line in out.stdout.splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            d[k] = v.strip()
     keys = ("codec_name", "width", "height", "r_frame_rate")
+    d = streams[0]
     if not all(k in d for k in keys):
         return None
-    return (d["codec_name"], d["width"], d["height"], d["r_frame_rate"])
+    return tuple(str(d[k]) for k in keys)  # type: ignore[return-value]
 
 
 def _joined_name(first_name: str, last_name: str) -> str:

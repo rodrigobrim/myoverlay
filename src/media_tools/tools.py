@@ -29,8 +29,10 @@ moved/deleted install quietly degrades to the bare name rather than failing.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import subprocess
 import sys
 from functools import cache
 from pathlib import Path
@@ -112,6 +114,38 @@ def ffmpeg_exe() -> str:
 
 def ffprobe_exe() -> str:
     return _resolve_exe("ffprobe", "MYOVERLAY_FFMPEG_DIR", _ffmpeg_dir_from_install)
+
+
+def probe_streams(path: Path | str, entries: str, select: str | None = None) -> list[dict]:
+    """ffprobe stream properties as a list of dicts, one per selected stream.
+
+    Always asks for JSON and reads the "streams" array. The flat writers
+    (csv/default) are unusable here: since ffmpeg 8 ffprobe also emits the
+    "programs" and "stream_groups" containers, and with `-show_entries
+    stream=...` those flatten into a blank line plus a duplicate of every
+    stream that belongs to a group - so `-of csv=p=0 stream=width,height`
+    prints "1920,1080\\n\\n1920,1080" for an ordinary MP4, and any naive
+    split on "," yields garbage. The JSON writer keeps the sections apart.
+
+    Values are returned exactly as ffprobe reports them (ints for width and
+    height, strings for codec_name and r_frame_rate). Returns [] when ffprobe
+    is missing, fails, or writes something unparseable.
+    """
+    cmd = [ffprobe_exe(), "-v", "error"]
+    if select:
+        cmd += ["-select_streams", select]
+    cmd += ["-show_entries", f"stream={entries}", "-of", "json", str(path)]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if out.returncode != 0 or not out.stdout.strip():
+        return []
+    try:
+        streams = json.loads(out.stdout).get("streams", [])
+    except json.JSONDecodeError:
+        return []
+    return [s for s in streams if isinstance(s, dict)]
 
 
 def _gcloud_path() -> str | None:

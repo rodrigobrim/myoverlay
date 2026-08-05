@@ -132,3 +132,72 @@ def test_gcloud_available_false_when_absent(monkeypatch):
     monkeypatch.setattr(os, "name", "nt")
     monkeypatch.setattr(tools.shutil, "which", lambda name: None)
     assert tools.gcloud_available() is False
+
+
+# --- probe_streams -----------------------------------------------------------
+#
+# ffmpeg 9's ffprobe answers `-show_entries stream=...` with three top-level
+# sections (programs, stream_groups, streams). Flattened by the csv/default
+# writers that becomes a blank line plus a duplicate of every grouped stream -
+# which is what made `render` die with
+# "invalid literal for int() with base 10: '1080\n\n1920'".
+
+FFPROBE_JSON_WITH_STREAM_GROUPS = """{
+    "programs": [],
+    "stream_groups": [
+        { "streams": [ { "index": 0, "width": 1920, "height": 1080 } ] }
+    ],
+    "streams": [
+        { "index": 0, "width": 1920, "height": 1080 }
+    ]
+}"""
+
+
+class _Completed:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.stderr = ""
+        self.returncode = returncode
+
+
+def _fake_run(stdout="", returncode=0, seen=None):
+    def run(cmd, **kwargs):
+        if seen is not None:
+            seen.append(cmd)
+        return _Completed(stdout, returncode)
+
+    return run
+
+
+def test_probe_streams_ignores_stream_groups(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        tools.subprocess, "run",
+        _fake_run(FFPROBE_JSON_WITH_STREAM_GROUPS, seen=seen),
+    )
+    streams = tools.probe_streams("clip.mp4", "width,height", select="v:0")
+    assert streams == [{"index": 0, "width": 1920, "height": 1080}]
+    assert "-of" in seen[0] and "json" in seen[0]
+    assert seen[0][seen[0].index("-select_streams") + 1] == "v:0"
+
+
+def test_probe_streams_without_select(monkeypatch):
+    monkeypatch.setattr(tools.subprocess, "run", _fake_run('{"streams": []}'))
+    assert tools.probe_streams("clip.mp4", "width,height") == []
+
+
+@pytest.mark.parametrize(
+    "stdout, returncode",
+    [("", 0), ("not json at all", 0), (FFPROBE_JSON_WITH_STREAM_GROUPS, 1)],
+)
+def test_probe_streams_degrades_to_empty(monkeypatch, stdout, returncode):
+    monkeypatch.setattr(tools.subprocess, "run", _fake_run(stdout, returncode))
+    assert tools.probe_streams("clip.mp4", "width,height") == []
+
+
+def test_probe_streams_survives_missing_ffprobe(monkeypatch):
+    def boom(cmd, **kwargs):
+        raise OSError("ffprobe not found")
+
+    monkeypatch.setattr(tools.subprocess, "run", boom)
+    assert tools.probe_streams("clip.mp4", "width,height") == []
