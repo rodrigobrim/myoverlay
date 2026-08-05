@@ -689,7 +689,7 @@ def google_setup(
     # Streamed line by line to a fixed path (not config-relative): the MSI
     # wizard tails it for live status while this runs in a console that dies
     # with the process, and reads it back afterwards to detect failure.
-    log = Path.home() / "myoverlay" / "google-setup.log"
+    log = Path.home() / "MyOverlay" / "google-setup.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         # When running via the exe, the launcher already started this run's

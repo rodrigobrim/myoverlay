@@ -5,10 +5,10 @@ run. It bundles a Python runtime, every pipeline dependency, MinGit and
 ffmpeg - nothing needs to be installed.
 
 On every start it:
-  1. clones the repo on first run (into ~\\myoverlay\\repo), or fast-forward
+  1. clones the repo on first run (into ~\\MyOverlay\\repo), or fast-forward
      pulls new commits; data from an older install under %LOCALAPPDATA%
-     \\MyOverlay is moved to ~\\myoverlay once;
-  2. creates ~\\myoverlay\\config.toml on first run from the repo's shipped
+     \\MyOverlay is moved to ~\\MyOverlay once;
+  2. creates ~\\MyOverlay\\config.toml on first run from the repo's shipped
      config.toml template (every option commented out; the Google
      credentials live next to it: client_secret.json and google-token);
   3. puts the bundled git/ffmpeg on PATH;
@@ -22,7 +22,7 @@ third-party dependency does the exe need a rebuild - that failure mode is
 detected and explained.
 
 Environment overrides:
-  MYOVERLAY_REPO       working copy location (default ~\\myoverlay\\repo)
+  MYOVERLAY_REPO       working copy location (default ~\\MyOverlay\\repo)
   MYOVERLAY_REPO_URL   git remote to clone/pull (default the official repo)
   MYOVERLAY_NO_UPDATE  set to 1 to skip the git pull (same as --no-update)
   MYOVERLAY_BRANCH     run this branch instead of the default (same as
@@ -48,7 +48,7 @@ def bundle_dir() -> Path:
 
 
 # Open by _open_status_log() for google-setup runs: mirrors every say() line
-# into ~\myoverlay\google-setup.log, which the MSI wizard tails for live
+# into ~\MyOverlay\google-setup.log, which the MSI wizard tails for live
 # status. Without it the clone/pull phase is invisible from the wizard.
 _TEE = None
 
@@ -89,7 +89,7 @@ def run_git(git: Path, args: list[str], cwd: Path | None = None, timeout: int = 
 def default_home() -> Path:
     """The user-facing data dir: config.toml, google-token, client_secret.json
     and the managed repo clone all live here."""
-    return Path.home() / "myoverlay"
+    return Path.home() / "MyOverlay"
 
 
 def default_repo_path() -> Path:
@@ -97,13 +97,13 @@ def default_repo_path() -> Path:
 
 
 def _legacy_appdata_dir() -> Path | None:
-    """Where installs before the ~\\myoverlay layout kept everything."""
+    """Where installs before the ~\\MyOverlay layout kept everything."""
     base = os.environ.get("LOCALAPPDATA")
     return Path(base) / "MyOverlay" if base else None
 
 
 def migrate_legacy_layout(home: Path, repo: Path) -> None:
-    """One-time move of an older install's data into ~\\myoverlay.
+    """One-time move of an older install's data into ~\\MyOverlay.
 
     Old layout: everything under %LOCALAPPDATA%\\MyOverlay - the clone with
     config.toml/token.json/client_secret.json inside it, plus the sign-in
@@ -164,7 +164,7 @@ def _resync(git: Path, repo: Path) -> bool:
     Only ever called for clones this launcher created: it is a disposable
     cache of the code, so local commits/edits to tracked files are not
     something to preserve (that includes the shipped config.toml template;
-    the USER config lives in ~\\myoverlay, outside the clone). Untracked
+    the USER config lives in ~\\MyOverlay, outside the clone). Untracked
     files like credentials survive untouched.
     """
     fetch = run_git(git, ["fetch", "origin"], cwd=repo, timeout=300)
@@ -526,7 +526,7 @@ def main() -> None:
     repo = Path(os.environ.get("MYOVERLAY_REPO") or default_repo_path())
     url = os.environ.get("MYOVERLAY_REPO_URL", DEFAULT_REPO_URL)
 
-    # Managed clone: config and credentials live in ~\myoverlay, next to the
+    # Managed clone: config and credentials live in ~\MyOverlay, next to the
     # repo. A custom MYOVERLAY_REPO (a dev checkout) keeps the classic layout
     # with config.toml inside the checkout itself.
     if is_managed(repo):

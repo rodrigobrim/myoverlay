@@ -49,7 +49,7 @@
     <!-- Opt-in cleanup choices from the remove-options page. Secure so the
          UI values reach the elevated execute sequence; left unset (so every
          box starts unticked) - an uninstall removes the application and
-         touches nothing in ~\myoverlay on its own. -->
+         touches nothing in ~\MyOverlay on its own. -->
     <Property Id="REMOVE_GCLOUD" Secure="yes" />
     <Property Id="REMOVE_REPO" Secure="yes" />
     <Property Id="REMOVE_GOOGLE_FILES" Secure="yes" />
@@ -275,7 +275,7 @@
     <!-- Uninstall cleanup: strictly opt-in. Each action runs only when its
          box was ticked on the remove-options page (all unticked by default),
          so an uninstall on its own removes the application and leaves
-         ~\myoverlay alone - settings, credentials, sign-in, the clone and
+         ~\MyOverlay alone - settings, credentials, sign-in, the clone and
          the media library. See uninstall_cleanup.js. Skipped on major
          upgrades. -->
     <Binary Id="UninstallCleanupJs" SourceFile="uninstall_cleanup.js" />

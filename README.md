@@ -25,7 +25,7 @@ skips anything already done, so all commands are safe to re-run.
 2. `uv sync`
 3. The repo ships `config.toml` with every option commented out at its
    default; it works untouched. Uncomment a line only to change it, e.g.:
-   - `library_root` — where processed track days live (default `~/myoverlay/render`)
+   - `library_root` — where processed track days live (default `~/MyOverlay/render`)
    - `telemetry.data_dirs` — where downloaded MyChron sessions are kept
    - timezones if your camera/logger clocks aren't on system local time
 4. For YouTube uploads: create a project in Google Cloud Console, enable the
