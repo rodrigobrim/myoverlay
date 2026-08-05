@@ -16,7 +16,7 @@ token*.json
 
 # config.toml at the repo root IS committed: it is the shipped template
 # (every option commented out). Machine-specific configs live in
-# ~/myoverlay/config.toml, outside the repo.
+# ~/MyOverlay/config.toml, outside the repo.
 
 # Runtime output the pipeline writes while running
 *.log

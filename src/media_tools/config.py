@@ -57,7 +57,7 @@ class MychronConfig(BaseModel):
     # where `mt telemetry get` writes device downloads; every entry is
     # scanned on ingest.
     data_dirs: list[Path] = Field(
-        default_factory=lambda: [Path.home() / "myoverlay" / "render" / "mychron"]
+        default_factory=lambda: [Path.home() / "MyOverlay" / "render" / "mychron"]
     )
 
     _expand_paths = field_validator("data_dirs", mode="before")(_expand)
@@ -143,7 +143,7 @@ class YouTubeConfig(BaseModel):
     playlist_id: str | None = None
     client_secret_file: Path = Path("client_secret.json")
     # Relative paths resolve against the process cwd: the launcher chdirs to
-    # ~\myoverlay (installed) or the checkout root (dev) before the CLI runs.
+    # ~\MyOverlay (installed) or the checkout root (dev) before the CLI runs.
     token_file: Path = Path("google-token")
 
     _expand_paths = field_validator("client_secret_file", "token_file", mode="before")(
@@ -169,9 +169,9 @@ class ToolsConfig(BaseModel):
 
 class Config(BaseModel):
     # Root folder where ingested/processed media lives (one subfolder per track
-    # day). Defaults to ~/myoverlay/render when unset in config.toml - inside
+    # day). Defaults to ~/MyOverlay/render when unset in config.toml - inside
     # the app data dir, next to config.toml and the repo clone.
-    library_root: Path = Field(default_factory=lambda: Path.home() / "myoverlay" / "render")
+    library_root: Path = Field(default_factory=lambda: Path.home() / "MyOverlay" / "render")
 
     _expand_paths = field_validator("library_root", mode="before")(_expand)
     # Output language for the overlay labels and YouTube title/description

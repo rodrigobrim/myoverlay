@@ -338,7 +338,7 @@ def _nothing_to_do(cfg: Config, report: list[str]) -> bool:
     Runs FIRST, ahead of ensure_project, and never prompts. gcloud's own
     credential is separate from the app's, so a machine can hold a perfectly
     configured app (client secret, project id in config) while gcloud has no
-    credential at all - a restored profile, a copied ~\\myoverlay, a wiped
+    credential at all - a restored profile, a copied ~\\MyOverlay, a wiped
     gcloud config. Ordering this after ensure_project made that machine open
     a sign-in browser purely to run checks that would then conclude there
     was nothing to do.

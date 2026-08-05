@@ -2,7 +2,7 @@
 // uninstalling user's profile).
 //
 // Uninstalling removes the APPLICATION. Nothing inside the data dir
-// (~\myoverlay) goes with it unless the user ticks a box for it on the
+// (~\MyOverlay) goes with it unless the user ticks a box for it on the
 // remove-options page, because everything there is either the user's or
 // irreplaceable:
 //
@@ -21,7 +21,7 @@
 //                         principle, but it may hold a branch or local edits
 //
 // RemoveRepo (REMOVE_REPO=1): delete the pipeline clone, in the data dir and
-// in the pre-home-layout %LOCALAPPDATA%\myoverlay of older installs; that
+// in the pre-home-layout %LOCALAPPDATA%\MyOverlay of older installs; that
 // legacy directory is dropped too, but only once nothing remains in it.
 // Wiping that path unconditionally is what once destroyed a checkout that
 // happened to live there.
@@ -41,11 +41,11 @@ var GOOGLE_ITEMS = [
 ];
 
 function _homeDir(sh) {
-    return sh.ExpandEnvironmentStrings("%USERPROFILE%") + "\\myoverlay";
+    return sh.ExpandEnvironmentStrings("%USERPROFILE%") + "\\MyOverlay";
 }
 
 function _legacyDir(sh) {
-    return sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\myoverlay";
+    return sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\MyOverlay";
 }
 
 function _delete(fso, path) {
