@@ -1326,16 +1326,12 @@ def status(
         console.print("[dim]library is empty[/dim]")
         return
 
-    for d in days:
+    table = Table(title=str(cfg.library_root))
+    table.add_column("video", overflow="fold", min_width=34)
+    for col in ("date", "length", "session", "synced", "rendered", "published"):
+        table.add_column(col)
+    for d in sorted(days):
         m = lib.load_day(d)
-        title = d.isoformat()
-        if m.track:
-            title += f"  {m.track}"
-        title += f"  ({len(m.telemetry)} telemetry, {len(m.sessions)} sessions)"
-        table = Table(title=title)
-        table.add_column("video", overflow="fold")
-        for col in ("length", "session", "synced", "rendered", "published"):
-            table.add_column(col)
         for v in m.videos:
             renders = [r for r in m.renders if v.file in r.source_videos]
             render_files = {r.file for r in renders}
@@ -1346,15 +1342,17 @@ def status(
                 synced = f"[green]{v.sync.method}[/green] ({v.sync.confidence:.2f})"
             table.add_row(
                 v.source_name,
+                d.isoformat(),
                 _fmt_duration(v.duration_s),
                 str(v.session_id) if v.session_id is not None else "-",
                 synced,
                 str(len(renders)) if renders else "[dim]0[/dim]",
                 "\n".join(p.video_id for p in pubs) if pubs else "-",
             )
-        if not m.videos:
-            table.add_row("[dim]no videos[/dim]", "-", "-", "-", "-", "-")
-        console.print(table)
+    if not table.rows:
+        console.print("[dim]no videos in the library[/dim]")
+        return
+    console.print(table)
 
 
 @app.command()
