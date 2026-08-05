@@ -3,6 +3,8 @@
 # Run from the repo root:  powershell -File packaging\build_exe.ps1
 # Requires: uv (deps come from the project venv), internet on first run
 # (downloads MinGit and ffmpeg into packaging\vendor\, cached afterwards).
+# Versions come from third_party_versions.json at the repo root - bump a pin
+# there and the next build refreshes the vendored copy automatically.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -10,34 +12,30 @@ $pack = Join-Path $root "packaging"
 $vendor = Join-Path $pack "vendor"
 New-Item -ItemType Directory -Force $vendor | Out-Null
 
-function Get-Zip($url, $dest) {
-    Write-Host "downloading $url"
-    $tmp = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName() + ".zip")
-    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-    Expand-Archive -Path $tmp -DestinationPath $dest -Force
-    Remove-Item $tmp
-}
+. (Join-Path $pack "third_party.ps1")
+$pins = Get-ThirdPartyPins
 
 # --- MinGit (portable git, ~45 MB) ---
 $gitDir = Join-Path $vendor "git"
-if (-not (Test-Path (Join-Path $gitDir "cmd\git.exe"))) {
-    $rel = Invoke-RestMethod "https://api.github.com/repos/git-for-windows/git/releases/latest" -UseBasicParsing
-    $asset = $rel.assets | Where-Object { $_.name -match "^MinGit-.*-64-bit\.zip$" } | Select-Object -First 1
-    if (-not $asset) { throw "MinGit asset not found in latest git-for-windows release" }
-    Get-Zip $asset.browser_download_url $gitDir
+Install-PinnedTool -Name "MinGit" -Url $pins.git.url -Dir $gitDir -Stage {
+    param($from, $to)
+    # MinGit zips have no wrapper dir: cmd\, mingw64\, etc. sit at the root.
+    Copy-Item (Join-Path $from "*") $to -Recurse -Force
 }
+Assert-PinnedVersion -Name "MinGit" -Pinned $pins.git.version `
+    -Actual (Get-GitBinaryVersion (Join-Path $gitDir "cmd\git.exe"))
 
-# --- ffmpeg (gyan.dev release essentials, ~90 MB) ---
+# --- ffmpeg (gyan.dev essentials build, ~90 MB) ---
 $ffDir = Join-Path $vendor "ffmpeg"
-if (-not (Test-Path (Join-Path $ffDir "ffmpeg.exe"))) {
-    $tmpDir = Join-Path $env:TEMP ("ff_" + [IO.Path]::GetRandomFileName())
-    Get-Zip "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" $tmpDir
-    New-Item -ItemType Directory -Force $ffDir | Out-Null
-    $bin = Get-ChildItem -Recurse $tmpDir -Filter ffmpeg.exe | Select-Object -First 1
-    Copy-Item $bin.FullName $ffDir
-    Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") $ffDir
-    Remove-Item -Recurse -Force $tmpDir
+Install-PinnedTool -Name "ffmpeg" -Url $pins.ffmpeg.url -Dir $ffDir -Stage {
+    param($from, $to)
+    $bin = Get-ChildItem -Recurse $from -Filter ffmpeg.exe | Select-Object -First 1
+    if (-not $bin) { throw "ffmpeg.exe not found in the downloaded archive" }
+    Copy-Item $bin.FullName $to
+    Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") $to
 }
+Assert-PinnedVersion -Name "ffmpeg" -Pinned $pins.ffmpeg.version `
+    -Actual (Get-FfmpegBinaryVersion (Join-Path $ffDir "ffmpeg.exe"))
 
 # --- build ---
 Set-Location $root

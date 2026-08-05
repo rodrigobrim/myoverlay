@@ -38,6 +38,9 @@ $wix = Join-Path $vendor "wix"
 $build = Join-Path $repo "packaging\build\msi"
 $out = Join-Path $repo "dist\MyOverlay-setup.msi"
 
+. (Join-Path $repo "packaging\third_party.ps1")
+$pins = Get-ThirdPartyPins
+
 # Archive extraction that survives BOTH traps this build hits:
 #
 #   MAX_PATH - the Google Cloud SDK's deepest file lands ~268 characters in
@@ -166,6 +169,45 @@ if (-not (Test-Path (Join-Path $wix "candle.exe"))) {
 #   * It also removes ~30k files from the harvest, which is most of the MSI
 #     build time.
 $gcloudZip = Join-Path $vendor "google-cloud-cli-windows.zip"
+
+# A truncated download would ship as a corrupt payload that only fails on the
+# user's machine, so the archive is opened (not extracted) and checked. An
+# unusable archive is deleted and $null returned, so callers can re-download.
+function Read-GcloudArchiveVersion {
+    param([string]$Zip)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+        $versionEntry = $archive.GetEntry("google-cloud-sdk/VERSION")
+        if (-not $archive.GetEntry("google-cloud-sdk/install.bat") -or -not $versionEntry) {
+            throw "google-cloud-sdk/install.bat or /VERSION missing"
+        }
+        $reader = New-Object System.IO.StreamReader($versionEntry.Open())
+        $v = $reader.ReadLine()
+        $reader.Close()
+        if ([string]::IsNullOrWhiteSpace($v)) { throw "VERSION file is empty" }
+        return $v.Trim()
+    } catch {
+        if ($archive) { $archive.Dispose(); $archive = $null }
+        Write-Host "The Google Cloud SDK archive is not usable ($($_.Exception.Message)) - deleting it."
+        Remove-Item $Zip -Force -ErrorAction SilentlyContinue
+        return $null
+    } finally {
+        if ($archive) { $archive.Dispose() }
+    }
+}
+
+# Google publishes no versioned bundled-python archive, only this rolling
+# rapid-channel url, so the pin is enforced by checking the VERSION file
+# inside the archive instead of by the download url.
+if (Test-Path $gcloudZip) {
+    $cached = Read-GcloudArchiveVersion $gcloudZip
+    if ($cached -and $cached -ne $pins.gcloud.version) {
+        Write-Host "Cached Google Cloud SDK archive is $cached, pin is $($pins.gcloud.version) - re-downloading."
+        Remove-Item $gcloudZip -Force
+    }
+}
 if (-not (Test-Path $gcloudZip)) {
     New-Item -ItemType Directory -Force $vendor | Out-Null
     # Download to a staging name and rename only on success: a connection
@@ -173,7 +215,7 @@ if (-not (Test-Path $gcloudZip)) {
     # leave a truncated archive that the Test-Path above reads as "cached".
     # Retried, because one reset connection should not fail a whole build.
     $part = "$gcloudZip.part"
-    $uri = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+    $uri = $pins.gcloud.url
     $attempts = 3
     for ($try = 1; $try -le $attempts; $try++) {
         Write-Host "Downloading the offline Google Cloud SDK archive (~110 MB), attempt $try/$attempts..."
@@ -192,29 +234,17 @@ if (-not (Test-Path $gcloudZip)) {
         }
     }
 }
-# A truncated download would ship as a corrupt payload that only fails on the
-# user's machine, so the archive is opened (not extracted) and checked here.
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$gcloudVersion = "unknown"
-$archive = $null
-try {
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($gcloudZip)
-    $versionEntry = $archive.GetEntry("google-cloud-sdk/VERSION")
-    if (-not $archive.GetEntry("google-cloud-sdk/install.bat") -or -not $versionEntry) {
-        throw "google-cloud-sdk/install.bat or /VERSION missing"
-    }
-    $reader = New-Object System.IO.StreamReader($versionEntry.Open())
-    $gcloudVersion = $reader.ReadLine()
-    $reader.Close()
-} catch {
-    if ($archive) { $archive.Dispose(); $archive = $null }
-    Remove-Item $gcloudZip -Force -ErrorAction SilentlyContinue
-    throw ("The Google Cloud SDK archive is not usable ($($_.Exception.Message)). " +
-        "It has been deleted - re-run the build to download it again.")
-} finally {
-    if ($archive) { $archive.Dispose() }
+$gcloudVersion = Read-GcloudArchiveVersion $gcloudZip
+if (-not $gcloudVersion) {
+    throw "The downloaded Google Cloud SDK archive was not usable - re-run the build to download it again."
 }
-if ([string]::IsNullOrWhiteSpace($gcloudVersion)) { $gcloudVersion = "unknown" }
+if ($gcloudVersion -ne $pins.gcloud.version) {
+    throw ("Google's rapid channel now serves Cloud SDK $gcloudVersion but third_party_versions.json " +
+        "pins $($pins.gcloud.version). There is no versioned bundled-python archive to fall back to, " +
+        "so review the SDK release notes and bump the gcloud pin to $gcloudVersion, then rebuild. " +
+        "(The $gcloudVersion archive stays in packaging\vendor - once the pin is bumped the " +
+        "rebuild reuses it without another download.)")
+}
 
 New-Item -ItemType Directory -Force $build | Out-Null
 
@@ -223,27 +253,22 @@ Write-Host "Generating wizard bitmaps from the branding assets..."
 uv run --project $repo python (Join-Path $msiDir "gen_bitmaps.py")
 if ($LASTEXITCODE -ne 0) { throw "gen_bitmaps failed" }
 
-# --- bundled-component versions: SINGLE SOURCE OF TRUTH is the actual
-#     binaries that ship. Read fresh on every build, so when a vendored tool
-#     is updated the wizard shows the new version automatically. The versions
-#     are passed to candle and rendered on the component-selection page. ---
+# --- bundled-component versions: the wizard shows what the actual binaries
+#     in the payload report, read fresh on every build - and the build fails
+#     if that disagrees with third_party_versions.json, which catches a
+#     payload built before a pin was bumped (fix: re-run build_exe.ps1). ---
 $ffmpegExe = Get-ChildItem -Path $payload -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
     Select-Object -First 1 -ExpandProperty FullName
 $gitExe = Get-ChildItem -Path $payload -Recurse -Filter git.exe -ErrorAction SilentlyContinue |
     Select-Object -First 1 -ExpandProperty FullName
 
 $ffmpegVersion = "unknown"
-if ($ffmpegExe) {
-    $line = (& $ffmpegExe -version 2>$null | Select-Object -First 1)
-    if ($line -match 'ffmpeg version (\d+\.\d+(\.\d+)?)') { $ffmpegVersion = $Matches[1] }
-    elseif ($line -match 'ffmpeg version (\S+)') { $ffmpegVersion = ($Matches[1] -split '-')[0] }
-}
+if ($ffmpegExe) { $ffmpegVersion = Get-FfmpegBinaryVersion $ffmpegExe }
 $gitVersion = "unknown"
-if ($gitExe) {
-    $line = (& $gitExe --version 2>$null | Select-Object -First 1)
-    if ($line -match 'git version (\d+\.\d+\.\d+)') { $gitVersion = $Matches[1] }
-}
+if ($gitExe) { $gitVersion = Get-GitBinaryVersion $gitExe }
 Write-Host "Bundled versions -> ffmpeg $ffmpegVersion | git $gitVersion | gcloud $gcloudVersion"
+Assert-PinnedVersion -Name "payload ffmpeg" -Actual $ffmpegVersion -Pinned $pins.ffmpeg.version
+Assert-PinnedVersion -Name "payload git" -Actual $gitVersion -Pinned $pins.git.version
 Write-Host "Product version  -> $Version"
 
 # The WiX 3.14 tools are .NET Framework programs with no long-path support:

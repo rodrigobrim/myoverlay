@@ -23,25 +23,24 @@ if (-not (Test-Path (Join-Path $Payload "MyOverlay.exe"))) {
 }
 
 # --- uv (astral-sh, ~35 MB extracted) ---
-# Cached in packaging\vendor\uv like MinGit and ffmpeg. The archive holds
-# uv.exe and uvx.exe at its root; only uv.exe is shipped.
+# Cached in packaging\vendor\uv like MinGit and ffmpeg, at the version pinned
+# in third_party_versions.json. The archive holds uv.exe and uvx.exe at its
+# root; only uv.exe is shipped.
+. (Join-Path $pack "third_party.ps1")
+$pins = Get-ThirdPartyPins
+
 $uvDir = Join-Path $vendor "uv"
 $uvVendored = Join-Path $uvDir "uv.exe"
-if (-not (Test-Path $uvVendored)) {
-    New-Item -ItemType Directory -Force $vendor | Out-Null
-    Write-Host "Downloading uv (windows x86_64)..."
-    # Download to a staging name and rename only on success, so a connection
-    # dropped mid-transfer cannot leave a truncated archive that the Test-Path
-    # above would read as "cached".
-    $tmp = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName() + ".zip")
-    Invoke-WebRequest -UseBasicParsing -OutFile $tmp `
-        -Uri "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
-    Expand-Archive -Path $tmp -DestinationPath $uvDir -Force
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path $uvVendored)) {
+New-Item -ItemType Directory -Force $vendor | Out-Null
+Install-PinnedTool -Name "uv" -Url $pins.uv.url -Dir $uvDir -Stage {
+    param($from, $to)
+    Copy-Item (Join-Path $from "*") $to -Recurse -Force
+    if (-not (Test-Path (Join-Path $to "uv.exe"))) {
         throw "uv.exe not found in the downloaded archive - layout changed?"
     }
 }
+Assert-PinnedVersion -Name "uv" -Pinned $pins.uv.version `
+    -Actual (Get-UvBinaryVersion $uvVendored)
 
 Copy-Item $uvVendored (Join-Path $Payload "uv.exe") -Force
 Copy-Item (Join-Path $pack "mt.cmd") (Join-Path $Payload "mt.cmd") -Force
