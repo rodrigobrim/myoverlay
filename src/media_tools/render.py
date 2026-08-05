@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from .encoding import encoder_args
-from .tools import ffmpeg_exe, ffprobe_exe
+from .tools import ffmpeg_exe, probe_streams
 from .library import DayManifest, Library, RenderOutput, TrackSession, VideoClip, utcnow
 from .overlay import FrameValues, OverlayRenderer, TrackProjection
 from .telemetry import DayFrame, load_day_frame, opened_laps, valid_laps
@@ -56,22 +56,10 @@ class RenderProgress:
 
 
 def probe_video_size(path: Path) -> tuple[int, int]:
-    out = subprocess.run(
-        [
-            ffprobe_exe(), "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if out.returncode != 0 or not out.stdout.strip():
+    streams = probe_streams(path, "width,height", select="v:0")
+    if not streams or "width" not in streams[0] or "height" not in streams[0]:
         raise RuntimeError(f"ffprobe failed for {path}")
-    w, h = out.stdout.strip().split(",")[:2]
-    return int(w), int(h)
+    return int(streams[0]["width"]), int(streams[0]["height"])
 
 
 def _lap_distance_profiles(
