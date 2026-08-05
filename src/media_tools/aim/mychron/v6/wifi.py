@@ -30,13 +30,14 @@ Per-command exchange
 
 from __future__ import annotations
 
+import getpass
 import socket
 import struct
 import sys
 import time
 from datetime import datetime, timezone
 
-from ... import discovery
+from ... import credstore, discovery
 from ...catalog import strip_status_word
 
 DEFAULT_HOST = discovery.WIFI_HOST
@@ -107,16 +108,56 @@ class Transport:
         if auto_join and not discovery.wifi_available():
             ssid = discovery.find_logger_ap()
             if ssid:
-                print(f"joining {ssid} ...", file=sys.stderr)
-                if not discovery.join_logger_ap(ssid):
-                    raise OSError(f"could not join {ssid}")
-                self.joined = True
+                self._join(ssid)
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.buf = b""
         self.timeout = timeout
         if self._hello() is None:
             self.close()
             raise OSError("no hello response")
+
+    def _join(self, ssid: str) -> None:
+        """Join the logger's AP, asking for its password when it has one.
+
+        The password is asked for once, then kept DPAPI-encrypted per SSID
+        (see credstore). A stored password that stops working - the logger's
+        password was changed - falls back to asking again, and the store is
+        only (re)written after a join actually succeeds.
+        """
+        password = None
+        asked = False
+        if discovery.ap_is_protected(ssid):
+            password = credstore.get(ssid)
+            if password is None:
+                password = self._ask_password(ssid)
+                asked = True
+        print(f"joining {ssid} ...", file=sys.stderr)
+        if not discovery.join_logger_ap(ssid, password):
+            if password and not asked:
+                print(f"stored password for {ssid} no longer works",
+                      file=sys.stderr)
+                password = self._ask_password(ssid)
+                asked = True
+                if discovery.join_logger_ap(ssid, password):
+                    credstore.save(ssid, password)
+                    self.joined = True
+                    return
+            raise OSError(f"could not join {ssid}"
+                          + (" (wrong password?)" if password else ""))
+        if asked:
+            credstore.save(ssid, password)
+        self.joined = True
+
+    @staticmethod
+    def _ask_password(ssid: str) -> str:
+        if not (sys.stdin and sys.stdin.isatty()):
+            raise OSError(
+                f"{ssid} is password protected and no stored password works; "
+                "run `mt telemetry get` interactively once to enter it")
+        password = getpass.getpass(f"{ssid} is password protected. Password: ")
+        if not password:
+            raise OSError(f"no password given for {ssid}")
+        return password
 
     # ------------------------------------------------------------- plumbing
     def _send(self, tag: bytes, body: bytes) -> None:
