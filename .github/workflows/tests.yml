@@ -22,22 +22,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # third_party_versions.json pins the tools the product ships; the test
+      # suite must run against those exact versions, not whatever a package
+      # manager serves today.
+      - name: Read pinned tool versions
+        id: pins
+        shell: pwsh
+        run: |
+          $p = Get-Content third_party_versions.json -Raw | ConvertFrom-Json
+          "ffmpeg_version=$($p.ffmpeg.version)" >> $env:GITHUB_OUTPUT
+          "uv_version=$($p.uv.version)" >> $env:GITHUB_OUTPUT
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          version: ${{ steps.pins.outputs.uv_version }}
 
       # Without ffmpeg the real-encoder tests self-skip (encoder resolution,
-      # the render smoke test, ffprobe duration probes). Install it so they
-      # actually run - there is no GPU here, so they exercise the libx264
-      # fallback path.
-      - name: Install ffmpeg
-        run: choco install ffmpeg --no-progress -y
+      # the render smoke test, ffprobe duration probes). Vendor the pinned
+      # build - the same download the launcher ships - and put it on PATH.
+      # There is no GPU here, so the tests exercise the libx264 fallback path.
+      - name: Cache ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: packaging/vendor/ffmpeg
+          key: test-ffmpeg-${{ runner.os }}-${{ steps.pins.outputs.ffmpeg_version }}
+
+      - name: Install ffmpeg (pinned)
+        shell: pwsh
+        run: |
+          . packaging/third_party.ps1
+          $pins = Get-ThirdPartyPins
+          $ffDir = "packaging/vendor/ffmpeg"
+          Install-PinnedTool -Name "ffmpeg" -Url $pins.ffmpeg.url -Dir $ffDir -Stage {
+              param($from, $to)
+              $bin = Get-ChildItem -Recurse $from -Filter ffmpeg.exe | Select-Object -First 1
+              if (-not $bin) { throw "ffmpeg.exe not found in the downloaded archive" }
+              Copy-Item $bin.FullName $to
+              Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") $to
+          }
+          Assert-PinnedVersion -Name "ffmpeg" -Pinned $pins.ffmpeg.version `
+              -Actual (Get-FfmpegBinaryVersion (Join-Path $ffDir "ffmpeg.exe"))
+          (Resolve-Path $ffDir).Path >> $env:GITHUB_PATH
 
       - name: Sync dependencies
         run: uv sync --frozen
 
       # `uv run pytest` hits a uv trampoline error on some setups; going
       # through `python -m pytest` is the reliable form.
+      # MYOVERLAY_ENFORCE_PINNED_TOOLS turns the pin-equality tests from
+      # skips into hard assertions - CI just installed those exact versions.
       - name: Run tests
         run: uv run python -m pytest -q
+        env:
+          MYOVERLAY_ENFORCE_PINNED_TOOLS: "1"

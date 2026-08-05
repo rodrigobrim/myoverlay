@@ -52,13 +52,15 @@ jobs:
 
       # packaging/vendor/ is gitignored - the build scripts download MinGit,
       # ffmpeg, WiX 3.14 and the offline Google Cloud SDK into it (~1 GB) and
-      # skip the download when already present. The download URLs live in the
-      # scripts, so key the cache on them.
+      # skip the download when already at the pinned version. The pins live in
+      # third_party_versions.json, so key the cache on it; a stale restore is
+      # harmless because every vendored dir carries a .pinned-source marker
+      # that forces a re-download when it no longer matches the pin.
       - name: Cache vendored build tools
         uses: actions/cache@v4
         with:
           path: packaging/vendor
-          key: vendor-${{ runner.os }}-${{ hashFiles('packaging/build_exe.ps1', 'packaging/msi/build_msi.ps1') }}
+          key: vendor-${{ runner.os }}-${{ hashFiles('third_party_versions.json') }}
           restore-keys: |
             vendor-${{ runner.os }}-
 

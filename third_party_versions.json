@@ -1,0 +1,31 @@
+{
+  "_readme": [
+    "Single source of truth for every third-party tool vendored into the",
+    "launcher zip / MSI and installed by CI for the test suite. To upgrade a",
+    "tool, bump its version AND url together: the packaging scripts detect the",
+    "change (the vendored dir's .pinned-source marker no longer matches),",
+    "re-download, and fail the build if the downloaded binary does not report",
+    "the pinned version.",
+    "gcloud is the one tool with no versioned download: Google only publishes",
+    "the bundled-python Windows archive at the rolling rapid-channel url, so",
+    "the build downloads that and verifies the archive's VERSION file against",
+    "the pin - when Google moves the channel forward the build fails loudly",
+    "until this pin is bumped."
+  ],
+  "ffmpeg": {
+    "version": "9.0",
+    "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0/ffmpeg-9.0-essentials_build.zip"
+  },
+  "git": {
+    "version": "2.55.0",
+    "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/MinGit-2.55.0.3-64-bit.zip"
+  },
+  "uv": {
+    "version": "0.12.1",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.12.1/uv-x86_64-pc-windows-msvc.zip"
+  },
+  "gcloud": {
+    "version": "579.0.0",
+    "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-windows-x86_64-bundled-python.zip"
+  }
+}
