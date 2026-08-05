@@ -55,7 +55,9 @@ def test_resolution_presets_and_validation():
 
     from media_tools.config import RESOLUTIONS, RenderConfig
 
-    assert RESOLUTIONS == {"sd": 420, "hd": 720, "fhd": 1080, "2k": 1440, "4k": 2160}
+    assert RESOLUTIONS == {
+        "nhd": 360, "sd": 480, "hd": 720, "fhd": 1080, "2k": 1440, "4k": 2160
+    }
     assert RenderConfig().resolution == "2k"  # default
     assert RenderConfig(resolution="HD").target_height() == 720  # case-insensitive
     assert RenderConfig(resolution="4k").target_height() == 2160

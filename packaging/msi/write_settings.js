@@ -34,7 +34,7 @@ function WriteSettings() {
         var parts = Session.Property("CustomActionData").split("|");
         var folder = parts[0];
         var language = parts[1] || "en";
-        var resolution = parts[2] || "2k";
+        var resolution = parts[2] || "fhd";
         var secret = parts[3] || "";
         var skipped = parts[4] === "1";
         // The install dir is INSTALLFOLDER without its trailing backslash.

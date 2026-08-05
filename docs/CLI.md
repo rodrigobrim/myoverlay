@@ -152,7 +152,7 @@ Render telemetry overlays onto synced videos (or an edited --plan).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--force` / `--no-force` | false | Re-render already rendered videos |
-| `--resolution`, `--res` |  | Output resolution: sd\|hd\|fhd\|2k\|4k (default from config) |
+| `--resolution`, `--res` |  | Output resolution: nhd\|sd\|hd\|fhd\|2k\|4k (default from config) |
 | `--scan-race-end` / `--no-scan-race-end` | false | Trim the video after the engine shutdown (default from config) |
 | `--video`, `--clip` |  | Only render videos whose name contains this substring (re-renders them) |
 | `--from` |  | Render only from this video time (MM:SS or seconds) - a short sample to validate the trim without rendering the whole video |
@@ -171,7 +171,7 @@ Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> pub
 | --- | --- | --- |
 | `--publish` / `--no-publish` | false | Also upload to YouTube |
 | `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: [telemetry] auto_download) |
-| `--resolution`, `--res` |  | Output resolution: sd\|hd\|fhd\|2k\|4k (default from config) |
+| `--resolution`, `--res` |  | Output resolution: nhd\|sd\|hd\|fhd\|2k\|4k (default from config) |
 
 ## mt scan
 
