@@ -202,7 +202,7 @@ Cut slices out of a rendered overlay video into out/slices/.
 
     mt status [DAY]
 
-Show the pipeline state of one or all track days.
+Show the pipeline state of one or all track days, one line per video.
 
 | Argument | Required | Description |
 | --- | --- | --- |
