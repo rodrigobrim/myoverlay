@@ -90,6 +90,12 @@ track day).
   haven't passed Google's (free) compliance audit. Pass the audit and set
   `youtube.privacy = "public"` if you ever want auto-public uploads.
 - **DJI Action 5 Pro has no GPS/API** — hence audio sync and SD-card ingestion.
+- **GoPro over USB must be in MTP mode**: on the camera, swipe down →
+  Preferences → Connections → USB Connection → **MTP** (not "GoPro Connect").
+  In MTP mode Windows shows the camera as a portable device and the pipeline
+  finds its DCIM videos; in "GoPro Connect" mode nothing is visible to it.
+  Alternatively pop the SD card into a reader — it mounts as a normal DCIM
+  volume, no camera setting involved.
 - **MyChron downloads need no AiM software**: the client speaks the logger's
   own protocol over USB or WiFi (see
   [docs/mychron-protocol-re.md](docs/mychron-protocol-re.md)). Only the
