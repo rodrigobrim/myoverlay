@@ -94,7 +94,7 @@ def ingest(
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
     if device:
-        _device_download(cfg, names=None, force=False)
+        _device_download(cfg, names=None, days=None, force=False)
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 
@@ -360,6 +360,18 @@ def video_get(
         raise typer.Exit(1)
 
 
+def _split_day_args(args: list[str] | None) -> tuple[list[date], list[str]]:
+    """Partition CLI args into days (YYYY-MM-DD) and plain names."""
+    days: list[date] = []
+    plain: list[str] = []
+    for a in args or []:
+        try:
+            days.append(date.fromisoformat(a))
+        except ValueError:
+            plain.append(a)
+    return days, plain
+
+
 def _expand_video_days(cfg: Config, names: list[str] | None):
     """Expand day-shaped args (YYYY-MM-DD) into that day's camera filenames.
 
@@ -370,13 +382,7 @@ def _expand_video_days(cfg: Config, names: list[str] | None):
         return None, []
     from .scan import list_camera_videos
 
-    expanded: list[str] = []
-    days: list[date] = []
-    for n in names:
-        try:
-            days.append(date.fromisoformat(n))
-        except ValueError:
-            expanded.append(n)
+    days, expanded = _split_day_args(names)
     missing: list[str] = []
     if days:
         camera_tz = cfg.camera.tzinfo()
@@ -560,7 +566,34 @@ def _telemetry_list_local(json_out: bool) -> None:
     console.print(table)
 
 
-def _device_download(cfg, names: Optional[list[str]], force: bool):
+def _expand_telemetry_days(cfg: Config, days: list[date]) -> tuple[list[str], list[str]]:
+    """Expand days into the on-disk telemetry filenames recorded those days.
+
+    Returns (names, days_that_matched_nothing). Runs after any device
+    download, so freshly fetched sessions count as on disk.
+    """
+    if not days:
+        return [], []
+    from .scan import list_telemetry_files
+
+    logger_tz = cfg.telemetry.tzinfo()
+    files = list_telemetry_files(cfg).files
+    names: list[str] = []
+    empty: list[str] = []
+    for d in days:
+        hits = [
+            f.source_name
+            for f in files
+            if f.start_utc and f.start_utc.astimezone(logger_tz).date() == d
+        ]
+        if hits:
+            names.extend(hits)
+        else:
+            empty.append(d.isoformat())
+    return names, empty
+
+
+def _device_download(cfg, names: Optional[list[str]], days: Optional[list[date]], force: bool):
     """Pull sessions off the MyChron, streaming per-file progress lines."""
     import sys
 
@@ -580,6 +613,7 @@ def _device_download(cfg, names: Optional[list[str]], force: bool):
     report = download_sessions(
         cfg,
         names=names,
+        days=days,
         force=force,
         echo=lambda line: console.print(f"  {line}", markup=False),
         progress=progress,
@@ -598,7 +632,8 @@ def telemetry_get(
     names: Annotated[
         Optional[list[str]],
         typer.Argument(
-            help="Session names from `mt telemetry list` (omit to download all new sessions)"
+            help="Session names from `mt telemetry list`, or days (YYYY-MM-DD) to "
+            "get every session recorded that day (omit to download all new sessions)"
         ),
     ] = None,
     download: Annotated[
@@ -614,27 +649,34 @@ def telemetry_get(
         typer.Option("--force", help="Re-download and re-ingest sessions already handled"),
     ] = False,
 ):
-    """Download MyChron sessions off the device and ingest them. No camera involvement."""
+    """Download MyChron sessions off the device and ingest them - all new, the
+    named sessions, or every session of the named days. No camera involvement."""
     from pathlib import Path as P
 
     cfg = get_config()
-    only_names = names or None
+    days, plain = _split_day_args(names)
     failed = False
+    downloaded: list[str] = []
     if download:
-        report = _device_download(cfg, names=names or None, force=force)
+        report = _device_download(cfg, names=plain or None, days=days or None, force=force)
         failed = bool(report.errors or report.missing)
-        if names:
-            # Device names (a_0186.xrz) become local .xrk files on download;
-            # ingest filters by the on-disk names.
-            only_names = [P(p).name for p in report.downloaded] or None
-            if only_names is None:
-                # Nothing newly downloaded for the requested names (already on
-                # disk, or all failed): fall back to the local-name filter so
-                # `telemetry get <name>` still re-ingests with --force. A
-                # device name (.xrz) maps to the .xrk its download produced.
-                only_names = [
-                    P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in names
-                ]
+        downloaded = [P(p).name for p in report.downloaded]
+
+    only_names = None
+    if names:
+        # A day is satisfied by files on disk after the download pass (which
+        # includes anything just fetched); one with nothing anywhere is an
+        # explicit error, mirroring `video get`.
+        day_names, empty_days = _expand_telemetry_days(cfg, days)
+        if empty_days:
+            console.print(f"[red]no telemetry for: {', '.join(empty_days)}[/red]")
+            raise typer.Exit(1)
+        # Device names (a_0186.xrz) become local .xrk files on download;
+        # ingest filters by the on-disk names, so requested names are mapped
+        # even when nothing was fetched (already on disk, --no-download, or
+        # re-ingesting with --force).
+        mapped = [P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in plain]
+        only_names = list(dict.fromkeys(downloaded + mapped + day_names))
 
     from .ingest.telemetry import ingest_telemetry
 

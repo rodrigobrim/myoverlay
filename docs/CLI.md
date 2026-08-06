@@ -269,11 +269,12 @@ MyChron telemetry utilities (list / download).
 
     mt telemetry get [OPTIONS] [NAMES]...
 
-Download MyChron sessions off the device and ingest them. No camera involvement.
+Download MyChron sessions off the device and ingest them - all new, the
+named sessions, or every session of the named days. No camera involvement.
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `NAMES` | no | Session names from `mt telemetry list` (omit to download all new sessions) |
+| `NAMES` | no | Session names from `mt telemetry list`, or days (YYYY-MM-DD) to get every session recorded that day (omit to download all new sessions) |
 
 | Option | Default | Description |
 | --- | --- | --- |
