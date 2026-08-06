@@ -19,7 +19,7 @@ from typing import Callable
 from .config import Config
 from .i18n import strings as i18n_strings
 from .library import DayManifest, PublishRecord, utcnow
-from .meta import compose_description, compose_title, title_context
+from .meta import compose_description, compose_title, render_session_id, title_context
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
@@ -184,7 +184,9 @@ def publish_day(
                 f"! {render.file}: source clip has no telemetry sync, refusing to upload"
             )
             continue
-        ctx = title_context(day_dir, manifest, render.session_id, cfg.render.min_lap_s)
+        ctx = title_context(
+            day_dir, manifest, render_session_id(manifest, render), cfg.render.min_lap_s
+        )
         values = {
             "track": ctx.track,
             "date": ctx.date,

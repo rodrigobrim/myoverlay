@@ -222,6 +222,33 @@ def test_publish_missing_file_is_reported(cfg, tmp_path):
     assert report[0].startswith("!") and manifest.publishes == {}
 
 
+def test_publish_title_uses_source_clip_session_when_render_row_is_stale(cfg, tmp_path):
+    """A render row's session_id can be stale (re-render, or a slice written
+    before correlate reassigned the day). Pointing it at a rollout-only session
+    must not cost the uploaded title its best lap: the clip -> session link
+    wins, so the title still carries the session's 1:01.56."""
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    start = manifest.sessions[0].start_utc
+    # a second, rollout-only session (single lap -> no complete lap)
+    manifest.sessions.append(
+        TrackSession(id=2, start_utc=start - timedelta(minutes=30),
+                     end_utc=start - timedelta(minutes=29))
+    )
+    manifest.telemetry.append(
+        TelemetryLog(file="raw/telemetry/s2.xrk", source_name="s2.xrk", size_bytes=1,
+                     start_utc=start - timedelta(minutes=30),
+                     end_utc=start - timedelta(minutes=29),
+                     session_id=2, laps=[Lap(num=1, start_s=0.0, end_s=9.3)])
+    )
+    manifest.videos[0].session_id = 1   # as correlate assigns it
+    manifest.renders[0].session_id = 2  # stale; the clip still belongs to session 1
+
+    calls = []
+    publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
+    assert calls == ["Interlagos 12/07/26 - BL 1:01.56"]
+
+
 def test_published_report_latest_first_then_superseded(cfg, tmp_path):
     from media_tools.publish import published_report
 

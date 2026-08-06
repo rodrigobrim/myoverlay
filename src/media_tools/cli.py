@@ -1333,10 +1333,12 @@ def meta(
     """
     from .i18n import strings as i18n_strings
     from .meta import (
+        NO_LAP,
         VISIBILITIES,
         compose_description,
         compose_title,
         fetch_details,
+        render_session_id,
         title_context,
         update_details,
         youtube_service,
@@ -1388,8 +1390,13 @@ def meta(
         render = next((r for r in manifest.renders if r.file == file), None)
         ctx = title_context(
             lib.day_dir(d), manifest,
-            render.session_id if render else None, cfg.render.min_lap_s,
+            render_session_id(manifest, render), cfg.render.min_lap_s,
         )
+        if not no_meta and ctx.best_lap == NO_LAP:
+            console.print(
+                "[yellow]no complete lap for this video's session - "
+                "title/description carry no best lap[/yellow]"
+            )
         t = i18n_strings(cfg.language)
         if title is not None:
             new_title = compose_title(title, ctx, t, no_meta=no_meta)
