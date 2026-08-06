@@ -16,7 +16,12 @@ LANGUAGES = ["en", "pt", "es", "ja", "ar", "fr", "it", "ru", "zh"]
 #   no_telemetry          : placeholder under the map when no data
 #   speed_delta/time_delta: ruler captions
 #   lap_word              : suffix word for per-lap slices ("... - lap 3")
-#   title_template/description_template: default YouTube templates
+#   best_lap_abbrev       : best-lap abbreviation in the auto title meta
+#                           ("KGV 111 30/07/26 - MV 0:53.41")
+#   description_template  : the auto description meta (recorded-at, best lap,
+#                           MyOverlay credit), shared by publish and `mt meta`
+_URL = "https://github.com/rodrigobrim/myoverlay"
+
 STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "current": "Current",
@@ -26,8 +31,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Speed delta",
         "time_delta": "Time delta",
         "lap_word": "lap",
-        "title_template": "Karting {track} {date} - session {session} (best lap {best_lap})",
-        "description_template": "Recorded {date} at {track}.\nBest lap: {best_lap}\n\nUploaded by media-tools.",
+        "best_lap_abbrev": "BL",
+        "description_template": "Recorded {date} at {track}.\nBest lap: {best_lap}\n\n"
+        f"Video created and published automatically by MyOverlay: {_URL}",
     },
     "pt": {
         "current": "Atual",
@@ -37,8 +43,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Delta de velocidade",
         "time_delta": "Delta de tempo",
         "lap_word": "volta",
-        "title_template": "Kart {track} {date} - sessão {session} (melhor volta {best_lap})",
-        "description_template": "Gravado em {date} em {track}.\nMelhor volta: {best_lap}\n\nEnviado pelo media-tools.",
+        "best_lap_abbrev": "MV",
+        "description_template": "Gravado em {date} em {track}.\nMelhor volta: {best_lap}\n\n"
+        f"Vídeo criado e publicado automaticamente pelo MyOverlay: {_URL}",
     },
     "es": {
         "current": "Actual",
@@ -48,8 +55,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Delta de velocidad",
         "time_delta": "Delta de tiempo",
         "lap_word": "vuelta",
-        "title_template": "Karting {track} {date} - sesión {session} (mejor vuelta {best_lap})",
-        "description_template": "Grabado el {date} en {track}.\nMejor vuelta: {best_lap}\n\nSubido por media-tools.",
+        "best_lap_abbrev": "MV",
+        "description_template": "Grabado el {date} en {track}.\nMejor vuelta: {best_lap}\n\n"
+        f"Vídeo creado y publicado automáticamente por MyOverlay: {_URL}",
     },
     "ja": {
         "current": "現在",
@@ -59,8 +67,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "速度差",
         "time_delta": "タイム差",
         "lap_word": "ラップ",
-        "title_template": "カート {track} {date} - セッション {session}（ベストラップ {best_lap}）",
-        "description_template": "{date} に {track} で撮影。\nベストラップ: {best_lap}\n\nmedia-tools によるアップロード。",
+        "best_lap_abbrev": "BL",
+        "description_template": "{date} に {track} で撮影。\nベストラップ: {best_lap}\n\n"
+        f"MyOverlay により自動作成・公開された動画: {_URL}",
     },
     "ar": {
         "current": "الحالية",
@@ -70,8 +79,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "فرق السرعة",
         "time_delta": "فرق الزمن",
         "lap_word": "لفة",
-        "title_template": "كارتينغ {track} {date} - جلسة {session} (أفضل لفة {best_lap})",
-        "description_template": "سُجل بتاريخ {date} في {track}.\nأفضل لفة: {best_lap}\n\nرُفع بواسطة media-tools.",
+        "best_lap_abbrev": "BL",
+        "description_template": "سُجل بتاريخ {date} في {track}.\nأفضل لفة: {best_lap}\n\n"
+        f"فيديو أُنشئ ونُشر تلقائيًا بواسطة MyOverlay: {_URL}",
     },
     "fr": {
         "current": "Actuel",
@@ -81,8 +91,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Delta de vitesse",
         "time_delta": "Delta de temps",
         "lap_word": "tour",
-        "title_template": "Karting {track} {date} - session {session} (meilleur tour {best_lap})",
-        "description_template": "Enregistré le {date} à {track}.\nMeilleur tour : {best_lap}\n\nPublié par media-tools.",
+        "best_lap_abbrev": "MT",
+        "description_template": "Enregistré le {date} à {track}.\nMeilleur tour : {best_lap}\n\n"
+        f"Vidéo créée et publiée automatiquement par MyOverlay : {_URL}",
     },
     "it": {
         "current": "Attuale",
@@ -92,8 +103,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Delta velocità",
         "time_delta": "Delta tempo",
         "lap_word": "giro",
-        "title_template": "Karting {track} {date} - sessione {session} (miglior giro {best_lap})",
-        "description_template": "Registrato il {date} a {track}.\nMiglior giro: {best_lap}\n\nCaricato da media-tools.",
+        "best_lap_abbrev": "MG",
+        "description_template": "Registrato il {date} a {track}.\nMiglior giro: {best_lap}\n\n"
+        f"Video creato e pubblicato automaticamente da MyOverlay: {_URL}",
     },
     "ru": {
         "current": "Текущий",
@@ -103,8 +115,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "Дельта скорости",
         "time_delta": "Дельта времени",
         "lap_word": "круг",
-        "title_template": "Картинг {track} {date} - сессия {session} (лучший круг {best_lap})",
-        "description_template": "Записано {date}, трасса {track}.\nЛучший круг: {best_lap}\n\nЗагружено media-tools.",
+        "best_lap_abbrev": "ЛК",
+        "description_template": "Записано {date}, трасса {track}.\nЛучший круг: {best_lap}\n\n"
+        f"Видео создано и опубликовано автоматически MyOverlay: {_URL}",
     },
     "zh": {
         "current": "当前",
@@ -114,8 +127,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "speed_delta": "速度差",
         "time_delta": "时间差",
         "lap_word": "圈",
-        "title_template": "卡丁车 {track} {date} - 第 {session}节 (最佳单圈 {best_lap})",
-        "description_template": "录制于 {date}，赛道 {track}。\n最佳单圈：{best_lap}\n\n由 media-tools 上传。",
+        "best_lap_abbrev": "BL",
+        "description_template": "录制于 {date}，赛道 {track}。\n最佳单圈：{best_lap}\n\n"
+        f"由 MyOverlay 自动创建并发布的视频：{_URL}",
     },
 }
 

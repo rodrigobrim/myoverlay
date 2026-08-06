@@ -47,9 +47,10 @@ def test_shape_text_leaves_non_arabic_untouched():
     assert i18n.shape_text("Atual", "pt") == "Atual"
 
 
-def test_title_templates_have_valid_placeholders():
-    values = {"track": "t", "date": "d", "session": 1, "best_lap": "1:00.00", "lap": 2}
+def test_description_templates_have_valid_placeholders():
+    values = {"track": "t", "date": "d", "best_lap": "1:00.00"}
     for lang in i18n.LANGUAGES:
         t = i18n.strings(lang)
-        t["title_template"].format(**values)
         t["description_template"].format(**values)
+        assert t["best_lap_abbrev"].strip()
+        assert "https://github.com/rodrigobrim/myoverlay" in t["description_template"]

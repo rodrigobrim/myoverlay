@@ -142,7 +142,8 @@ class RenderConfig(BaseModel):
 
 class YouTubeConfig(BaseModel):
     privacy: str = "private"
-    # None -> language-appropriate default from i18n (per top-level `language`).
+    # None -> the automatic meta title/description in the configured output
+    # language (see meta.py); an explicit template here overrides it entirely.
     title_template: str | None = None
     description_template: str | None = None
     playlist_id: str | None = None
