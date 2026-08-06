@@ -51,6 +51,7 @@ SSID 3 : AiM-MYC6-999999-Spare
 @pytest.fixture
 def scan(monkeypatch):
     def use(text):
+        monkeypatch.setattr(discovery, "_force_scan", lambda: None)
         monkeypatch.setattr(
             discovery, "_netsh", lambda *a: types.SimpleNamespace(stdout=text))
     return use
@@ -76,8 +77,31 @@ def test_find_logger_aps_survives_netsh_failure(monkeypatch):
     def boom(*a):
         raise OSError("netsh missing")
 
+    monkeypatch.setattr(discovery, "_force_scan", lambda: None)
     monkeypatch.setattr(discovery, "_netsh", boom)
     assert discovery.find_logger_aps() == []
+
+
+def test_find_logger_aps_scans_before_reading(monkeypatch):
+    """netsh reports the previous scan; while associated to an AP, Windows
+    rescans so rarely that the cache can hold only the connected network -
+    a powered-on logger stays invisible unless a scan is forced first."""
+    order = []
+    monkeypatch.setattr(discovery, "_force_scan",
+                        lambda: order.append("scan"))
+    monkeypatch.setattr(discovery, "_netsh", lambda *a: (
+        order.append("netsh"), types.SimpleNamespace(stdout=SCAN))[1])
+    assert len(discovery.find_logger_aps()) == 2
+    assert order == ["scan", "netsh"]
+
+
+def test_force_scan_failure_is_not_fatal(monkeypatch):
+    """No PowerShell, no adapter, denied consent: the cache is still read."""
+    def boom(*a, **kw):
+        raise OSError("powershell missing")
+
+    monkeypatch.setattr(discovery.subprocess, "run", boom)
+    discovery._force_scan()          # must not raise
 
 
 # ------------------------------------------------------------ the fake world
@@ -108,6 +132,7 @@ class Situation:
         self._picks = iter(picks)
         self._typed = iter(typed)
 
+        monkeypatch.setattr(discovery, "_force_scan", lambda: None)
         monkeypatch.setattr(discovery, "_netsh", self._netsh)
         monkeypatch.setattr(discovery, "join_logger_ap", self._join)
         monkeypatch.setattr(discovery, "wifi_available",
