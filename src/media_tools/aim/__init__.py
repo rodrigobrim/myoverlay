@@ -16,7 +16,7 @@ download path entirely), so the command layer here is not portable as-is.
 See docs/mychron-protocol-re.md for how the protocol was recovered.
 """
 
-from .errors import NoDeviceError
+from .errors import NoDeviceError, UserInputNeededError
 from .connect import connect
 
-__all__ = ["connect", "NoDeviceError"]
+__all__ = ["connect", "NoDeviceError", "UserInputNeededError"]

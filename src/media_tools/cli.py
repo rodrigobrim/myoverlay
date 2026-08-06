@@ -72,7 +72,9 @@ def _print_ingest_report(name: str, report) -> None:
     if not report.copied and not report.skipped_known:
         console.print("  [dim]nothing new[/dim]")
     for err in report.errors:
-        console.print(f"  [red]! {err}[/red]")
+        # style= rather than [red] tags: device errors can contain brackets,
+        # and markup=False would print the tags literally.
+        console.print(f"  ! {err}", style="red", markup=False)
 
 
 @app.command()
@@ -201,8 +203,11 @@ def video_list_remote(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List new videos on the connected camera. Copies nothing."""
-    _video_list_remote(include_ingested=False, json_out=json_out)
+    """List every video on the connected camera, already-ingested ones marked
+    as such. Copies nothing."""
+    # Same rule as `telemetry list remote`: a device inventory is only useful
+    # complete, so there is no flag to remember.
+    _video_list_remote(include_ingested=True, json_out=json_out)
 
 
 @video_list_app.command("local")
@@ -387,8 +392,10 @@ def telemetry_list_remote(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing."""
-    _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+    """List every session recorded on the MyChron, already-downloaded ones
+    marked as such (connects over USB or WiFi). Downloads nothing."""
+    # A device inventory is only useful complete: always the whole card.
+    _telemetry_list_remote(include_downloaded=True, json_out=json_out)
 
 
 @telemetry_list_app.command("local")
@@ -470,7 +477,10 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     if not result.sessions:
         # Only claim an empty device when the listing actually succeeded.
         if result.transport and not failed:
-            console.print("[dim]no new sessions on the device[/dim]")
+            # Nothing was filtered out, so "no new" would be a lie: the
+            # device really is empty.
+            what = "no sessions" if include_downloaded else "no new sessions"
+            console.print(f"[dim]{what} on the device[/dim]")
         return
 
     title = f"MyChron sessions ({result.transport})" if result.transport else "MyChron sessions"
@@ -554,7 +564,7 @@ def _device_download(cfg, names: Optional[list[str]], force: bool):
     for n in report.missing:
         console.print(f"  [red]not on the device: {n}[/red]")
     for e in report.errors:
-        console.print(f"  [red]! {e}[/red]", markup=False)
+        console.print(f"  ! {e}", style="red", markup=False)
     return report
 
 

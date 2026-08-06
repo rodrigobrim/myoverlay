@@ -287,7 +287,8 @@ download dir(s) - with its ingested state. Copies nothing.
 
     mt telemetry list remote [OPTIONS]
 
-List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing.
+List every session recorded on the MyChron, already-downloaded ones
+marked as such (connects over USB or WiFi). Downloads nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -341,7 +342,8 @@ List videos already downloaded into the library.
 
     mt video list remote [OPTIONS]
 
-List new videos on the connected camera. Copies nothing.
+List every video on the connected camera, already-ingested ones marked
+as such. Copies nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
