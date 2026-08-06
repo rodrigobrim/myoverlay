@@ -109,16 +109,18 @@ Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one video.
 
 ## mt meta
 
-    mt meta [OPTIONS] DAY VIDEO
+    mt meta [OPTIONS] DAY [VIDEO]
 
 Show or edit the YouTube title, description and visibility of a published video.
 
-With no option, shows the video's current published details.
+Without VIDEO, lists the day's published videos (same as
+`mt publish DAY --show-published`); with VIDEO and no option, shows that
+video's current published details.
 
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | yes | Day (YYYY-MM-DD) |
-| `VIDEO` | yes | Published rendered file (name or substring) |
+| `VIDEO` | no | Published rendered file (name or substring); omit to list the day's published videos |
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -158,6 +160,7 @@ Upload rendered videos to YouTube (as configured, default private).
 | `--dry-run` / `--no-dry-run` | false | Show what would be uploaded |
 | `--force` | false | Re-upload renders even if already published (a fresh video) |
 | `--video`, `--clip` |  | Only publish renders whose file name contains this substring |
+| `--show-published` | false | List what is already on YouTube; uploads nothing |
 
 ## mt render
 

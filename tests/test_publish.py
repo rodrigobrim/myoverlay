@@ -220,3 +220,40 @@ def test_publish_missing_file_is_reported(cfg, tmp_path):
     (day_dir / "out" / "clip_overlay.mp4").unlink()
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: "x")
     assert report[0].startswith("!") and manifest.publishes == {}
+
+
+def test_published_report_latest_first_then_superseded(cfg, tmp_path):
+    from media_tools.publish import published_report
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    assert published_report(manifest) == ["nothing published"]
+
+    calls = []
+
+    def up(path, title, description, privacy, playlist_id):
+        calls.append(path.name)
+        return f"vid{len(calls)}"
+
+    publish_day(cfg, manifest, day_dir, uploader=up)
+    lines = published_report(manifest)
+    assert lines[0].startswith("out/clip_overlay.mp4 -> https://youtu.be/vid1 (private, published ")
+    assert lines[0].endswith("UTC)")
+    assert lines[1] == "    title: Interlagos 12/07/26 - BL 1:01.56"
+
+    # after a --force re-upload the current video (latest) leads the block and
+    # the prior upload is shown as superseded
+    publish_day(cfg, manifest, day_dir, uploader=up, force=True)
+    lines = published_report(manifest)
+    assert "https://youtu.be/vid2" in lines[0]
+    assert any(line.strip().startswith("superseded: https://youtu.be/vid1") for line in lines)
+
+
+def test_published_report_clip_filter(cfg, tmp_path):
+    from media_tools.publish import published_report
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    publish_day(cfg, manifest, day_dir, uploader=lambda *a: "x")
+    assert published_report(manifest, clip_filter="OVERLAY")[0].startswith("out/clip_overlay.mp4")
+    assert published_report(manifest, clip_filter="nope") == ["nothing published"]

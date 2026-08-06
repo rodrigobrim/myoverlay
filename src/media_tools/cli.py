@@ -1270,13 +1270,26 @@ def publish(
         Optional[str],
         typer.Option("--video", "--clip", help="Only publish renders whose file name contains this substring"),
     ] = None,
+    show_published: Annotated[
+        bool,
+        typer.Option("--show-published", help="List what is already on YouTube; uploads nothing"),
+    ] = False,
 ):
     """Upload rendered videos to YouTube (as configured, default private)."""
-    from .publish import publish_day
+    from .publish import publish_day, published_report
 
+    if show_published and (dry_run or force):
+        console.print("[red]--show-published only lists; drop --dry-run/--force[/red]")
+        raise typer.Exit(2)
     cfg = get_config()
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
+    if show_published:
+        for d in days:
+            console.print(f"[bold]{d}[/bold]:")
+            for line in published_report(lib.load_day(d), clip_filter=clip):
+                console.print(f"  {line}", markup=False)
+        return
     for d in days:
         manifest = lib.load_day(d)
         lines = publish_day(
@@ -1292,7 +1305,10 @@ def publish(
 @app.command()
 def meta(
     day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
-    video: Annotated[str, typer.Argument(help="Published rendered file (name or substring)")],
+    video: Annotated[
+        Optional[str],
+        typer.Argument(help="Published rendered file (name or substring); omit to list the day's published videos"),
+    ] = None,
     title: Annotated[
         Optional[str],
         typer.Option("--title", help="New title (auto track/date/best-lap meta appended unless --no-meta)"),
@@ -1311,7 +1327,9 @@ def meta(
 ):
     """Show or edit the YouTube title, description and visibility of a published video.
 
-    With no option, shows the video's current published details.
+    Without VIDEO, lists the day's published videos (same as
+    `mt publish DAY --show-published`); with VIDEO and no option, shows that
+    video's current published details.
     """
     from .i18n import strings as i18n_strings
     from .meta import (
@@ -1330,6 +1348,13 @@ def meta(
     if no_meta and title is None and description is None:
         console.print("[red]--no-meta needs --title and/or --description[/red]")
         raise typer.Exit(2)
+    if video is None:
+        if title is not None or description is not None or visibility is not None:
+            console.print("[red]--title/--description/--visibility need a VIDEO argument[/red]")
+            raise typer.Exit(2)
+        # `mt meta DAY` == `mt publish DAY --show-published`.
+        publish(day=day, show_published=True)
+        return
 
     cfg = get_config()
     lib = Library(cfg.library_root)
