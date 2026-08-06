@@ -94,7 +94,7 @@ def ingest(
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
     if device:
-        _device_download(cfg, names=None, force=False)
+        _device_download(cfg, names=None, days=None, force=False)
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 

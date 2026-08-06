@@ -112,6 +112,22 @@ def test_telemetry_get_downloads_from_device_and_ingests(cfg_with_card, monkeypa
     assert seen["kw"] == {"only_names": None, "force": False}
 
 
+def test_ingest_device_flag_downloads_first(cfg_with_card, monkeypatch):
+    """`ingest --device` drives the same download helper as `telemetry get`."""
+    calls = {"download": 0}
+
+    def fake_download(cfg, names=None, days=None, force=False, echo=None, progress=None):
+        calls["download"] += 1
+        return aim.DownloadReport()
+
+    monkeypatch.setattr(aim, "download_sessions", fake_download)
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", lambda cfg, **kw: tel_ingest.IngestReport())
+
+    r = runner.invoke(cli.app, ["ingest", "--source", "telemetry", "--device"])
+    assert r.exit_code == 0
+    assert calls["download"] == 1
+
+
 def test_telemetry_get_named_sessions_ingest_their_downloads(cfg_with_card, monkeypatch, tmp_path):
     monkeypatch.setattr(
         aim,
