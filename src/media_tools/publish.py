@@ -129,6 +129,25 @@ def api_uploader(cfg: Config) -> Uploader:
     return upload
 
 
+def published_report(manifest: DayManifest, clip_filter: str | None = None) -> list[str]:
+    """What is on YouTube for this day, from the manifest's publish registry:
+    one block per rendered file, the latest upload (the current video) first,
+    older --force re-uploads listed as superseded."""
+    lines: list[str] = []
+    for file, records in manifest.publishes.items():
+        if clip_filter and clip_filter.lower() not in file.lower():
+            continue
+        rec = records[-1]
+        lines.append(
+            f"{file} -> {rec.url} ({rec.privacy}, published {rec.published_at:%Y-%m-%d %H:%M} UTC)"
+        )
+        if rec.title:
+            lines.append(f"    title: {rec.title}")
+        for old in records[:-1]:
+            lines.append(f"    superseded: {old.url} ({old.published_at:%Y-%m-%d %H:%M} UTC)")
+    return lines or ["nothing published"]
+
+
 def publish_day(
     cfg: Config,
     manifest: DayManifest,
