@@ -63,13 +63,16 @@ def test_publish_day_uploads_and_records(cfg, tmp_path):
     assert calls == [
         (
             "clip_overlay.mp4",
-            "Karting Interlagos 2026-07-12 - session 1 (best lap 1:01.56)",
+            "Interlagos 12/07/26 - BL 1:01.56",
             "private",
             None,
         )
     ]
-    assert manifest.publishes[0].video_id == "abc123"
-    assert manifest.publishes[0].url == "https://youtu.be/abc123"
+    rec = manifest.publishes["out/clip_overlay.mp4"][0]
+    assert rec.video_id == "abc123"
+    assert rec.url == "https://youtu.be/abc123"
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"
+    assert rec.description.startswith("Recorded 2026-07-12 at Interlagos.")
     assert report[0].startswith("+")
 
     # already published -> nothing to do, uploader not called again
@@ -79,7 +82,7 @@ def test_publish_day_uploads_and_records(cfg, tmp_path):
 
 
 def test_title_best_lap_ignores_fragments_and_impossible_laps(cfg, tmp_path):
-    from media_tools.publish import _title_context
+    from media_tools.meta import title_context
 
     day_dir = tmp_path / "day"
     manifest = make_manifest(day_dir)
@@ -93,7 +96,7 @@ def test_title_best_lap_ignores_fragments_and_impossible_laps(cfg, tmp_path):
         Lap(num=4, start_s=140.9, end_s=179.9),
         Lap(num=5, start_s=179.9, end_s=240.0),
     ]
-    ctx = _title_context(day_dir, manifest, 1, min_lap_s=42.0)
+    ctx = title_context(day_dir, manifest, 1, min_lap_s=42.0)
     # Best is the 61.555 s real lap, not 17 s or 39 s.
     assert ctx.best_lap == "1:01.56"
 
@@ -103,7 +106,7 @@ def test_publish_slice_gets_labeled_title(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     (day_dir / "out" / "slices").mkdir(parents=True)
     (day_dir / "out" / "slices" / "clip_overlay_25m15s-30m37s.mp4").write_bytes(b"v")
-    manifest.publishes = []
+    manifest.publishes = {}
     manifest.renders = [
         RenderOutput(
             file="out/slices/clip_overlay_25m15s-30m37s.mp4",
@@ -116,7 +119,7 @@ def test_publish_slice_gets_labeled_title(cfg, tmp_path):
     ]
     calls = []
     publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
-    assert calls == ["Karting Interlagos 2026-07-12 - session 1 (best lap 1:01.56) - 25:15-30:37"]
+    assert calls == ["Interlagos 12/07/26 - BL 1:01.56 - 25:15-30:37"]
 
 
 def test_publish_force_reuploads_already_published(cfg, tmp_path):
@@ -132,17 +135,19 @@ def test_publish_force_reuploads_already_published(cfg, tmp_path):
         return f"vid{len(calls)}"
 
     publish_day(cfg, manifest, day_dir, uploader=up)
-    assert len(calls) == 1 and len(manifest.publishes) == 1
+    assert len(calls) == 1 and len(manifest.publishes["out/clip_overlay.mp4"]) == 1
 
     # without force: already published -> skipped
     assert publish_day(cfg, manifest, day_dir, uploader=up) == ["nothing to publish"]
     assert len(calls) == 1
 
     # with force: uploads again, keeping the prior record and adding a new one
+    # under the same rendered-file key
     report = publish_day(cfg, manifest, day_dir, uploader=up, force=True)
     assert len(calls) == 2
-    assert len(manifest.publishes) == 2
-    assert manifest.publishes[-1].video_id == "vid2"
+    records = manifest.publishes["out/clip_overlay.mp4"]
+    assert len(records) == 2
+    assert records[-1].video_id == "vid2"
     assert any(line.startswith("+") for line in report)
 
 
@@ -155,7 +160,7 @@ def test_publish_uses_item_title_and_appends_best_lap(cfg, tmp_path):
     manifest.renders[0].append_best_lap = True
     calls = []
     publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
-    assert calls == ["Custom Title - 1:01.56"]
+    assert calls == ["Custom Title - Interlagos 12/07/26 - BL 1:01.56"]
 
 
 def test_publish_item_title_without_best_lap(cfg, tmp_path):
@@ -173,7 +178,7 @@ def test_publish_dry_run_uploads_nothing(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     report = publish_day(cfg, manifest, day_dir, dry_run=True)
     assert report[0].startswith("~ would upload")
-    assert manifest.publishes == []
+    assert manifest.publishes == {}
 
 
 def test_publish_refuses_raw_clip_paths(cfg, tmp_path):
@@ -186,7 +191,7 @@ def test_publish_refuses_raw_clip_paths(cfg, tmp_path):
 
     calls = []
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: calls.append(a) or "x")
-    assert calls == [] and manifest.publishes == []
+    assert calls == [] and manifest.publishes == {}
     assert "refusing to upload" in report[0]
 
 
@@ -205,7 +210,7 @@ def test_publish_refuses_render_of_unsynced_clip(cfg, tmp_path):
     ]
     calls = []
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: calls.append(a) or "x")
-    assert calls == [] and manifest.publishes == []
+    assert calls == [] and manifest.publishes == {}
     assert "no telemetry sync" in report[0]
 
 
@@ -214,4 +219,4 @@ def test_publish_missing_file_is_reported(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     (day_dir / "out" / "clip_overlay.mp4").unlink()
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: "x")
-    assert report[0].startswith("!") and manifest.publishes == []
+    assert report[0].startswith("!") and manifest.publishes == {}

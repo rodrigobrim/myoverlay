@@ -107,6 +107,26 @@ Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one video.
 | `--gap-s` | `8.0` | Max seconds between segments to treat as one recording |
 | `--dry-run` | false | Show what would be joined |
 
+## mt meta
+
+    mt meta [OPTIONS] DAY VIDEO
+
+Show or edit the YouTube title, description and visibility of a published video.
+
+With no option, shows the video's current published details.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `DAY` | yes | Day (YYYY-MM-DD) |
+| `VIDEO` | yes | Published rendered file (name or substring) |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--title` |  | New title (auto track/date/best-lap meta appended unless --no-meta) |
+| `--description`, `--desc` |  | New description (auto meta appended unless --no-meta) |
+| `--visibility` |  | private \| unlisted \| public |
+| `--no-meta` | false | Set --title/--description verbatim, without the auto meta |
+
 ## mt plan
 
     mt plan [OPTIONS] DAY

@@ -167,6 +167,31 @@ def _resolve_video(manifest, needle: str, day):
     raise typer.Exit(2)
 
 
+def _resolve_publish(manifest, needle: str, day) -> str:
+    """Resolve a --video value to ONE published rendered file: an exact path,
+    file name or stem wins, else a unique case-insensitive substring; anything
+    ambiguous lists the candidates instead of guessing."""
+    files = list(manifest.publishes)
+    exact = [f for f in files if needle in (f, Path(f).name, Path(f).stem)]
+    matches = exact or [f for f in files if needle.lower() in f.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        console.print(f"[red]'{needle}' matches {len(matches)} published videos on {day}:[/red]")
+        for f in matches:
+            console.print(f"  {f}")
+    else:
+        rendered = [r.file for r in manifest.renders if needle.lower() in r.file.lower()]
+        if rendered:
+            console.print(
+                f"[red]'{rendered[0]}' is rendered but not published - "
+                f"run `mt publish {day}` first[/red]"
+            )
+        else:
+            console.print(f"[red]no published video matching '{needle}' on {day}[/red]")
+    raise typer.Exit(2)
+
+
 def _fmt_duration(s: float | None) -> str:
     if s is None:
         return "-"
@@ -1265,6 +1290,113 @@ def publish(
 
 
 @app.command()
+def meta(
+    day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
+    video: Annotated[str, typer.Argument(help="Published rendered file (name or substring)")],
+    title: Annotated[
+        Optional[str],
+        typer.Option("--title", help="New title (auto track/date/best-lap meta appended unless --no-meta)"),
+    ] = None,
+    description: Annotated[
+        Optional[str],
+        typer.Option("--description", "--desc", help="New description (auto meta appended unless --no-meta)"),
+    ] = None,
+    visibility: Annotated[
+        Optional[str], typer.Option("--visibility", help="private | unlisted | public")
+    ] = None,
+    no_meta: Annotated[
+        bool,
+        typer.Option("--no-meta", help="Set --title/--description verbatim, without the auto meta"),
+    ] = False,
+):
+    """Show or edit the YouTube title, description and visibility of a published video.
+
+    With no option, shows the video's current published details.
+    """
+    from .i18n import strings as i18n_strings
+    from .meta import (
+        VISIBILITIES,
+        compose_description,
+        compose_title,
+        fetch_details,
+        title_context,
+        update_details,
+        youtube_service,
+    )
+
+    if visibility is not None and visibility not in VISIBILITIES:
+        console.print(f"[red]--visibility must be one of: {', '.join(VISIBILITIES)}[/red]")
+        raise typer.Exit(2)
+    if no_meta and title is None and description is None:
+        console.print("[red]--no-meta needs --title and/or --description[/red]")
+        raise typer.Exit(2)
+
+    cfg = get_config()
+    lib = Library(cfg.library_root)
+    d = date.fromisoformat(day)
+    manifest = lib.load_day(d)
+    file = _resolve_publish(manifest, video, d)
+    records = manifest.publishes[file]
+    rec = records[-1]
+    if len(records) > 1:
+        console.print(
+            f"[dim]{file} was uploaded {len(records)} times; using the latest ({rec.url})[/dim]"
+        )
+
+    service = youtube_service(cfg)
+    if title is None and description is None and visibility is None:
+        details = fetch_details(rec.video_id, service)
+        if details is None:
+            console.print(f"[red]{rec.url} no longer exists on YouTube[/red]")
+            raise typer.Exit(1)
+        console.print(f"[bold]{file}[/bold] -> {rec.url}")
+        console.print(f"  title:      {details['title']}", markup=False)
+        console.print(f"  visibility: {details['visibility']}")
+        console.print(f"  published:  {details['published_at']}")
+        console.print("  description:")
+        for line in details["description"].splitlines() or [""]:
+            console.print(f"    {line}", markup=False)
+        return
+
+    new_title = new_desc = None
+    if title is not None or description is not None:
+        render = next((r for r in manifest.renders if r.file == file), None)
+        ctx = title_context(
+            lib.day_dir(d), manifest,
+            render.session_id if render else None, cfg.render.min_lap_s,
+        )
+        t = i18n_strings(cfg.language)
+        if title is not None:
+            new_title = compose_title(title, ctx, t, no_meta=no_meta)
+            if not new_title:
+                console.print("[red]--title must not be empty[/red]")
+                raise typer.Exit(2)
+        if description is not None:
+            new_desc = compose_description(description, ctx, t, no_meta=no_meta)
+    try:
+        update_details(rec.video_id, service, title=new_title, description=new_desc, visibility=visibility)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if new_title is not None:
+        rec.title = new_title
+    if new_desc is not None:
+        rec.description = new_desc
+    if visibility is not None:
+        rec.privacy = visibility
+    lib.save_day(manifest)
+    console.print(f"[green]+[/green] updated {rec.url}")
+    if new_title is not None:
+        console.print(f"  title: {new_title}", markup=False)
+    if new_desc is not None:
+        console.print("  description:")
+        for line in new_desc.splitlines():
+            console.print(f"    {line}", markup=False)
+    if visibility is not None:
+        console.print(f"  visibility: {visibility}")
+
+
+@app.command()
 def run(
     publish: Annotated[bool, typer.Option(help="Also upload to YouTube")] = False,
     download: Annotated[
@@ -1398,8 +1530,7 @@ def status(
             if clip and clip not in v.source_name and clip not in v.file:
                 continue
             renders = [r for r in m.renders if v.file in r.source_videos]
-            render_files = {r.file for r in renders}
-            pubs = [p for p in m.publishes if p.file in render_files]
+            pubs = [p for r in renders for p in m.publishes.get(r.file, [])]
             if v.sync is None:
                 synced = "[red]no[/red]"
             else:
