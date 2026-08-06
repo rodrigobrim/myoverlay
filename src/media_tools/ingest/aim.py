@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import zlib
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -83,6 +84,14 @@ def _session_size(meta: dict[str, str]) -> int | None:
         return None
 
 
+def _session_date(meta: dict[str, str]) -> date | None:
+    """The catalog's day-first 'date' ('30/07/2026') as a date, if parseable."""
+    try:
+        return datetime.strptime(meta.get("date", ""), "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+
 def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> RemoteListResult:
     """List the sessions recorded on the MyChron (default: only ones not on
     disk yet). Connects over USB or WiFi; downloads nothing."""
@@ -124,13 +133,17 @@ def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> Remot
 def download_sessions(
     cfg: Config,
     names: list[str] | None = None,
+    days: list[date] | None = None,
     force: bool = False,
     echo=None,
     progress=None,
 ) -> DownloadReport:
     """Download sessions off the MyChron into telemetry.data_dirs[0].
 
-    names=None means every session not already on disk. The device serves
+    names=None means every session not already on disk. days: additionally
+    every session the catalog dates to one of these days (device clock). A
+    day matching nothing is not reported missing - its sessions may already
+    sit on disk, which only the caller can see. The device serves
     zlib-compressed .xrz files: each is decompressed and written as
     <stem>.xrk (the format libxrk and the GPS-time recovery read).
 
@@ -165,10 +178,12 @@ def download_sessions(
             return report
 
         local = _local_stems(cfg)
-        if names:
-            wanted = list(names)
-            report.missing = [n for n in wanted if n not in catalog]
-            wanted = [n for n in wanted if n in catalog]
+        if names or days:
+            wanted = [n for n in (names or []) if n in catalog]
+            report.missing = [n for n in (names or []) if n not in catalog]
+            for n, meta in catalog.items():
+                if n not in wanted and _session_date(meta) in (days or []):
+                    wanted.append(n)
         else:
             wanted = list(catalog)
 
