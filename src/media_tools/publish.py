@@ -13,49 +13,18 @@ are locked to private regardless of the requested privacy status.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from .config import Config
 from .i18n import strings as i18n_strings
 from .library import DayManifest, PublishRecord, utcnow
-from .overlay import fmt_laptime
-from .telemetry import best_lap, session_laps_derived
+from .meta import compose_description, compose_title, render_session_id, title_context
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 # uploader(path, title, description, privacy, playlist_id) -> video_id
 Uploader = Callable[[Path, str, str, str, str | None], str]
-
-
-@dataclass
-class TitleContext:
-    track: str
-    date: str
-    session: int
-    best_lap: str
-
-
-def _title_context(
-    day_dir: Path, manifest: DayManifest, session_id: int | None, min_lap_s: float = 0.0
-) -> TitleContext:
-    # Best lap via the single source of truth (telemetry.best_lap) over the
-    # S/F-relap-corrected laps (session_laps_derived), so the title's best lap
-    # is exactly the one the overlay shows - never the raw early-beacon lap.
-    best_s: float | None = None
-    for session in manifest.sessions:
-        if session_id is None or session.id == session_id:
-            lap = best_lap(session_laps_derived(day_dir, manifest, session), min_lap_s)
-            if lap is not None:
-                dur = lap[2] - lap[1]
-                best_s = dur if best_s is None else min(best_s, dur)
-    return TitleContext(
-        track=manifest.track or "karting",
-        date=manifest.date.isoformat(),
-        session=session_id if session_id is not None else 0,
-        best_lap=fmt_laptime(best_s),
-    )
 
 
 def _token_client_mismatch(cfg: Config, creds) -> bool:
@@ -160,6 +129,25 @@ def api_uploader(cfg: Config) -> Uploader:
     return upload
 
 
+def published_report(manifest: DayManifest, clip_filter: str | None = None) -> list[str]:
+    """What is on YouTube for this day, from the manifest's publish registry:
+    one block per rendered file, the latest upload (the current video) first,
+    older --force re-uploads listed as superseded."""
+    lines: list[str] = []
+    for file, records in manifest.publishes.items():
+        if clip_filter and clip_filter.lower() not in file.lower():
+            continue
+        rec = records[-1]
+        lines.append(
+            f"{file} -> {rec.url} ({rec.privacy}, published {rec.published_at:%Y-%m-%d %H:%M} UTC)"
+        )
+        if rec.title:
+            lines.append(f"    title: {rec.title}")
+        for old in records[:-1]:
+            lines.append(f"    superseded: {old.url} ({old.published_at:%Y-%m-%d %H:%M} UTC)")
+    return lines or ["nothing published"]
+
+
 def publish_day(
     cfg: Config,
     manifest: DayManifest,
@@ -171,7 +159,7 @@ def publish_day(
     save: Callable[[], None] | None = None,
 ) -> list[str]:
     report: list[str] = []
-    published_files = {p.file for p in manifest.publishes}
+    published_files = set(manifest.publishes)
     # force re-uploads renders already on YouTube (e.g. a re-rendered clip):
     # the prior publish record is kept and a new video is created alongside it.
     pending = [r for r in manifest.renders if force or r.file not in published_files]
@@ -196,7 +184,9 @@ def publish_day(
                 f"! {render.file}: source clip has no telemetry sync, refusing to upload"
             )
             continue
-        ctx = _title_context(day_dir, manifest, render.session_id, cfg.render.min_lap_s)
+        ctx = title_context(
+            day_dir, manifest, render_session_id(manifest, render), cfg.render.min_lap_s
+        )
         values = {
             "track": ctx.track,
             "date": ctx.date,
@@ -204,22 +194,21 @@ def publish_day(
             "best_lap": ctx.best_lap,
             "lap": render.lap_num if render.lap_num is not None else "",
         }
-        # Explicit templates in config.toml win; otherwise the defaults for
-        # the configured output language apply.
+        # Explicit templates in config.toml win; otherwise the meta composers
+        # (shared with `mt meta`) build "<review-GUI text> - <auto meta>" in
+        # the configured language. A review-GUI title with append_best_lap
+        # unchecked stays verbatim; an empty title falls back to the auto meta
+        # alone (YouTube rejects empty titles).
         t = i18n_strings(cfg.language)
-        title_template = cfg.youtube.title_template or t["title_template"]
-        description_template = cfg.youtube.description_template or t["description_template"]
-        # A review-GUI item title (render.title) is used verbatim as the base
-        # title; the best lap is appended only when the item asks for it. A
-        # template title already carries the best lap inside it, so it is not
-        # re-appended. render.description likewise overrides the templated body.
-        if render.title:
-            title = render.title
-            if render.append_best_lap and ctx.best_lap != "-:--.--":
-                title = f"{title} - {ctx.best_lap}"
+        if cfg.youtube.title_template:
+            title = cfg.youtube.title_template.format(**values)
         else:
-            title = title_template.format(**values)
-        description = render.description or description_template.format(**values)
+            no_meta = bool(render.title) and not render.append_best_lap
+            title = compose_title(render.title or "", ctx, t, no_meta=no_meta)
+        if cfg.youtube.description_template:
+            description = cfg.youtube.description_template.format(**values)
+        else:
+            description = compose_description(render.description or "", ctx, t)
         if render.lap_num is not None:
             title = f"{title} - {t['lap_word']} {render.lap_num}"
         if render.label:
@@ -234,13 +223,14 @@ def publish_day(
             continue
 
         video_id = uploader(path, title, description, cfg.youtube.privacy, cfg.youtube.playlist_id)
-        manifest.publishes.append(
+        manifest.publishes.setdefault(render.file, []).append(
             PublishRecord(
-                file=render.file,
                 video_id=video_id,
                 url=f"https://youtu.be/{video_id}",
                 privacy=cfg.youtube.privacy,
                 published_at=utcnow(),
+                title=title,
+                description=description,
             )
         )
         # Persist immediately: a later upload failing in this batch must never

@@ -19,7 +19,7 @@ import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 MANIFEST_NAME = "session.json"
 DAY_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -112,11 +112,17 @@ class RenderOutput(BaseModel):
 
 
 class PublishRecord(BaseModel):
-    file: str
+    """One YouTube upload of a rendered file. The file itself is the key of
+    DayManifest.publishes; a --force re-upload appends a second record under
+    the same key (latest = the current video)."""
+
     video_id: str
     url: str
     privacy: str
     published_at: datetime
+    # What was actually sent to YouTube; `mt meta` keeps these current.
+    title: str | None = None
+    description: str | None = None
 
 
 class ConsumedSegment(BaseModel):
@@ -135,9 +141,24 @@ class DayManifest(BaseModel):
     telemetry: list[TelemetryLog] = Field(default_factory=list)
     sessions: list[TrackSession] = Field(default_factory=list)
     renders: list[RenderOutput] = Field(default_factory=list)
-    publishes: list[PublishRecord] = Field(default_factory=list)
+    # Rendered file path -> its uploads, in upload order (see PublishRecord).
+    publishes: dict[str, list[PublishRecord]] = Field(default_factory=dict)
     # Split segments already joined into a single clip (see ConsumedSegment).
     consumed_segments: list[ConsumedSegment] = Field(default_factory=list)
+
+    @field_validator("publishes", mode="before")
+    @classmethod
+    def _publishes_from_legacy_list(cls, v):
+        """Old manifests stored publishes as a flat list, each record carrying
+        its rendered file path; regroup them under that path. The leftover
+        "file" key inside each record is ignored by PublishRecord."""
+        if isinstance(v, list):
+            grouped: dict[str, list] = {}
+            for rec in v:
+                file = rec["file"] if isinstance(rec, dict) else rec.file
+                grouped.setdefault(file, []).append(rec)
+            return grouped
+        return v
 
     def has_video(self, source_name: str, size_bytes: int) -> bool:
         return any(

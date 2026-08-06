@@ -73,13 +73,13 @@ def _one_session_manifest(day_dir):
 def test_title_best_lap_is_derived_aware(cfg, tmp_path):
     """With a sibling .sf-relapped.parquet the title's best lap follows the
     CORRECTED laps, not the raw early-beacon .xrk laps."""
-    from media_tools.publish import _title_context
+    from media_tools.meta import title_context
 
     day_dir = tmp_path / "day"
     manifest = _one_session_manifest(day_dir)
 
     # without the sidecar: raw laps -> best complete lap is 60 s (1:00.00)
-    assert _title_context(day_dir, manifest, 1).best_lap == "1:00.00"
+    assert title_context(day_dir, manifest, 1).best_lap == "1:00.00"
 
     # corrected laps put the fastest complete lap at 59 s (0:59.00)
     _write_derived(
@@ -89,4 +89,4 @@ def test_title_best_lap_is_derived_aware(cfg, tmp_path):
          {"num": 2, "start_time": 70000, "end_time": 129000},
          {"num": 3, "start_time": 129000, "end_time": 145000}],
     )
-    assert _title_context(day_dir, manifest, 1).best_lap == "0:59.00"
+    assert title_context(day_dir, manifest, 1).best_lap == "0:59.00"
