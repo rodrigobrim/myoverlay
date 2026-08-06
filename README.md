@@ -102,6 +102,13 @@ For development in this checkout, `uv run mt <command>` is the direct entry
 point (same CLI the exe forwards to), and `uv run python tools/proof_slices.py`
 renders quick HD test slices instead of full re-renders.
 
+To exercise a branch against the real library and Google credentials, run
+`.\mt <command>` from the root of the checkout (or worktree) you are working
+in. It runs that checkout's code — uncommitted edits included — with the
+working directory and bundled ffmpeg/git the installed exe uses, so nothing
+about the installed `mt` changes. `uv run mt` differs only in reading
+`config.toml` from the checkout instead of `~\MyOverlay`.
+
 ```
 uv run pytest
 ```
