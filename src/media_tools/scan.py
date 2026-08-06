@@ -229,20 +229,18 @@ def scan_new(cfg: Config) -> ScanResult:
         ))
 
     # --- new camera clips (name+size not already ingested) ---
-    camera_tz = cfg.camera.tzinfo()
-    sources = _cam.find_dcim_sources() + list(cfg.camera.source_dirs)
-    known_vid = lib.known_videos()
+    _vid_sources, cam_files = _cam.enumerate_camera_videos(cfg)
     vid_entries: list[tuple[ScanVideo, datetime, datetime | None]] = []
-    for path in _cam.iter_source_videos(sources, cfg.camera.extensions):
-        size = path.stat().st_size
-        if (path.name, size) in known_vid:
+    for cf in cam_files:
+        if cf.ingested:
             continue
-        start = _cam.capture_time(path, camera_tz)
-        dur = _cam.probe_duration_s(path)
-        end = start + timedelta(seconds=dur) if dur else None
+        # MTP files have no filesystem path to hand ffprobe; the duration
+        # stays unknown until the clip is downloaded.
+        dur = None if cf.mtp else _cam.probe_duration_s(cf.path)
+        end = cf.start_utc + timedelta(seconds=dur) if dur else None
         vid_entries.append((
-            ScanVideo(source_name=path.name, size_bytes=size, start_utc=start, end_utc=end, duration_s=dur),
-            start, end,
+            ScanVideo(source_name=cf.name, size_bytes=cf.size, start_utc=cf.start_utc, end_utc=end, duration_s=dur),
+            cf.start_utc, end,
         ))
 
     # --- correlate: attach each telemetry to the best-overlapping video ---

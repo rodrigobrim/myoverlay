@@ -84,11 +84,13 @@ class SourcesSnapshot:
 
 
 def snapshot_sources(cfg: Config) -> SourcesSnapshot:
+    from .ingest import mtp
     from .ingest.camera import find_dcim_sources
     from .ingest.telemetry import scan_sources
 
     return SourcesSnapshot(
-        dcim_volumes=frozenset(str(p) for p in find_dcim_sources()),
+        dcim_volumes=frozenset(str(p) for p in find_dcim_sources())
+        | frozenset(mtp.find_mtp_sources()),
         telemetry_files=frozenset((p.name, p.stat().st_size) for p in scan_sources(cfg)),
     )
 
