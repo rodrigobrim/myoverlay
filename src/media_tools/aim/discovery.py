@@ -83,6 +83,42 @@ def _netsh(*args):
                           capture_output=True, text=True, timeout=30)
 
 
+# WinRT WiFiAdapter.ScanAsync, reached through PowerShell. The AsTask
+# overloads are picked by parameter type because ScanAsync returns an
+# IAsyncAction while the other two return IAsyncOperations.
+_SCAN_PS = """
+$null = [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType=WindowsRuntime]
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$m = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 }
+$op = ($m | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+$act = ($m | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' })[0]
+$null = $op.MakeGenericMethod([Windows.Devices.WiFi.WiFiAccessStatus]).Invoke($null, @([Windows.Devices.WiFi.WiFiAdapter]::RequestAccessAsync())).Result
+$adapters = $op.MakeGenericMethod([System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]]).Invoke($null, @([Windows.Devices.WiFi.WiFiAdapter]::FindAllAdaptersAsync())).Result
+foreach ($a in $adapters) { $null = $act.Invoke($null, @($a.ScanAsync())).Wait(15000) }
+"""
+
+
+def _force_scan(timeout: float = 30.0) -> None:
+    """Make the adapter scan now; netsh only ever reads a cache.
+
+    `netsh wlan show networks` reports the previous scan's results, and
+    while Windows is associated to an AP it rescans so rarely that a logger
+    powered on right next to the machine can stay invisible indefinitely -
+    observed as a cache holding nothing but the connected network. WinRT's
+    WiFiAdapter is the one documented way to request a scan on demand, and
+    PowerShell is how to reach it without adding a package dependency.
+
+    Best-effort by design: whatever goes wrong (no PowerShell, no adapter,
+    location consent denied), the caller still reads the cache as before.
+    """
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                        "-Command", _SCAN_PS],
+                       capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        pass
+
+
 class LoggerAp(NamedTuple):
     """A broadcasting AiM logger: its SSID, and whether it needs a password."""
 
@@ -98,11 +134,14 @@ _SSID_HEADER = re.compile(r"^SSID\s+\d+\s*:\s*(.*)$")
 def find_logger_aps() -> list[LoggerAp]:
     """Every broadcasting AiM logger in range, in the order netsh scans them.
 
-    A single `mode=bssid` scan carries both the names and the security of
-    each network, so this is one netsh call rather than one per logger.
-    netsh localizes the 'Authentication' label, so each block is scanned for
-    the untranslated scheme names (WPA*, 802.1X) instead of by field name.
+    A fresh scan is forced first - see _force_scan for why netsh alone is
+    not enough. A single `mode=bssid` listing then carries both the names
+    and the security of each network, so this is one netsh call rather than
+    one per logger. netsh localizes the 'Authentication' label, so each
+    block is scanned for the untranslated scheme names (WPA*, 802.1X)
+    instead of by field name.
     """
+    _force_scan()
     try:
         out = _netsh("show", "networks", "mode=bssid").stdout
     except Exception:
