@@ -1,11 +1,14 @@
 """Metadata composers (`mt meta` + publish), publishes-dict migration."""
 
+from datetime import date, datetime, timezone
+
 from media_tools.i18n import strings as i18n_strings
-from media_tools.library import DayManifest
+from media_tools.library import DayManifest, RenderOutput, VideoClip
 from media_tools.meta import (
     TitleContext,
     compose_description,
     compose_title,
+    render_session_id,
     update_details,
 )
 
@@ -40,6 +43,39 @@ def test_compose_description_appends_meta_block():
     )
     assert compose_description("Minha descrição.", CTX, t, no_meta=True) == "Minha descrição."
     assert compose_description("", CTX, t).startswith("Gravado em 2026-07-30")
+
+
+def _render_manifest(render_session_id_value, clip_session_id=11):
+    """A render whose own session_id disagrees with its source clip's."""
+    now = datetime(2026, 7, 30, tzinfo=timezone.utc)
+    return DayManifest(
+        date=date(2026, 7, 30),
+        track="KGV 111",
+        videos=[VideoClip(file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1,
+                          start_utc_estimate=now, session_id=clip_session_id)],
+        renders=[RenderOutput(file="out/c_overlay.mp4", session_id=render_session_id_value,
+                              kind="session", rendered_at=now,
+                              source_videos=["raw/video/c.MP4"])],
+    )
+
+
+def test_render_session_id_prefers_the_source_clip():
+    """A render row can carry a stale session_id (re-render, or a slice written
+    before correlate reassigned the day); the clip -> session link is the one
+    kept current, so it wins - otherwise the title silently loses its best lap."""
+    m = _render_manifest(render_session_id_value=1, clip_session_id=11)
+    assert render_session_id(m, m.renders[0]) == 11
+
+
+def test_render_session_id_falls_back_to_the_render_row():
+    # source clip unassigned -> the render's own id is all there is
+    m = _render_manifest(render_session_id_value=7, clip_session_id=None)
+    assert render_session_id(m, m.renders[0]) == 7
+    # source clip missing from the manifest entirely
+    m.videos = []
+    assert render_session_id(m, m.renders[0]) == 7
+    # no render row at all (published file with no render record)
+    assert render_session_id(m, None) is None
 
 
 def test_manifest_migrates_legacy_publishes_list():

@@ -1,12 +1,21 @@
 """CLI contracts for `mt publish --show-published` and `mt meta`."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from typer.testing import CliRunner
 
 import media_tools.cli as cli
-from media_tools.library import DayManifest, Library, PublishRecord, RenderOutput
+from media_tools.library import (
+    DayManifest,
+    Lap,
+    Library,
+    PublishRecord,
+    RenderOutput,
+    TelemetryLog,
+    TrackSession,
+    VideoClip,
+)
 
 runner = CliRunner()
 DAY = date(2026, 7, 30)
@@ -266,6 +275,92 @@ def test_meta_targets_latest_upload(cli_cfg, fake_service, sent):
     assert r.exit_code == 0
     assert "uploaded 2 times; using the latest" in r.stdout
     assert sent["video_id"] == "v2"
+
+
+def _seed_two_sessions(cfg, render_sid: int, clip_sid: int | None) -> None:
+    """The real 2026-07-30 shape: a rollout-only session (one out-lap, no
+    complete lap) plus the clip's real session, and a render row whose
+    session_id may disagree with its source clip's."""
+    s1_start = datetime(2026, 7, 30, 23, 4, tzinfo=timezone.utc)
+    s11_start = datetime(2026, 7, 31, 1, 25, tzinfo=timezone.utc)
+    manifest = DayManifest(
+        date=DAY,
+        track="KGV 111",
+        videos=[VideoClip(file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1,
+                          start_utc_estimate=s11_start, session_id=clip_sid)],
+        sessions=[
+            TrackSession(id=1, start_utc=s1_start,
+                         end_utc=s1_start + timedelta(seconds=9)),
+            TrackSession(id=11, start_utc=s11_start,
+                         end_utc=s11_start + timedelta(minutes=14)),
+        ],
+        telemetry=[
+            # session 1: MyChron only logged the rollout - a single lap, so no
+            # beacon-complete lap and therefore no best lap
+            TelemetryLog(file="raw/telemetry/s1.xrk", source_name="s1.xrk", size_bytes=1,
+                         start_utc=s1_start, end_utc=s1_start + timedelta(seconds=9),
+                         session_id=1, laps=[Lap(num=1, start_s=0.0, end_s=9.3)]),
+            # session 11: out-lap, one complete 61.555 s lap (best), in-lap
+            TelemetryLog(file="raw/telemetry/s11.xrk", source_name="s11.xrk", size_bytes=1,
+                         start_utc=s11_start, end_utc=s11_start + timedelta(minutes=14),
+                         session_id=11,
+                         laps=[Lap(num=1, start_s=0.0, end_s=62.345),
+                               Lap(num=2, start_s=62.345, end_s=123.9),
+                               Lap(num=3, start_s=123.9, end_s=185.0)]),
+        ],
+        renders=[RenderOutput(file="out/c_overlay.mp4", session_id=render_sid,
+                              kind="session", rendered_at=s11_start,
+                              source_videos=["raw/video/c.MP4"])],
+        publishes={"out/c_overlay.mp4": [
+            PublishRecord(video_id="v1", url="https://youtu.be/v1",
+                          privacy="private", published_at=T1)
+        ]},
+    )
+    Library(cfg.library_root).save_day(manifest)
+
+
+def test_meta_title_uses_source_clip_session_when_render_row_is_stale(
+    cli_cfg, fake_service, sent
+):
+    """Regression (real 2026-07-30 library): the render row for the 0015 clip
+    carried session_id=1 - a 9-second rollout-only session with no complete lap
+    - while the clip itself belongs to session 11. The best lap must come from
+    the clip's session; before the fix the '- BL m:ss.ss' block silently
+    vanished from the title and description."""
+    _seed_two_sessions(cli_cfg, render_sid=1, clip_sid=11)
+    r = runner.invoke(cli.app, [
+        "meta", "2026-07-30", "c_overlay", "--title", "Karteiros Master",
+        "--desc", "Minha descrição.",
+    ])
+    assert r.exit_code == 0
+    assert sent["title"] == "Karteiros Master - KGV 111 30/07/26 - BL 1:01.56"
+    assert sent["description"].startswith(
+        "Minha descrição.\n\nRecorded 2026-07-30 at KGV 111.\nBest lap: 1:01.56"
+    )
+    assert "no complete lap" not in r.stdout
+
+
+def test_meta_warns_when_the_session_really_has_no_complete_lap(
+    cli_cfg, fake_service, sent
+):
+    """Both the render row and its clip on the rollout-only session: there is
+    genuinely no best lap, so the title carries none - but say so instead of
+    dropping it silently."""
+    _seed_two_sessions(cli_cfg, render_sid=1, clip_sid=1)
+    r = runner.invoke(cli.app, ["meta", "2026-07-30", "c_overlay", "--title", "Karteiros Master"])
+    assert r.exit_code == 0
+    assert sent["title"] == "Karteiros Master - KGV 111 30/07/26"
+    assert "no complete lap" in r.stdout
+
+
+def test_meta_no_meta_skips_the_best_lap_warning(cli_cfg, fake_service, sent):
+    _seed_two_sessions(cli_cfg, render_sid=1, clip_sid=1)
+    r = runner.invoke(
+        cli.app, ["meta", "2026-07-30", "c_overlay", "--title", "Karteiros Master", "--no-meta"]
+    )
+    assert r.exit_code == 0
+    assert sent["title"] == "Karteiros Master"
+    assert "no complete lap" not in r.stdout
 
 
 def test_meta_update_of_vanished_video_fails_cleanly(cli_cfg, fake_service, monkeypatch):

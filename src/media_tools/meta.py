@@ -18,12 +18,32 @@ from datetime import date
 from pathlib import Path
 
 from .config import Config
-from .library import DayManifest
+from .library import DayManifest, RenderOutput
 from .overlay import fmt_laptime
 from .telemetry import best_lap, session_laps_derived
 
 VISIBILITIES = ("private", "unlisted", "public")
 NO_LAP = "-:--.--"
+
+
+def render_session_id(manifest: DayManifest, render: RenderOutput | None) -> int | None:
+    """Which track session a render's best lap must come from.
+
+    The render row's own session_id can be stale - a re-render or a slice
+    written before correlate reassigned the day leaves an old id behind, and
+    an id pointing at a rollout-only session yields no complete lap, silently
+    costing the title its best lap. The clip -> session link is the one
+    correlate/sync keep current, so the source clip wins; the render's own id
+    is the fallback when no source clip carries one.
+    """
+    if render is None:
+        return None
+    by_file = {v.file: v for v in manifest.videos}
+    for src in render.source_videos:
+        clip = by_file.get(src)
+        if clip is not None and clip.session_id is not None:
+            return clip.session_id
+    return render.session_id
 
 
 @dataclass
