@@ -92,6 +92,13 @@ track day).
   own protocol over USB or WiFi (see
   [docs/mychron-protocol-re.md](docs/mychron-protocol-re.md)). Only the
   MyChron6 is implemented; other AiM models use different download paths.
+- **Picking a logger over WiFi**: USB is tried first. Falling back to WiFi,
+  every `AiM-...` network in range is listed and — when there is more than
+  one — you are asked which to join, every time, so a neighbour's logger is
+  never picked for you. A password is asked for only if that network has one,
+  then kept per-SSID, encrypted with Windows DPAPI, in
+  `~/MyOverlay/wifi-credentials.json`. Both prompts need a terminal: with two
+  loggers in range the watcher reports what it needs rather than guessing.
 - The `.xrk` parser (`libxrk`) reads GPS, RPM, temperatures and lap markers;
   the session's absolute start time comes from the file's `Log Date`/`Log
   Time` metadata interpreted in `telemetry.timezone`.

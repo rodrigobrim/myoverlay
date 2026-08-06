@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 
-from .errors import NoDeviceError
+from .errors import NoDeviceError, UserInputNeededError
 
 
 def _usb():
@@ -39,6 +39,11 @@ def connect(prefer: str | None = None, verbose: bool = True):
     for name in names:
         try:
             dev = TRANSPORTS[name]()
+        except UserInputNeededError:
+            # A logger IS reachable, it just needs an answer first. Falling
+            # through to "no MyChron found" would bury the one message that
+            # tells the user what to do about it.
+            raise
         except Exception as exc:
             tried.append(f"{name}: {type(exc).__name__}")
             continue

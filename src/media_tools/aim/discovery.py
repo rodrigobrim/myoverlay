@@ -11,10 +11,12 @@ device answers with a descriptor carrying its name, IP and serial.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import tempfile
 import time
+from typing import NamedTuple
 
 WIFI_HOST = "10.0.0.1"          # the logger is its own DHCP server and gateway
 WIFI_UDP_PORT = 36002
@@ -81,42 +83,42 @@ def _netsh(*args):
                           capture_output=True, text=True, timeout=30)
 
 
-def find_logger_ap() -> str | None:
-    """SSID of a broadcasting AiM logger, if one is in range."""
-    try:
-        out = _netsh("show", "networks").stdout
-    except Exception:
-        return None
-    for line in out.splitlines():
-        if "AiM-" in line and ":" in line:
-            ssid = line.split(":", 1)[1].strip()
-            if ssid.startswith("AiM-"):
-                return ssid
-    return None
+class LoggerAp(NamedTuple):
+    """A broadcasting AiM logger: its SSID, and whether it needs a password."""
+
+    ssid: str
+    protected: bool
 
 
-def ap_is_protected(ssid: str) -> bool | None:
-    """Whether `ssid` requires a password; None if it is not in the scan.
+# 'SSID 3 : AiM-MYC6-021763-...' opens a network's block. The number and the
+# colon are what distinguish it from the indented 'BSSID 1 :' rows inside it.
+_SSID_HEADER = re.compile(r"^SSID\s+\d+\s*:\s*(.*)$")
 
-    netsh localizes the 'Authentication' label, so the SSID's block is
-    scanned for the untranslated scheme names (WPA*, 802.1X) instead of
-    parsing by field name.
+
+def find_logger_aps() -> list[LoggerAp]:
+    """Every broadcasting AiM logger in range, in the order netsh scans them.
+
+    A single `mode=bssid` scan carries both the names and the security of
+    each network, so this is one netsh call rather than one per logger.
+    netsh localizes the 'Authentication' label, so each block is scanned for
+    the untranslated scheme names (WPA*, 802.1X) instead of by field name.
     """
     try:
         out = _netsh("show", "networks", "mode=bssid").stdout
     except Exception:
-        return None
-    in_block = False
+        return []
+    aps: list[LoggerAp] = []
+    current = None      # index of the AiM block being read, if any
     for line in out.splitlines():
-        if ":" in line and line.split(":", 1)[1].strip() == ssid:
-            in_block = True
-            continue
-        if in_block:
-            if line.strip().startswith("SSID "):   # next network's block
-                return False
-            if "WPA" in line or "802.1X" in line:
-                return True
-    return False if in_block else None
+        header = _SSID_HEADER.match(line.strip())
+        if header:
+            ssid = header.group(1).strip()
+            current = len(aps) if ssid.startswith("AiM-") else None
+            if current is not None:
+                aps.append(LoggerAp(ssid, False))
+        elif current is not None and ("WPA" in line or "802.1X" in line):
+            aps[current] = aps[current]._replace(protected=True)
+    return aps
 
 
 def join_logger_ap(ssid: str, password: str | None = None,

@@ -86,13 +86,13 @@ def _session_size(meta: dict[str, str]) -> int | None:
 def list_remote_sessions(cfg: Config, include_downloaded: bool = False) -> RemoteListResult:
     """List the sessions recorded on the MyChron (default: only ones not on
     disk yet). Connects over USB or WiFi; downloads nothing."""
-    from ..aim import NoDeviceError, connect
+    from ..aim import NoDeviceError, UserInputNeededError, connect
     from ..aim.catalog import as_catalog
 
     result = RemoteListResult()
     try:
         dev = connect(prefer=cfg.telemetry.transport, verbose=False)
-    except NoDeviceError as exc:
+    except (NoDeviceError, UserInputNeededError) as exc:
         result.notes.append(f"! {exc}")
         return result
 
@@ -138,7 +138,7 @@ def download_sessions(
     happens (device transfers take a while). progress: optional
     (name, done, total) callable for in-flight transfer progress.
     """
-    from ..aim import NoDeviceError, connect
+    from ..aim import NoDeviceError, UserInputNeededError, connect
     from ..aim.catalog import as_catalog
 
     report = DownloadReport()
@@ -150,7 +150,7 @@ def download_sessions(
 
     try:
         dev = connect(prefer=cfg.telemetry.transport, verbose=False)
-    except NoDeviceError as exc:
+    except (NoDeviceError, UserInputNeededError) as exc:
         report.errors.append(str(exc))
         return report
 
