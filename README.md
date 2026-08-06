@@ -7,11 +7,13 @@
 
 # media-tools
 
-Zero-touch karting video pipeline: DJI Osmo Action footage + AiM MyChron
-telemetry in, YouTube videos with a telemetry overlay out.
+Zero-touch karting video pipeline: DJI Osmo Action / GoPro footage + AiM
+MyChron telemetry in, YouTube videos with a telemetry overlay out. Cameras
+are picked up as removable DCIM volumes (SD card / DJI over USB) or as MTP
+portable devices (GoPro over USB, which mounts no drive letter).
 
 ```
-camera SD/USB ──────┐
+camera SD/USB/MTP ──┐
                     ├─> ingest ─> correlate ─> sync ─> render ─> publish
 MyChron (USB/WiFi) ─┘              (sessions)  (audio↔RPM)  (overlay)  (YouTube)
 ```
