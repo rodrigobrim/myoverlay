@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 from .config import Config
 from .library import DayManifest, RenderOutput
@@ -24,6 +25,41 @@ from .telemetry import best_lap, session_laps_derived
 
 VISIBILITIES = ("private", "unlisted", "public")
 NO_LAP = "-:--.--"
+
+# updater(video_id, title, description, visibility) -> None; None leaves a
+# field untouched. Injectable so publish can be driven without the API.
+Updater = Callable[[str, str | None, str | None, str | None], None]
+
+
+@dataclass
+class DetailOverrides:
+    """The `--title/--description/--visibility/--no-meta` quartet, as accepted
+    by `mt meta` and by `mt publish` (which applies them right after upload)."""
+
+    title: str | None = None
+    description: str | None = None
+    visibility: str | None = None
+    no_meta: bool = False
+
+    @property
+    def wanted(self) -> bool:
+        return (
+            self.title is not None
+            or self.description is not None
+            or self.visibility is not None
+        )
+
+
+def validate_overrides(ov: DetailOverrides) -> str | None:
+    """The message to print when the option combination is refused, else None.
+
+    One implementation so `mt meta` and `mt publish` cannot drift apart.
+    """
+    if ov.visibility is not None and ov.visibility not in VISIBILITIES:
+        return f"--visibility must be one of: {', '.join(VISIBILITIES)}"
+    if ov.no_meta and ov.title is None and ov.description is None:
+        return "--no-meta needs --title and/or --description"
+    return None
 
 
 def render_session_id(manifest: DayManifest, render: RenderOutput | None) -> int | None:
@@ -110,12 +146,37 @@ def compose_description(
     return f"{user_desc}\n\n{meta}" if user_desc else meta
 
 
+def composed_details(
+    ov: DetailOverrides, ctx: TitleContext, t: dict[str, str]
+) -> tuple[str | None, str | None]:
+    """The title/description to send for these overrides - None where the
+    option was not given, so the field is left alone."""
+    title = (
+        compose_title(ov.title, ctx, t, no_meta=ov.no_meta) if ov.title is not None else None
+    )
+    description = (
+        compose_description(ov.description, ctx, t, no_meta=ov.no_meta)
+        if ov.description is not None
+        else None
+    )
+    return title, description
+
+
 def youtube_service(cfg: Config):
     from googleapiclient.discovery import build
 
     from .publish import get_credentials
 
     return build("youtube", "v3", credentials=get_credentials(cfg))
+
+
+def api_updater(service) -> Updater:
+    def apply(video_id, title=None, description=None, visibility=None) -> None:
+        update_details(
+            video_id, service, title=title, description=description, visibility=visibility
+        )
+
+    return apply
 
 
 def fetch_details(video_id: str, service) -> dict[str, str] | None:

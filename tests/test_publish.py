@@ -249,6 +249,116 @@ def test_publish_title_uses_source_clip_session_when_render_row_is_stale(cfg, tm
     assert calls == ["Interlagos 12/07/26 - BL 1:01.56"]
 
 
+def _override_run(cfg, day_dir, manifest, **override_kw):
+    """publish_day with detail overrides, capturing upload+update call order."""
+    from media_tools.meta import DetailOverrides
+
+    calls = []
+
+    def up(path, title, description, privacy, playlist_id):
+        calls.append(("upload", title, privacy))
+        return "vid1"
+
+    def upd(video_id, title=None, description=None, visibility=None):
+        calls.append(("update", video_id, title, description, visibility))
+
+    report = publish_day(
+        cfg, manifest, day_dir, uploader=up, updater=upd,
+        overrides=DetailOverrides(**override_kw),
+    )
+    return calls, report
+
+
+def test_publish_applies_details_right_after_each_upload(cfg, tmp_path):
+    """--title/--description/--visibility are the meta edit, run on the video
+    the moment its upload returns: upload first, then exactly one update."""
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, report = _override_run(
+        cfg, day_dir, manifest,
+        title="Karteiros Master", description="Minha descrição.", visibility="public",
+    )
+    assert [c[0] for c in calls] == ["upload", "update"]
+    # the upload itself is unchanged - the configured default title and privacy
+    assert calls[0] == ("upload", "Interlagos 12/07/26 - BL 1:01.56", "private")
+    _, video_id, title, desc, vis = calls[1]
+    assert video_id == "vid1"
+    assert title == "Karteiros Master - Interlagos 12/07/26 - BL 1:01.56"
+    assert desc.startswith("Minha descrição.\n\nRecorded 2026-07-12 at Interlagos.")
+    assert vis == "public"
+    # the registry mirrors the applied details, not the upload-time ones
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.title == title and rec.description == desc and rec.privacy == "public"
+    assert any("details set: title, description, visibility" in line for line in report)
+
+
+def test_publish_details_only_touch_given_fields(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest, visibility="unlisted")
+    assert calls[1] == ("update", "vid1", None, None, "unlisted")
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.privacy == "unlisted"
+    # title untouched -> still the upload-time one
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"
+
+
+def test_publish_details_no_meta_is_verbatim(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest, title="Só isso", no_meta=True)
+    assert calls[1] == ("update", "vid1", "Só isso", None, None)
+
+
+def test_publish_without_details_never_updates(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest)  # no overrides given
+    assert [c[0] for c in calls] == ["upload"]
+
+
+def test_publish_details_failure_keeps_the_upload(cfg, tmp_path):
+    """The video is already on YouTube when the edit runs: a failing update is
+    reported, never rolled back, and never loses the publish record."""
+    from media_tools.meta import DetailOverrides
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+
+    def boom(video_id, title=None, description=None, visibility=None):
+        raise ValueError("video vid1 no longer exists on YouTube")
+
+    report = publish_day(
+        cfg, manifest, day_dir, uploader=lambda *a: "vid1", updater=boom,
+        overrides=DetailOverrides(title="X"),
+    )
+    assert any(line.startswith("+") for line in report)
+    assert any("details not applied" in line for line in report)
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.video_id == "vid1"
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"  # upload-time value kept
+
+
+def test_publish_dry_run_shows_details_without_calling(cfg, tmp_path):
+    from media_tools.meta import DetailOverrides
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls = []
+    report = publish_day(
+        cfg, manifest, day_dir, dry_run=True,
+        updater=lambda *a, **kw: calls.append(a),
+        overrides=DetailOverrides(title="Karteiros Master", visibility="public"),
+    )
+    assert calls == [] and manifest.publishes == {}
+    assert any("would upload" in line for line in report)
+    assert any(
+        "then would set title: Karteiros Master - Interlagos 12/07/26 - BL 1:01.56" in line
+        for line in report
+    )
+    assert any("then would set visibility: public" in line for line in report)
+
+
 def test_published_report_latest_first_then_superseded(cfg, tmp_path):
     from media_tools.publish import published_report
 
