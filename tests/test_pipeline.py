@@ -1,6 +1,8 @@
+from datetime import date
 from pathlib import Path
 
 import media_tools.pipeline as pipeline
+from media_tools.library import Library
 from media_tools.pipeline import (
     PipelineReport,
     SourcesSnapshot,
@@ -54,6 +56,32 @@ def test_run_pipeline_stage_order_and_report(cfg, monkeypatch):
     assert isinstance(report, PipelineReport)
     # empty library: no per-day stages ran
     assert not [l for l in report.lines if l.startswith("[correlate")]
+
+
+def test_run_pipeline_day_restricts_per_day_stages(cfg, monkeypatch):
+    class FakeIngestReport:
+        copied = []
+        errors = []
+
+    monkeypatch.setattr(
+        "media_tools.ingest.camera.ingest_camera", lambda cfg: FakeIngestReport()
+    )
+    monkeypatch.setattr(
+        "media_tools.ingest.telemetry.ingest_telemetry", lambda cfg: FakeIngestReport()
+    )
+    lib = Library(cfg.library_root)
+    for d in (date(2026, 7, 12), date(2026, 7, 13)):
+        lib.save_day(lib.load_day(d))
+
+    synced = []
+    monkeypatch.setattr(
+        "media_tools.sync.sync_day",
+        lambda cfg, manifest, day_dir: synced.append(manifest.date) or [],
+    )
+    monkeypatch.setattr("media_tools.render.render_day", lambda cfg, manifest, day_dir: [])
+
+    run_pipeline(cfg, day=date(2026, 7, 13))
+    assert synced == [date(2026, 7, 13)]
 
 
 def test_needs_attention_filters_flags():
