@@ -38,9 +38,13 @@ def run_pipeline(
     takes every action itself by default.
 
     day restricts the per-day stages (sync/correlate/render/publish) to that
-    single day; ingest still runs, since fresh material may belong to it."""
+    single day; ingest still runs, since fresh material may belong to it.
+    Naming a day is an explicit request for THAT day's material, so the
+    MyChron download runs regardless of auto_download (unless the caller
+    passes download=False) and asks the device for that day's sessions -
+    the same selection `mt telemetry get DAY` makes."""
     if download is None:
-        download = cfg.telemetry.auto_download
+        download = day is not None or cfg.telemetry.auto_download
     from .correlate import correlate_day
     from .ingest.camera import ingest_camera
     from .ingest.telemetry import ingest_telemetry
@@ -52,7 +56,17 @@ def run_pipeline(
     if download:
         from .ingest.aim import download_sessions
 
-        report.add("telemetry:download", download_sessions(cfg).lines())
+        dl = download_sessions(cfg, days=[day] if day else None)
+        lines = dl.lines()
+        # A day the device's catalog dates differently (the MyChron clock
+        # wanders) selects nothing, and an empty report would read exactly
+        # like "no download ran" - say so instead.
+        if day and not lines:
+            lines = [
+                f"? no session dated {day} on the device "
+                f"(device clock - check `mt telemetry list`)"
+            ]
+        report.add("telemetry:download", lines)
 
     cam = ingest_camera(cfg)
     report.add("ingest:camera", cam.copied + [f"! {e}" for e in cam.errors])

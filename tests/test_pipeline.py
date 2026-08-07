@@ -58,10 +58,16 @@ def test_run_pipeline_stage_order_and_report(cfg, monkeypatch):
     assert not [l for l in report.lines if l.startswith("[correlate")]
 
 
-def test_run_pipeline_day_restricts_per_day_stages(cfg, monkeypatch):
+def _stub_stages(cfg, monkeypatch, synced, asked, downloaded=("a_0186.xrk",)):
+    """Stub every stage that touches a device, the disk or ffmpeg."""
+
     class FakeIngestReport:
         copied = []
         errors = []
+
+    class FakeDownloadReport:
+        def lines(self):
+            return list(downloaded)
 
     monkeypatch.setattr(
         "media_tools.ingest.camera.ingest_camera", lambda cfg: FakeIngestReport()
@@ -69,19 +75,61 @@ def test_run_pipeline_day_restricts_per_day_stages(cfg, monkeypatch):
     monkeypatch.setattr(
         "media_tools.ingest.telemetry.ingest_telemetry", lambda cfg: FakeIngestReport()
     )
-    lib = Library(cfg.library_root)
-    for d in (date(2026, 7, 12), date(2026, 7, 13)):
-        lib.save_day(lib.load_day(d))
-
-    synced = []
+    monkeypatch.setattr(
+        "media_tools.ingest.aim.download_sessions",
+        lambda cfg, days=None: asked.append(days) or FakeDownloadReport(),
+    )
     monkeypatch.setattr(
         "media_tools.sync.sync_day",
         lambda cfg, manifest, day_dir: synced.append(manifest.date) or [],
     )
     monkeypatch.setattr("media_tools.render.render_day", lambda cfg, manifest, day_dir: [])
 
+
+def test_run_pipeline_day_restricts_per_day_stages(cfg, monkeypatch):
+    synced, asked = [], []
+    _stub_stages(cfg, monkeypatch, synced, asked)
+    lib = Library(cfg.library_root)
+    for d in (date(2026, 7, 12), date(2026, 7, 13)):
+        lib.save_day(lib.load_day(d))
+
     run_pipeline(cfg, day=date(2026, 7, 13))
     assert synced == [date(2026, 7, 13)]
+
+
+def test_run_pipeline_day_downloads_that_days_telemetry(cfg, monkeypatch):
+    """A named day is an explicit request for its material: the MyChron
+    download runs even with auto_download off, scoped to that day."""
+    synced, asked = [], []
+    cfg.telemetry.auto_download = False
+    _stub_stages(cfg, monkeypatch, synced, asked)
+
+    report = run_pipeline(cfg, day=date(2026, 7, 13))
+    assert asked == [[date(2026, 7, 13)]]
+    assert "[telemetry:download] a_0186.xrk" in report.lines
+
+    # ...and --no-download still wins.
+    asked.clear()
+    run_pipeline(cfg, day=date(2026, 7, 13), download=False)
+    assert asked == []
+
+
+def test_run_pipeline_day_with_no_matching_session_says_so(cfg, monkeypatch):
+    synced, asked = [], []
+    _stub_stages(cfg, monkeypatch, synced, asked, downloaded=())
+
+    report = run_pipeline(cfg, day=date(2026, 7, 13))
+    assert [l for l in report.lines if l.startswith("[telemetry:download] ? no session")]
+    assert report.needs_attention()
+
+
+def test_run_pipeline_without_day_downloads_everything_new(cfg, monkeypatch):
+    synced, asked = [], []
+    cfg.telemetry.auto_download = True
+    _stub_stages(cfg, monkeypatch, synced, asked)
+
+    run_pipeline(cfg)
+    assert asked == [None]
 
 
 def test_needs_attention_filters_flags():
