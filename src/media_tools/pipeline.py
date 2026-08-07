@@ -7,6 +7,7 @@ over all days; work already recorded in the manifests is skipped.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -18,10 +19,26 @@ from .library import Library
 @dataclass
 class PipelineReport:
     lines: list[str] = field(default_factory=list)
+    # Called with every line as it is recorded. A full chain takes minutes
+    # (device download, sync, render); without this the console stays blank
+    # until the last stage finishes and the whole report prints at once.
+    on_line: Callable[[str], None] | None = None
 
     def add(self, stage: str, entries: list[str]) -> None:
         for entry in entries:
-            self.lines.append(f"[{stage}] {entry}")
+            line = f"[{stage}] {entry}"
+            self.lines.append(line)
+            if self.on_line is not None:
+                self.on_line(line)
+
+    def begin(self, stage: str, note: str) -> None:
+        """Announce a stage before it runs, so a long one is not silence.
+
+        Streamed only - announcements are not results, so they stay out of
+        `lines` (and so out of watch.log and needs_attention).
+        """
+        if self.on_line is not None:
+            self.on_line(f"[{stage}] {note}...")
 
     def needs_attention(self) -> list[str]:
         return [l for l in self.lines if l.split("] ", 1)[-1][:1] in "!?"]
@@ -32,6 +49,8 @@ def run_pipeline(
     publish: bool = False,
     download: bool | None = None,
     day: date | None = None,
+    on_line: Callable[[str], None] | None = None,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> PipelineReport:
     """Full chain. download=None means: pull MyChron data off the device
     whenever [telemetry] auto_download is enabled in config - the pipeline
@@ -42,7 +61,11 @@ def run_pipeline(
     Naming a day is an explicit request for THAT day's material, so the
     MyChron download runs regardless of auto_download (unless the caller
     passes download=False) and asks the device for that day's sessions -
-    the same selection `mt telemetry get DAY` makes."""
+    the same selection `mt telemetry get DAY` makes.
+
+    on_line receives every result line as it happens, plus a note before
+    each stage starts; progress receives (name, done, total) during device
+    transfers. Both are optional - the returned report is unchanged."""
     if download is None:
         download = day is not None or cfg.telemetry.auto_download
     from .correlate import correlate_day
@@ -51,31 +74,45 @@ def run_pipeline(
     from .render import render_day
     from .sync import sync_day
 
-    report = PipelineReport()
+    report = PipelineReport(on_line=on_line)
 
     if download:
         from .ingest.aim import download_sessions
 
-        dl = download_sessions(cfg, days=[day] if day else None)
-        lines = dl.lines()
+        stage = "telemetry:download"
+        # The slowest silent stretch of all when no logger is around: USB
+        # probe, then a WiFi scan that has to time out.
+        report.begin(stage, "looking for the MyChron (USB, then WiFi)")
+        dl = download_sessions(
+            cfg,
+            days=[day] if day else None,
+            echo=lambda line: report.add(stage, [line]),
+            progress=progress,
+        )
+        report.add(stage, dl.summary_lines())
         # A day the device's catalog dates differently (the MyChron clock
-        # wanders) selects nothing, and an empty report would read exactly
-        # like "no download ran" - say so instead.
-        if day and not lines:
-            lines = [
-                f"? no session dated {day} on the device "
-                f"(device clock - check `mt telemetry list`)"
-            ]
-        report.add("telemetry:download", lines)
+        # wanders) selects nothing, which would leave the stage silent -
+        # indistinguishable from no download at all. Say so instead.
+        if day and not dl.did_anything():
+            report.add(
+                stage,
+                [
+                    f"? no session dated {day} on the device "
+                    f"(device clock - check `mt telemetry list`)"
+                ],
+            )
 
+    report.begin("ingest:camera", "scanning the camera / card")
     cam = ingest_camera(cfg)
     report.add("ingest:camera", cam.copied + [f"! {e}" for e in cam.errors])
+    report.begin("ingest:telemetry", "scanning for new telemetry")
     tel = ingest_telemetry(cfg)
     report.add("ingest:telemetry", tel.copied + [f"! {e}" for e in tel.errors])
 
     lib = Library(cfg.library_root)
     for d in ([day] if day else lib.day_dates()):
         manifest = lib.load_day(d)
+        report.begin(f"sync:{d}", "syncing clips against the day's telemetry")
         report.add(f"sync:{d}", sync_day(cfg, manifest, lib.day_dir(d)))
         # Correlate AFTER sync: synced clips assign to sessions by their
         # true times, immune to camera/device clock error.
@@ -85,10 +122,12 @@ def run_pipeline(
             [f"{cor.sessions} session(s), {cor.assigned_videos} clip(s) assigned"]
             + [f"? unassigned: {f}" for f in cor.unassigned_videos],
         )
+        report.begin(f"render:{d}", "rendering overlays (this is the long one)")
         report.add(f"render:{d}", render_day(cfg, manifest, lib.day_dir(d)))
         if publish:
             from .publish import publish_day
 
+            report.begin(f"publish:{d}", "uploading to YouTube")
             report.add(f"publish:{d}", publish_day(cfg, manifest, lib.day_dir(d)))
         lib.save_day(manifest)
 

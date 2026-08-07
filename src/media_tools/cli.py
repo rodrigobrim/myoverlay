@@ -593,22 +593,27 @@ def _expand_telemetry_days(cfg: Config, days: list[date]) -> tuple[list[str], li
     return names, empty
 
 
-def _device_download(cfg, names: Optional[list[str]], days: Optional[list[date]], force: bool):
-    """Pull sessions off the MyChron, streaming per-file progress lines."""
+def _transfer_progress(name: str, done: int, total: int) -> None:
+    """In-flight byte counter for device transfers.
+
+    Only where a human is watching: a scheduled run must not fill the log
+    with carriage returns.
+    """
     import sys
 
+    if sys.stderr.isatty():
+        sys.stderr.write(f"\r  {name}  {done:>10,} / {total:,}")
+        sys.stderr.flush()
+        if done >= total:
+            sys.stderr.write("\n")
+
+
+def _device_download(cfg, names: Optional[list[str]], days: Optional[list[date]], force: bool):
+    """Pull sessions off the MyChron, streaming per-file progress lines."""
     from .ingest.aim import download_sessions
 
     console.print("[bold]telemetry[/bold] (device):")
-
-    def progress(name: str, done: int, total: int) -> None:
-        # In-flight progress only where a human is watching; a scheduled run
-        # must not fill the log with carriage returns.
-        if sys.stderr.isatty():
-            sys.stderr.write(f"\r  {name}  {done:>10,} / {total:,}")
-            sys.stderr.flush()
-            if done >= total:
-                sys.stderr.write("\n")
+    progress = _transfer_progress
 
     report = download_sessions(
         cfg,
@@ -1546,9 +1551,16 @@ def run(
         except ValueError:
             console.print(f"[red]invalid day '{day}' - expected YYYY-MM-DD[/red]")
             raise typer.Exit(2)
-    report = run_pipeline(cfg, publish=publish, download=download, day=d)
-    for line in report.lines:
-        console.print(line, markup=False)
+    # Streamed, not printed at the end: the chain takes minutes and a blank
+    # console reads like a hang.
+    report = run_pipeline(
+        cfg,
+        publish=publish,
+        download=download,
+        day=d,
+        on_line=lambda line: console.print(line, markup=False),
+        progress=_transfer_progress,
+    )
     attention = report.needs_attention()
     if attention:
         console.print(f"\n[yellow]{len(attention)} item(s) need attention (see ? / ! above)[/yellow]")

@@ -50,12 +50,21 @@ class DownloadReport:
     errors: list[str] = field(default_factory=list)
 
     def lines(self) -> list[str]:
-        out = list(self.downloaded)
+        return list(self.downloaded) + self.summary_lines()
+
+    def summary_lines(self) -> list[str]:
+        """Everything lines() reports except the downloaded paths - for
+        callers that already streamed each transfer through `echo`."""
+        out = []
         if self.skipped_existing:
             out.append(f"{self.skipped_existing} session(s) already downloaded")
         out += [f"! not on the device: {n}" for n in self.missing]
         out += [f"! {e}" for e in self.errors]
         return out
+
+    def did_anything(self) -> bool:
+        """Did the device have anything to say about what was asked for?"""
+        return bool(self.downloaded or self.skipped_existing or self.missing or self.errors)
 
 
 def _local_stems(cfg: Config) -> set[str]:
