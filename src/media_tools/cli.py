@@ -1510,6 +1510,7 @@ def meta(
 
 @app.command()
 def run(
+    day: Annotated[Optional[str], typer.Argument(help="Day (YYYY-MM-DD); default all")] = None,
     publish: Annotated[bool, typer.Option(help="Also upload to YouTube")] = False,
     download: Annotated[
         Optional[bool],
@@ -1523,7 +1524,10 @@ def run(
         typer.Option("--resolution", "--res", help=_RES_HELP),
     ] = None,
 ):
-    """Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish]."""
+    """Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish].
+
+    With DAY, only that day is synced/correlated/rendered (ingest still runs,
+    since fresh material may belong to it)."""
     from .pipeline import run_pipeline
 
     cfg = get_config()
@@ -1533,7 +1537,14 @@ def run(
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(2)
-    report = run_pipeline(cfg, publish=publish, download=download)
+    d = None
+    if day:
+        try:
+            d = date.fromisoformat(day)
+        except ValueError:
+            console.print(f"[red]invalid day '{day}' - expected YYYY-MM-DD[/red]")
+            raise typer.Exit(2)
+    report = run_pipeline(cfg, publish=publish, download=download, day=d)
     for line in report.lines:
         console.print(line, markup=False)
     attention = report.needs_attention()

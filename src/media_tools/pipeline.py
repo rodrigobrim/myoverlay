@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from .config import Config
@@ -27,11 +28,17 @@ class PipelineReport:
 
 
 def run_pipeline(
-    cfg: Config, publish: bool = False, download: bool | None = None
+    cfg: Config,
+    publish: bool = False,
+    download: bool | None = None,
+    day: date | None = None,
 ) -> PipelineReport:
     """Full chain. download=None means: pull MyChron data off the device
     whenever [telemetry] auto_download is enabled in config - the pipeline
-    takes every action itself by default."""
+    takes every action itself by default.
+
+    day restricts the per-day stages (sync/correlate/render/publish) to that
+    single day; ingest still runs, since fresh material may belong to it."""
     if download is None:
         download = cfg.telemetry.auto_download
     from .correlate import correlate_day
@@ -53,7 +60,7 @@ def run_pipeline(
     report.add("ingest:telemetry", tel.copied + [f"! {e}" for e in tel.errors])
 
     lib = Library(cfg.library_root)
-    for d in lib.day_dates():
+    for d in ([day] if day else lib.day_dates()):
         manifest = lib.load_day(d)
         report.add(f"sync:{d}", sync_day(cfg, manifest, lib.day_dir(d)))
         # Correlate AFTER sync: synced clips assign to sessions by their

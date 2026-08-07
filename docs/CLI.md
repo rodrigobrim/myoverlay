@@ -193,9 +193,16 @@ Render telemetry overlays onto synced videos (or an edited --plan).
 
 ## mt run
 
-    mt run [OPTIONS]
+    mt run [OPTIONS] [DAY]
 
 Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish].
+
+With DAY, only that day is synced/correlated/rendered (ingest still runs,
+since fresh material may belong to it).
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `DAY` | no | Day (YYYY-MM-DD); default all |
 
 | Option | Default | Description |
 | --- | --- | --- |
