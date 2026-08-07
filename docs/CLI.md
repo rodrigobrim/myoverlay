@@ -197,8 +197,9 @@ Render telemetry overlays onto synced videos (or an edited --plan).
 
 Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish].
 
-With DAY, only that day is synced/correlated/rendered (ingest still runs,
-since fresh material may belong to it).
+With DAY, the MyChron download asks for that day's sessions (as
+`mt telemetry get DAY` does) and only that day is synced/correlated/
+rendered; ingest still runs, since fresh material may belong to it.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -207,7 +208,7 @@ since fresh material may belong to it).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--publish` / `--no-publish` | false | Also upload to YouTube |
-| `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: [telemetry] auto_download) |
+| `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: with DAY always, otherwise [telemetry] auto_download) |
 | `--resolution`, `--res` |  | Output resolution: nhd\|sd\|hd\|fhd\|2k\|4k (default from config) |
 
 ## mt scan

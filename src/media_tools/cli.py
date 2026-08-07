@@ -1516,7 +1516,8 @@ def run(
         Optional[bool],
         typer.Option(
             "--download/--no-download",
-            help="Pull new sessions off the MyChron first (default: [telemetry] auto_download)",
+            help="Pull new sessions off the MyChron first "
+            "(default: with DAY always, otherwise [telemetry] auto_download)",
         ),
     ] = None,
     resolution: Annotated[
@@ -1526,8 +1527,9 @@ def run(
 ):
     """Full pipeline: MyChron download -> ingest -> correlate -> sync -> render [-> publish].
 
-    With DAY, only that day is synced/correlated/rendered (ingest still runs,
-    since fresh material may belong to it)."""
+    With DAY, the MyChron download asks for that day's sessions (as
+    `mt telemetry get DAY` does) and only that day is synced/correlated/
+    rendered; ingest still runs, since fresh material may belong to it."""
     from .pipeline import run_pipeline
 
     cfg = get_config()
