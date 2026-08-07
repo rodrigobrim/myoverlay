@@ -276,11 +276,12 @@ MyChron telemetry utilities (list / download).
 
     mt telemetry get [OPTIONS] [NAMES]...
 
-Download MyChron sessions off the device and ingest them. No camera involvement.
+Download MyChron sessions off the device and ingest them - all new, the
+named sessions, or every session of the named days. No camera involvement.
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `NAMES` | no | Session names from `mt telemetry list` (omit to download all new sessions) |
+| `NAMES` | no | Session names from `mt telemetry list`, or days (YYYY-MM-DD) to get every session recorded that day (omit to download all new sessions) |
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -317,7 +318,8 @@ download dir(s) - with its ingested state. Copies nothing.
 
     mt telemetry list remote [OPTIONS]
 
-List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing.
+List every session recorded on the MyChron, already-downloaded ones
+marked as such (connects over USB or WiFi). Downloads nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -371,7 +373,8 @@ List videos already downloaded into the library.
 
     mt video list remote [OPTIONS]
 
-List new videos on the connected camera. Copies nothing.
+List every video on the connected camera, already-ingested ones marked
+as such. Copies nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |

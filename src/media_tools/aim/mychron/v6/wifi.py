@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 
 from ... import credstore, discovery
 from ...catalog import strip_status_word
+from ...errors import UserInputNeededError
 
 DEFAULT_HOST = discovery.WIFI_HOST
 DEFAULT_PORT = 2000
@@ -61,6 +62,15 @@ DESTRUCTIVE = {
     0x0004000D: "DbgFormatDati", 0x00051000: "eraseFirmware",
     0x000C0005: "DbgResetWiFi",
 }
+
+
+def _interactive() -> bool:
+    """Whether there is a human at the other end to prompt.
+
+    False under the watcher and any scheduled run, where a prompt would
+    hang forever instead of being answered.
+    """
+    return bool(sys.stdin) and sys.stdin.isatty()
 
 
 def build_frame(tag: bytes, body: bytes, flag: int = 0) -> bytes:
@@ -102,13 +112,17 @@ class Transport:
 
     kind = "WiFi"
 
+    # How many passwords to try before giving up on a protected AP: the
+    # stored one, if any, then fresh ones typed by the user.
+    PASSWORD_TRIES = 3
+
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                  timeout: float = 10.0, auto_join: bool = True):
         self.joined = False
         if auto_join and not discovery.wifi_available():
-            ssid = discovery.find_logger_ap()
-            if ssid:
-                self._join(ssid)
+            aps = discovery.find_logger_aps()
+            if aps:
+                self._join(self._choose(aps))
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.buf = b""
         self.timeout = timeout
@@ -116,47 +130,90 @@ class Transport:
             self.close()
             raise OSError("no hello response")
 
-    def _join(self, ssid: str) -> None:
+    @staticmethod
+    def _choose(aps: list[discovery.LoggerAp]) -> discovery.LoggerAp:
+        """Which logger to talk to, asked whenever more than one is in range.
+
+        The answer is deliberately not remembered: which loggers are within
+        earshot changes from one paddock to the next, so silently reusing
+        last time's pick is how you end up downloading someone else's data.
+        """
+        if len(aps) == 1:
+            return aps[0]
+        listing = "\n".join(f"  {i}) {ap.ssid}" for i, ap in enumerate(aps, 1))
+        if not _interactive():
+            raise UserInputNeededError(
+                f"{len(aps)} AiM loggers in range; run `mt telemetry get` "
+                f"interactively to pick one:\n{listing}")
+        print(f"{len(aps)} AiM loggers in range:\n{listing}", file=sys.stderr)
+        while True:
+            # The prompt is written by hand rather than passed to input(),
+            # which would put it on stdout - stdout carries --json output.
+            print(f"which one? [1-{len(aps)}]: ", end="", file=sys.stderr,
+                  flush=True)
+            try:
+                reply = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                raise UserInputNeededError("no logger chosen") from None
+            if reply.isdigit() and 1 <= int(reply) <= len(aps):
+                return aps[int(reply) - 1]
+            print(f"enter a number between 1 and {len(aps)}", file=sys.stderr)
+
+    def _join(self, ap: discovery.LoggerAp) -> None:
         """Join the logger's AP, asking for its password when it has one.
 
-        The password is asked for once, then kept DPAPI-encrypted per SSID
-        (see credstore). A stored password that stops working - the logger's
-        password was changed - falls back to asking again, and the store is
-        only (re)written after a join actually succeeds.
+        A rejected passphrase and an access point that went away look the
+        same from netsh, so every failed join of a protected network is
+        treated as an authentication failure: say so, ask again, and retry up
+        to PASSWORD_TRIES times. Whatever finally works is written to the
+        store (DPAPI-encrypted, per SSID - see credstore), replacing a
+        password that has been changed on the logger.
+
+        The store is only ever written after a join actually succeeds, and a
+        stored password that fails is left in place rather than deleted: one
+        flaky scan must not be able to wipe a working password and strand the
+        watcher, which has no way to ask for a new one.
         """
-        password = None
-        asked = False
-        if discovery.ap_is_protected(ssid):
-            password = credstore.get(ssid)
+        ssid = ap.ssid
+        if not ap.protected:
+            print(f"joining {ssid} ...", file=sys.stderr)
+            if not discovery.join_logger_ap(ssid):
+                raise OSError(f"could not join {ssid}")
+            self.joined = True
+            return
+
+        password = credstore.get(ssid)
+        from_store = password is not None
+        for remaining in range(self.PASSWORD_TRIES - 1, -1, -1):
             if password is None:
                 password = self._ask_password(ssid)
-                asked = True
-        print(f"joining {ssid} ...", file=sys.stderr)
-        if not discovery.join_logger_ap(ssid, password):
-            if password and not asked:
+                from_store = False
+            print(f"joining {ssid} ...", file=sys.stderr)
+            if discovery.join_logger_ap(ssid, password):
+                if not from_store:      # new password, or one that changed
+                    credstore.save(ssid, password)
+                self.joined = True
+                return
+            if from_store:
                 print(f"stored password for {ssid} no longer works",
                       file=sys.stderr)
-                password = self._ask_password(ssid)
-                asked = True
-                if discovery.join_logger_ap(ssid, password):
-                    credstore.save(ssid, password)
-                    self.joined = True
-                    return
-            raise OSError(f"could not join {ssid}"
-                          + (" (wrong password?)" if password else ""))
-        if asked:
-            credstore.save(ssid, password)
-        self.joined = True
+            elif remaining:
+                print(f"could not join {ssid} (wrong password?)",
+                      file=sys.stderr)
+            password = None
+            from_store = False
+        raise OSError(f"could not join {ssid} (wrong password?) after "
+                      f"{self.PASSWORD_TRIES} attempts")
 
     @staticmethod
     def _ask_password(ssid: str) -> str:
-        if not (sys.stdin and sys.stdin.isatty()):
-            raise OSError(
+        if not _interactive():
+            raise UserInputNeededError(
                 f"{ssid} is password protected and no stored password works; "
                 "run `mt telemetry get` interactively once to enter it")
         password = getpass.getpass(f"{ssid} is password protected. Password: ")
         if not password:
-            raise OSError(f"no password given for {ssid}")
+            raise UserInputNeededError(f"no password given for {ssid}")
         return password
 
     # ------------------------------------------------------------- plumbing

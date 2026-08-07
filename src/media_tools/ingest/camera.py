@@ -1,10 +1,12 @@
-"""Camera ingestion: copy new clips from DJI SD/USB volumes into the library.
+"""Camera ingestion: copy new clips from camera volumes/devices into the library.
 
 The DJI Osmo Action 5 Pro exposes no API; when plugged in (or its SD card is
-inserted) it appears as a removable volume with a DCIM directory. We detect
-those volumes, plus any configured source dirs, and copy files we have not
-seen before (identity = original filename + size). Originals are never
-deleted from the card.
+inserted) it appears as a removable volume with a DCIM directory. GoPros
+have no mass-storage mode at all: over USB they show up as an MTP portable
+device without a drive letter, reached through the Windows Shell namespace
+(see mtp.py). We detect both, plus any configured source dirs, and copy
+files we have not seen before (identity = original filename + size).
+Originals are never deleted from the card.
 """
 
 from __future__ import annotations
@@ -22,12 +24,18 @@ import psutil
 from ..config import Config
 from ..library import Library, VideoClip
 from ..tools import ffprobe_exe
+from . import mtp
 
 # e.g. DJI_20260712143205_0012_D.MP4
 DJI_NAME_RE = re.compile(r"DJI_(\d{14})_")
 
 # DJI low-resolution proxy files that ride along with the real footage.
 SKIP_SUFFIXES = {".lrf", ".thm"}
+
+
+def is_junk_name(name: str) -> bool:
+    """AppleDouble droppings ("._GH011045.MP4") a Mac leaves on the card."""
+    return name.startswith("._")
 
 
 @dataclass
@@ -44,11 +52,14 @@ class IngestReport:
 class CameraFile:
     """One video present on a source, with its already-ingested status."""
 
-    path: Path
+    path: Path  # filesystem path, or a display-only pseudo path for MTP files
     name: str
     size: int
     start_utc: datetime
     ingested: bool
+    # Set for files living on an MTP device: they cannot be stat'ed, probed
+    # or shutil-copied; mtp.copy_mtp_file is the only way to reach the bytes.
+    mtp: mtp.MtpFile | None = None
 
 
 def find_dcim_sources() -> list[Path]:
@@ -64,17 +75,24 @@ def find_dcim_sources() -> list[Path]:
     return sources
 
 
+def capture_time_from_name(name: str, camera_tz: tzinfo) -> datetime | None:
+    """UTC capture time embedded in the filename (camera local clock), if any."""
+    m = DJI_NAME_RE.search(name)
+    if m:
+        naive = datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+        return naive.replace(tzinfo=camera_tz).astimezone(timezone.utc)
+    return None
+
+
 def capture_time(path: Path, camera_tz: tzinfo) -> datetime:
     """Best-effort capture start time in UTC.
 
     Prefers the timestamp embedded in DJI filenames (camera local clock),
     falls back to file mtime.
     """
-    m = DJI_NAME_RE.search(path.name)
-    if m:
-        naive = datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
-        return naive.replace(tzinfo=camera_tz).astimezone(timezone.utc)
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return capture_time_from_name(path.name, camera_tz) or datetime.fromtimestamp(
+        path.stat().st_mtime, tz=timezone.utc
+    )
 
 
 def probe_duration_s(path: Path) -> float | None:
@@ -108,7 +126,7 @@ def iter_source_videos(sources: list[Path], extensions: list[str]):
             if not path.is_file():
                 continue
             suffix = path.suffix.lower()
-            if suffix in SKIP_SUFFIXES or suffix not in exts:
+            if suffix in SKIP_SUFFIXES or suffix not in exts or is_junk_name(path.name):
                 continue
             yield path
 
@@ -139,6 +157,24 @@ def enumerate_camera_videos(
                 size=size,
                 start_utc=capture_time(path, camera_tz),
                 ingested=(path.name, size) in known,
+            )
+        )
+
+    mtp_sources, mtp_files = mtp.enumerate_mtp_videos(cfg.camera.extensions)
+    sources += [Path(s) for s in mtp_sources]
+    for mf in mtp_files:
+        if is_junk_name(mf.name):
+            continue
+        files.append(
+            CameraFile(
+                path=Path(mf.display),
+                name=mf.name,
+                size=mf.size,
+                # GoPro names carry no timestamp; the device's recording
+                # date stands in for mtime (there is none over MTP).
+                start_utc=capture_time_from_name(mf.name, camera_tz) or mf.created_utc,
+                ingested=(mf.name, mf.size) in known,
+                mtp=mf,
             )
         )
     return sources, files
@@ -187,7 +223,10 @@ def ingest_camera(
 
             dest = day_dir / "raw" / "video" / path.name
             if force or not (dest.is_file() and dest.stat().st_size == size):
-                shutil.copy2(path, dest)
+                if cf.mtp is not None:
+                    mtp.copy_mtp_file(cf.mtp, dest.parent)
+                else:
+                    shutil.copy2(path, dest)
             if dest.stat().st_size != size:
                 report.errors.append(f"size mismatch after copy: {path} -> {dest}")
                 dest.unlink(missing_ok=True)
