@@ -1326,12 +1326,42 @@ def publish(
         bool,
         typer.Option("--show-published", help="List what is already on YouTube; uploads nothing"),
     ] = False,
+    title: Annotated[
+        Optional[str],
+        typer.Option("--title", help="Set this title on each upload (auto meta appended unless --no-meta)"),
+    ] = None,
+    description: Annotated[
+        Optional[str],
+        typer.Option("--description", "--desc", help="Set this description on each upload (auto meta appended unless --no-meta)"),
+    ] = None,
+    visibility: Annotated[
+        Optional[str], typer.Option("--visibility", help="private | unlisted | public")
+    ] = None,
+    no_meta: Annotated[
+        bool,
+        typer.Option("--no-meta", help="Set --title/--description verbatim, without the auto meta"),
+    ] = False,
 ):
-    """Upload rendered videos to YouTube (as configured, default private)."""
+    """Upload rendered videos to YouTube (as configured, default private).
+
+    --title/--description/--visibility are applied to each video the moment
+    its upload completes, exactly as `mt meta` would.
+    """
+    from .meta import DetailOverrides, validate_overrides
     from .publish import publish_day, published_report
 
+    overrides = DetailOverrides(
+        title=title, description=description, visibility=visibility, no_meta=no_meta
+    )
+    error = validate_overrides(overrides)
+    if error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(2)
     if show_published and (dry_run or force):
         console.print("[red]--show-published only lists; drop --dry-run/--force[/red]")
+        raise typer.Exit(2)
+    if show_published and (overrides.wanted or no_meta):
+        console.print("[red]--show-published only lists; drop the detail options[/red]")
         raise typer.Exit(2)
     cfg = get_config()
     lib = Library(cfg.library_root)
@@ -1347,6 +1377,7 @@ def publish(
         lines = publish_day(
             cfg, manifest, lib.day_dir(d), dry_run=dry_run, clip_filter=clip,
             force=force, save=lambda m=manifest: lib.save_day(m),
+            overrides=overrides,
         )
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")
@@ -1386,24 +1417,25 @@ def meta(
     from .i18n import strings as i18n_strings
     from .meta import (
         NO_LAP,
-        VISIBILITIES,
-        compose_description,
-        compose_title,
+        DetailOverrides,
+        composed_details,
         fetch_details,
         render_session_id,
         title_context,
         update_details,
+        validate_overrides,
         youtube_service,
     )
 
-    if visibility is not None and visibility not in VISIBILITIES:
-        console.print(f"[red]--visibility must be one of: {', '.join(VISIBILITIES)}[/red]")
-        raise typer.Exit(2)
-    if no_meta and title is None and description is None:
-        console.print("[red]--no-meta needs --title and/or --description[/red]")
+    overrides = DetailOverrides(
+        title=title, description=description, visibility=visibility, no_meta=no_meta
+    )
+    error = validate_overrides(overrides)
+    if error:
+        console.print(f"[red]{error}[/red]")
         raise typer.Exit(2)
     if video is None:
-        if title is not None or description is not None or visibility is not None:
+        if overrides.wanted:
             console.print("[red]--title/--description/--visibility need a VIDEO argument[/red]")
             raise typer.Exit(2)
         # `mt meta DAY` == `mt publish DAY --show-published`.
@@ -1423,7 +1455,7 @@ def meta(
         )
 
     service = youtube_service(cfg)
-    if title is None and description is None and visibility is None:
+    if not overrides.wanted:
         details = fetch_details(rec.video_id, service)
         if details is None:
             console.print(f"[red]{rec.url} no longer exists on YouTube[/red]")
@@ -1449,14 +1481,10 @@ def meta(
                 "[yellow]no complete lap for this video's session - "
                 "title/description carry no best lap[/yellow]"
             )
-        t = i18n_strings(cfg.language)
-        if title is not None:
-            new_title = compose_title(title, ctx, t, no_meta=no_meta)
-            if not new_title:
-                console.print("[red]--title must not be empty[/red]")
-                raise typer.Exit(2)
-        if description is not None:
-            new_desc = compose_description(description, ctx, t, no_meta=no_meta)
+        new_title, new_desc = composed_details(overrides, ctx, i18n_strings(cfg.language))
+        if title is not None and not new_title:
+            console.print("[red]--title must not be empty[/red]")
+            raise typer.Exit(2)
     try:
         update_details(rec.video_id, service, title=new_title, description=new_desc, visibility=visibility)
     except ValueError as exc:

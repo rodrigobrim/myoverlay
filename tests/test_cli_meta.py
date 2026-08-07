@@ -94,6 +94,26 @@ def test_publish_show_published_refuses_upload_flags(cli_cfg):
         assert "--show-published only lists" in r.stdout
 
 
+def test_publish_show_published_refuses_detail_options(cli_cfg):
+    _seed(cli_cfg)
+    for opts in (["--title", "X"], ["--desc", "Y"], ["--visibility", "public"]):
+        r = runner.invoke(cli.app, ["publish", "2026-07-30", "--show-published", *opts])
+        assert r.exit_code == 2
+        assert "--show-published only lists" in r.stdout
+
+
+def test_publish_detail_options_share_metas_validation(cli_cfg):
+    """The same refusals as `mt meta`, from the one shared rulebook."""
+    _seed(cli_cfg)
+    r = runner.invoke(cli.app, ["publish", "2026-07-30", "--visibility", "secret"])
+    assert r.exit_code == 2
+    assert "--visibility must be one of: private, unlisted, public" in r.stdout
+    for opts in (["--no-meta"], ["--no-meta", "--visibility", "public"]):
+        r = runner.invoke(cli.app, ["publish", "2026-07-30", *opts])
+        assert r.exit_code == 2
+        assert "--no-meta needs --title and/or --description" in r.stdout
+
+
 def test_publish_show_published_superseded_and_video_filter(cli_cfg):
     _seed(cli_cfg, publishes={
         "out/a_overlay.mp4": [

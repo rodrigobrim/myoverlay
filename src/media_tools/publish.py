@@ -19,7 +19,15 @@ from typing import Callable
 from .config import Config
 from .i18n import strings as i18n_strings
 from .library import DayManifest, PublishRecord, utcnow
-from .meta import compose_description, compose_title, render_session_id, title_context
+from .meta import (
+    DetailOverrides,
+    Updater,
+    compose_description,
+    compose_title,
+    composed_details,
+    render_session_id,
+    title_context,
+)
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
@@ -157,6 +165,8 @@ def publish_day(
     clip_filter: str | None = None,
     force: bool = False,
     save: Callable[[], None] | None = None,
+    overrides: DetailOverrides | None = None,
+    updater: Updater | None = None,
 ) -> list[str]:
     report: list[str] = []
     published_files = set(manifest.publishes)
@@ -169,6 +179,10 @@ def publish_day(
         return ["nothing to publish"]
     if uploader is None and not dry_run:
         uploader = api_uploader(cfg)
+    if overrides is not None and overrides.wanted and updater is None and not dry_run:
+        from .meta import api_updater, youtube_service
+
+        updater = api_updater(youtube_service(cfg))
 
     # Invariant: only overlay renders are ever uploaded - never raw clips.
     # publish iterates manifest.renders exclusively (all created by the render
@@ -220,22 +234,61 @@ def publish_day(
             continue
         if dry_run:
             report.append(f"~ would upload {render.file} as '{title}' ({cfg.youtube.privacy})")
+            if overrides is not None and overrides.wanted:
+                new_title, new_desc = composed_details(overrides, ctx, t)
+                for label, value in (
+                    ("title", new_title),
+                    ("description", new_desc),
+                    ("visibility", overrides.visibility),
+                ):
+                    if value is not None:
+                        report.append(f"~   then would set {label}: {value}")
             continue
 
         video_id = uploader(path, title, description, cfg.youtube.privacy, cfg.youtube.playlist_id)
-        manifest.publishes.setdefault(render.file, []).append(
-            PublishRecord(
-                video_id=video_id,
-                url=f"https://youtu.be/{video_id}",
-                privacy=cfg.youtube.privacy,
-                published_at=utcnow(),
-                title=title,
-                description=description,
-            )
+        record = PublishRecord(
+            video_id=video_id,
+            url=f"https://youtu.be/{video_id}",
+            privacy=cfg.youtube.privacy,
+            published_at=utcnow(),
+            title=title,
+            description=description,
         )
+        manifest.publishes.setdefault(render.file, []).append(record)
         # Persist immediately: a later upload failing in this batch must never
         # orphan a video that already went up (the record survives the crash).
         if save is not None:
             save()
         report.append(f"+ {render.file} -> https://youtu.be/{video_id} ({cfg.youtube.privacy})")
+
+        # Requested details are applied the moment the upload returns - the
+        # same edit `mt meta` performs, on the video just created. No wait:
+        # the id the API hands back is immediately addressable.
+        if overrides is not None and overrides.wanted:
+            new_title, new_desc = composed_details(overrides, ctx, t)
+            try:
+                updater(video_id, new_title, new_desc, overrides.visibility)
+            except Exception as exc:  # noqa: BLE001 - the video is up; say what failed
+                report.append(f"!   details not applied: {exc}")
+                continue
+            if new_title is not None:
+                record.title = new_title
+            if new_desc is not None:
+                record.description = new_desc
+            if overrides.visibility is not None:
+                record.privacy = overrides.visibility
+            if save is not None:
+                save()
+            changed = [
+                name
+                for name, value in (
+                    ("title", new_title),
+                    ("description", new_desc),
+                    ("visibility", overrides.visibility),
+                )
+                if value is not None
+            ]
+            report.append(f"    details set: {', '.join(changed)}")
+            if new_title is not None:
+                report.append(f"    title: {new_title}")
     return report

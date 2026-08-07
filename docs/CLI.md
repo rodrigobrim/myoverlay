@@ -151,6 +151,9 @@ Build the render-plan queue (review Gate 2) - one item per synced video.
 
 Upload rendered videos to YouTube (as configured, default private).
 
+--title/--description/--visibility are applied to each video the moment
+its upload completes, exactly as `mt meta` would.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | no | Day (YYYY-MM-DD); default all |
@@ -161,6 +164,10 @@ Upload rendered videos to YouTube (as configured, default private).
 | `--force` | false | Re-upload renders even if already published (a fresh video) |
 | `--video`, `--clip` |  | Only publish renders whose file name contains this substring |
 | `--show-published` | false | List what is already on YouTube; uploads nothing |
+| `--title` |  | Set this title on each upload (auto meta appended unless --no-meta) |
+| `--description`, `--desc` |  | Set this description on each upload (auto meta appended unless --no-meta) |
+| `--visibility` |  | private \| unlisted \| public |
+| `--no-meta` | false | Set --title/--description verbatim, without the auto meta |
 
 ## mt render
 

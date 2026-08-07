@@ -5,11 +5,14 @@ from datetime import date, datetime, timezone
 from media_tools.i18n import strings as i18n_strings
 from media_tools.library import DayManifest, RenderOutput, VideoClip
 from media_tools.meta import (
+    DetailOverrides,
     TitleContext,
     compose_description,
     compose_title,
+    composed_details,
     render_session_id,
     update_details,
+    validate_overrides,
 )
 
 CTX = TitleContext(track="KGV 111", date="2026-07-30", session=3, best_lap="0:53.41")
@@ -43,6 +46,37 @@ def test_compose_description_appends_meta_block():
     )
     assert compose_description("Minha descrição.", CTX, t, no_meta=True) == "Minha descrição."
     assert compose_description("", CTX, t).startswith("Gravado em 2026-07-30")
+
+
+def test_validate_overrides_is_the_one_rulebook():
+    """`mt meta` and `mt publish` share this, so their refusals cannot drift."""
+    assert validate_overrides(DetailOverrides()) is None
+    assert validate_overrides(DetailOverrides(title="X", no_meta=True)) is None
+    assert validate_overrides(DetailOverrides(description="X", no_meta=True)) is None
+    assert "must be one of" in validate_overrides(DetailOverrides(visibility="secret"))
+    for ov in (DetailOverrides(no_meta=True),
+               DetailOverrides(visibility="public", no_meta=True)):
+        assert validate_overrides(ov) == "--no-meta needs --title and/or --description"
+
+
+def test_overrides_wanted_flags_only_real_field_changes():
+    assert not DetailOverrides().wanted
+    assert not DetailOverrides(no_meta=True).wanted  # --no-meta alone changes nothing
+    assert DetailOverrides(title="X").wanted
+    assert DetailOverrides(description="X").wanted
+    assert DetailOverrides(visibility="public").wanted
+
+
+def test_composed_details_leaves_unset_fields_alone():
+    t = i18n_strings("pt")
+    title, desc = composed_details(DetailOverrides(visibility="public"), CTX, t)
+    assert title is None and desc is None
+    title, desc = composed_details(DetailOverrides(title="Meu vídeo"), CTX, t)
+    assert title == "Meu vídeo - KGV 111 30/07/26 - MV 0:53.41" and desc is None
+    title, desc = composed_details(
+        DetailOverrides(title="A", description="B", no_meta=True), CTX, t
+    )
+    assert (title, desc) == ("A", "B")
 
 
 def _render_manifest(render_session_id_value, clip_session_id=11):
