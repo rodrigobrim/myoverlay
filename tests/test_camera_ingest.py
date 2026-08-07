@@ -142,3 +142,72 @@ def test_force_replaces_entry_in_place(cfg, tmp_path):
     lib = Library(cfg.library_root)
     m12 = lib.load_day(date(2026, 7, 12))
     assert [v.source_name for v in m12.videos].count(name) == 1
+
+
+def _device_gone() -> OSError:
+    """The Windows 'the volume vanished' error, as raised on Rodrigo's box."""
+    exc = OSError(22, "Foi especificado um dispositivo inexistente")
+    exc.winerror = 433
+    return exc
+
+
+def test_copy_retries_across_a_camera_that_drops_off_the_bus(cfg, tmp_path, monkeypatch):
+    """The card reappears (possibly under a new letter) - the clip still lands."""
+    import shutil
+
+    card = make_fake_card(tmp_path)
+    moved = tmp_path / "card2" / "DCIM"
+    calls = []
+    real_copy2 = shutil.copy2
+
+    def flaky_copy2(src, dst):
+        calls.append(Path(src))
+        if len(calls) == 1:
+            raise _device_gone()
+        return real_copy2(src, dst)
+
+    def reappear_elsewhere(_seconds):
+        """The volume comes back - under a different drive letter."""
+        if card.exists():
+            moved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(card), str(moved))
+
+    monkeypatch.setattr(camera.shutil, "copy2", flaky_copy2)
+    monkeypatch.setattr(camera.time, "sleep", reappear_elsewhere)
+    monkeypatch.setattr(camera, "find_dcim_sources", lambda: [moved])
+
+    name = "DJI_20260712141530_0001_D.MP4"
+    report = ingest_camera(cfg, extra_sources=[card], only_names=[name])
+    assert not report.errors
+    assert len(report.copied) == 1
+    # Retried from the volume's new location, not the stale path.
+    assert calls[1].parent.parent == moved
+
+
+def test_persistent_disconnect_reports_once_and_stops(cfg, tmp_path, monkeypatch):
+    card = make_fake_card(tmp_path)
+    monkeypatch.setattr(camera.shutil, "copy2", lambda src, dst: (_ for _ in ()).throw(_device_gone()))
+    monkeypatch.setattr(camera.time, "sleep", lambda s: None)
+    monkeypatch.setattr(camera, "find_dcim_sources", lambda: [])
+
+    report = ingest_camera(cfg, extra_sources=[card])
+    assert report.copied == []
+    # One clear line, not one raw WinError per clip.
+    assert len(report.errors) == 1
+    assert "camera disconnected mid-ingest" in report.errors[0]
+    assert "3 clip(s) not copied" in report.errors[0]
+
+
+def test_real_file_error_is_still_reported_per_file(cfg, tmp_path, monkeypatch):
+    """A bad file must not be mistaken for a disconnect: keep going."""
+    card = make_fake_card(tmp_path)
+    real_copy2 = camera.shutil.copy2
+
+    def one_bad(src, dst):
+        if "0001" in Path(src).name:
+            raise OSError(5, "Input/output error")
+        return real_copy2(src, dst)
+
+    monkeypatch.setattr(camera.shutil, "copy2", one_bad)
+    report = ingest_camera(cfg, extra_sources=[card])
+    assert len(report.errors) == 1 and len(report.copied) == 2

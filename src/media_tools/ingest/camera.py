@@ -11,9 +11,11 @@ Originals are never deleted from the card.
 
 from __future__ import annotations
 
+import errno
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
@@ -60,6 +62,58 @@ class CameraFile:
     # Set for files living on an MTP device: they cannot be stat'ed, probed
     # or shutil-copied; mtp.copy_mtp_file is the only way to reach the bytes.
     mtp: mtp.MtpFile | None = None
+
+
+# A camera in mass-storage mode drops off the bus mid-ingest (it sleeps, or
+# re-enumerates after a sustained read): the copy in flight and every one
+# after it fail instantly. Windows: 433 ERROR_NO_SUCH_DEVICE, 21 NOT_READY,
+# 55 DEV_NOT_EXIST, 1167 DEVICE_NOT_CONNECTED.
+DEVICE_GONE_WINERRORS = {21, 55, 433, 1167}
+DEVICE_GONE_ERRNOS = {errno.ENODEV, errno.ENXIO}
+# It comes back within a few seconds - long enough to matter, short enough
+# that a camera left unplugged does not stall the run.
+RECONNECT_ATTEMPTS = 3
+RECONNECT_WAIT_S = 5.0
+
+
+def is_device_gone(exc: OSError) -> bool:
+    """Did this OSError mean 'the camera volume vanished', not 'bad file'?"""
+    return (
+        getattr(exc, "winerror", None) in DEVICE_GONE_WINERRORS
+        or exc.errno in DEVICE_GONE_ERRNOS
+    )
+
+
+def relocate_source(name: str, size: int) -> Path | None:
+    """Re-find a card file after a re-enumeration, which may hand the volume
+    a different drive letter. Identity is the ingest identity: name + size."""
+    for src in find_dcim_sources():
+        for path in src.rglob(name):
+            try:
+                if path.is_file() and path.stat().st_size == size:
+                    return path
+            except OSError:
+                continue
+    return None
+
+
+def copy_from_card(path: Path, dest: Path, size: int) -> Path:
+    """shutil.copy2, retrying across a camera that drops off the bus.
+
+    Returns the source path the copy finally succeeded from (the volume may
+    reappear under a new letter). Re-raises the OSError if it never does.
+    """
+    for attempt in range(RECONNECT_ATTEMPTS):
+        try:
+            shutil.copy2(path, dest)
+            return path
+        except OSError as exc:
+            if not is_device_gone(exc) or attempt == RECONNECT_ATTEMPTS - 1:
+                raise
+            dest.unlink(missing_ok=True)  # a partial copy is not a clip
+            time.sleep(RECONNECT_WAIT_S)
+            path = relocate_source(path.name, size) or path
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def find_dcim_sources() -> list[Path]:
@@ -199,7 +253,8 @@ def ingest_camera(
     matched: set[str] = set()
     manifests: dict[str, tuple] = {}  # date iso -> (manifest, day_dir)
 
-    for cf in files:
+    pending = list(files)
+    for i, cf in enumerate(pending):
         try:
             if wanted is not None:
                 key = cf.name.casefold()
@@ -226,7 +281,7 @@ def ingest_camera(
                 if cf.mtp is not None:
                     mtp.copy_mtp_file(cf.mtp, dest.parent)
                 else:
-                    shutil.copy2(path, dest)
+                    path = copy_from_card(path, dest, size)
             if dest.stat().st_size != size:
                 report.errors.append(f"size mismatch after copy: {path} -> {dest}")
                 dest.unlink(missing_ok=True)
@@ -255,6 +310,16 @@ def ingest_camera(
                 manifest.videos.append(clip)
             report.copied.append(f"{path} -> {dest}")
         except OSError as exc:
+            if is_device_gone(exc):
+                # The card is gone for good this run: every clip left would
+                # fail the same way. Say it once, with what was left behind.
+                left = sum(1 for c in pending[i:] if force or not c.ingested)
+                report.errors.append(
+                    f"camera disconnected mid-ingest ({exc.strerror or exc}); "
+                    f"{left} clip(s) not copied, starting at {cf.name}. "
+                    "Reconnect the camera and run again - copied clips are kept."
+                )
+                break
             report.errors.append(f"{cf.path}: {exc}")
 
     if wanted is not None:
