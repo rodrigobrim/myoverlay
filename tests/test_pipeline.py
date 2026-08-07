@@ -65,9 +65,24 @@ def _stub_stages(cfg, monkeypatch, synced, asked, downloaded=("a_0186.xrk",)):
         copied = []
         errors = []
 
+    names = list(downloaded)
+
     class FakeDownloadReport:
-        def lines(self):
-            return list(downloaded)
+        def __init__(self):
+            self.downloaded = names
+
+        def summary_lines(self):
+            return []
+
+        def did_anything(self):
+            return bool(self.downloaded)
+
+    def fake_download(cfg, days=None, echo=None, progress=None):
+        asked.append(days)
+        for name in downloaded:  # the device streams each transfer as it lands
+            if echo:
+                echo(name)
+        return FakeDownloadReport()
 
     monkeypatch.setattr(
         "media_tools.ingest.camera.ingest_camera", lambda cfg: FakeIngestReport()
@@ -75,10 +90,7 @@ def _stub_stages(cfg, monkeypatch, synced, asked, downloaded=("a_0186.xrk",)):
     monkeypatch.setattr(
         "media_tools.ingest.telemetry.ingest_telemetry", lambda cfg: FakeIngestReport()
     )
-    monkeypatch.setattr(
-        "media_tools.ingest.aim.download_sessions",
-        lambda cfg, days=None: asked.append(days) or FakeDownloadReport(),
-    )
+    monkeypatch.setattr("media_tools.ingest.aim.download_sessions", fake_download)
     monkeypatch.setattr(
         "media_tools.sync.sync_day",
         lambda cfg, manifest, day_dir: synced.append(manifest.date) or [],
@@ -136,3 +148,37 @@ def test_needs_attention_filters_flags():
     r = PipelineReport()
     r.add("sync:2026-07-12", ["+ ok clip", "? low confidence clip", "! broken clip"])
     assert len(r.needs_attention()) == 2
+
+
+def test_run_pipeline_streams_lines_as_they_happen(cfg, monkeypatch):
+    """The console must not stay blank until the last stage finishes."""
+    seen: list[str] = []
+    synced, asked = [], []
+    lib = Library(cfg.library_root)
+    lib.save_day(lib.load_day(date(2026, 7, 13)))
+
+    def sync_and_check(cfg, manifest, day_dir):
+        # By the time the slow stage runs, earlier stages have been reported.
+        assert any(l.startswith("[telemetry:download] a_0186") for l in seen)
+        synced.append(manifest.date)
+        return ["+ clip synced"]
+
+    _stub_stages(cfg, monkeypatch, synced, asked)
+    monkeypatch.setattr("media_tools.sync.sync_day", sync_and_check)
+
+    report = run_pipeline(cfg, day=date(2026, 7, 13), on_line=seen.append)
+
+    # Every result line was streamed, in order...
+    assert [l for l in seen if l in report.lines] == report.lines
+    # ...plus a note before each stage, which stays out of the recorded
+    # report (and so out of watch.log and needs_attention).
+    notes = [l for l in seen if l not in report.lines]
+    assert any(l.startswith("[render:2026-07-13] rendering") for l in notes)
+    assert not [l for l in report.lines if l.endswith("...")]
+
+
+def test_pipeline_report_without_callback_is_unchanged(cfg, monkeypatch):
+    synced, asked = [], []
+    _stub_stages(cfg, monkeypatch, synced, asked)
+    report = run_pipeline(cfg, day=date(2026, 7, 13))
+    assert report.lines and all(l.startswith("[") for l in report.lines)
