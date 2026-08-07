@@ -45,7 +45,9 @@ def test_build_plan_defaults(cfg, tmp_path):
     assert it.telemetry_files == ["raw/telemetry/s.xrk"]
     assert it.best_lap == "0:59.00"  # lap 70->129 = 59 s, via the SSOT
     assert it.append_best_lap is True
-    assert it.title and "best lap" not in it.title.lower()  # not baked into base title
+    # empty prefills: publish composes "<text> - <auto meta>", so a prefilled
+    # default here would end up duplicated in the published title
+    assert it.title == "" and it.description == ""
 
 
 def test_unsynced_clip_is_skipped(cfg, tmp_path):

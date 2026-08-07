@@ -44,10 +44,14 @@ def test_video_list_remote_local_and_all(cfg_with_card):
     default = json.loads(runner.invoke(cli.app, ["video", "list", "--json"]).stdout)
     assert default["videos"] == []
 
-    # Ingest one: remote hides it, default/`local` show it, `all` shows both.
+    # Ingest one: remote still lists the whole card, marking that one
+    # ingested; default/`local` show it; `all` shows both sides.
     camera.ingest_camera(cfg_with_card, only_names=["DJI_20260712141530_0001_D.MP4"])
     remote = json.loads(runner.invoke(cli.app, ["video", "list", "remote", "--json"]).stdout)
-    assert [v["source_name"] for v in remote["videos"]] == ["DJI_20260712145010_0002_D.MP4"]
+    assert {v["source_name"]: v["status"] for v in remote["videos"]} == {
+        "DJI_20260712141530_0001_D.MP4": "ingested",
+        "DJI_20260712145010_0002_D.MP4": "new",
+    }
     default = json.loads(runner.invoke(cli.app, ["video", "list", "--json"]).stdout)
     local = json.loads(runner.invoke(cli.app, ["video", "list", "local", "--json"]).stdout)
     assert default == local
@@ -85,9 +89,9 @@ def test_video_get_by_day(cfg_with_card):
 def test_telemetry_get_downloads_from_device_and_ingests(cfg_with_card, monkeypatch):
     calls = {"download": 0}
 
-    def fake_download(cfg, names=None, force=False, echo=None, progress=None):
+    def fake_download(cfg, names=None, days=None, force=False, echo=None, progress=None):
         calls["download"] += 1
-        assert names is None
+        assert names is None and days is None
         return aim.DownloadReport()
 
     monkeypatch.setattr(aim, "download_sessions", fake_download)
@@ -108,11 +112,27 @@ def test_telemetry_get_downloads_from_device_and_ingests(cfg_with_card, monkeypa
     assert seen["kw"] == {"only_names": None, "force": False}
 
 
+def test_ingest_device_flag_downloads_first(cfg_with_card, monkeypatch):
+    """`ingest --device` drives the same download helper as `telemetry get`."""
+    calls = {"download": 0}
+
+    def fake_download(cfg, names=None, days=None, force=False, echo=None, progress=None):
+        calls["download"] += 1
+        return aim.DownloadReport()
+
+    monkeypatch.setattr(aim, "download_sessions", fake_download)
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", lambda cfg, **kw: tel_ingest.IngestReport())
+
+    r = runner.invoke(cli.app, ["ingest", "--source", "telemetry", "--device"])
+    assert r.exit_code == 0
+    assert calls["download"] == 1
+
+
 def test_telemetry_get_named_sessions_ingest_their_downloads(cfg_with_card, monkeypatch, tmp_path):
     monkeypatch.setattr(
         aim,
         "download_sessions",
-        lambda cfg, names=None, force=False, echo=None, progress=None: aim.DownloadReport(
+        lambda cfg, names=None, days=None, force=False, echo=None, progress=None: aim.DownloadReport(
             downloaded=[str(tmp_path / "a_0186.xrk")]
         ),
     )
@@ -127,6 +147,121 @@ def test_telemetry_get_named_sessions_ingest_their_downloads(cfg_with_card, monk
     assert r.exit_code == 0
     # The device name maps to the .xrk the download produced.
     assert seen["kw"] == {"only_names": ["a_0186.xrk"], "force": False}
+
+
+def test_telemetry_get_by_day(cfg_with_card, monkeypatch):
+    """A day arg filters the device download AND expands to on-disk files."""
+    from media_tools import scan
+
+    seen = {}
+
+    def fake_download(cfg, names=None, days=None, force=False, echo=None, progress=None):
+        seen["download"] = {"names": names, "days": days}
+        return aim.DownloadReport(downloaded=[str(Path("dl") / "a_0187.xrk")])
+
+    monkeypatch.setattr(aim, "download_sessions", fake_download)
+
+    def entry(name, day_utc, ingested=False):
+        return scan.TelemetryFileEntry(
+            source_name=name, size_bytes=10, source_path=name, ingested=ingested,
+            start_utc=day_utc,
+        )
+
+    monkeypatch.setattr(
+        scan,
+        "list_telemetry_files",
+        lambda cfg: scan.TelemetryListResult(files=[
+            # 18:00 UTC on Aug 6 is 15:00 in the logger's Sao Paulo timezone.
+            entry("a_0186.xrk", datetime(2026, 8, 6, 18, 0, tzinfo=timezone.utc)),
+            entry("a_0187.xrk", datetime(2026, 8, 6, 19, 0, tzinfo=timezone.utc)),
+            entry("a_0100.xrk", datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc), ingested=True),
+        ]),
+    )
+    ingested = {}
+
+    def fake_ingest(cfg, **kw):
+        ingested.update(kw)
+        return tel_ingest.IngestReport()
+
+    monkeypatch.setattr(tel_ingest, "ingest_telemetry", fake_ingest)
+
+    r = runner.invoke(cli.app, ["telemetry", "get", "2026-08-06"])
+    assert r.exit_code == 0
+    # The day reaches the device download as a date, not a session name.
+    assert seen["download"] == {"names": None, "days": [date(2026, 8, 6)]}
+    # Ingest covers that day's files on disk; the other day's file stays out.
+    assert sorted(ingested["only_names"]) == ["a_0186.xrk", "a_0187.xrk"]
+
+
+def test_telemetry_get_day_with_nothing_anywhere_fails(cfg_with_card, monkeypatch):
+    from media_tools import scan
+
+    monkeypatch.setattr(
+        aim,
+        "download_sessions",
+        lambda cfg, names=None, days=None, force=False, echo=None, progress=None: aim.DownloadReport(),
+    )
+    monkeypatch.setattr(scan, "list_telemetry_files", lambda cfg: scan.TelemetryListResult())
+    monkeypatch.setattr(
+        tel_ingest,
+        "ingest_telemetry",
+        lambda cfg, **kw: (_ for _ in ()).throw(AssertionError("ingest ran")),
+    )
+    r = runner.invoke(cli.app, ["telemetry", "get", "1999-01-01"])
+    assert r.exit_code == 1
+    assert "no telemetry for" in r.stdout
+
+
+@pytest.fixture
+def remote_listing(cfg_with_card, monkeypatch):
+    """One session already downloaded, one not, as the device reports them."""
+    seen = {}
+
+    def fake_list(cfg, include_downloaded=False):
+        seen["include_downloaded"] = include_downloaded
+        result = aim.RemoteListResult(transport="WiFi")
+        result.sessions = [
+            aim.RemoteSession(name="a_0186.xrz", size_bytes=1024,
+                              downloaded=True, meta={"nlap": "12"}),
+            aim.RemoteSession(name="a_0187.xrz", size_bytes=2048,
+                              downloaded=False, meta={"nlap": "9"}),
+        ]
+        if not include_downloaded:
+            result.sessions = [s for s in result.sessions if not s.downloaded]
+        return result
+
+    monkeypatch.setattr(aim, "list_remote_sessions", fake_list)
+    return seen
+
+
+def test_telemetry_list_remote_always_shows_the_whole_device(remote_listing):
+    """A device inventory is only useful complete - no flag to remember."""
+    r = runner.invoke(cli.app, ["telemetry", "list", "remote"])
+    assert r.exit_code == 0
+    assert remote_listing["include_downloaded"] is True
+    # Both present, and the status column distinguishes them.
+    assert "a_0186" in r.stdout and "a_0187" in r.stdout
+    assert "downloaded" in r.stdout and "new" in r.stdout
+
+
+def test_telemetry_list_remote_json_carries_the_downloaded_flag(remote_listing):
+    r = runner.invoke(cli.app, ["telemetry", "list", "remote", "--json"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert {s["name"]: s["downloaded"] for s in data["sessions"]} == {
+        "a_0186.xrz": True,
+        "a_0187.xrz": False,
+    }
+
+
+def test_telemetry_list_remote_on_an_empty_device(remote_listing, monkeypatch):
+    """'no new sessions' would be a lie when nothing was filtered out."""
+    monkeypatch.setattr(
+        aim, "list_remote_sessions",
+        lambda cfg, include_downloaded=False: aim.RemoteListResult(transport="WiFi"))
+    r = runner.invoke(cli.app, ["telemetry", "list", "remote"])
+    assert r.exit_code == 0
+    assert "no sessions on the device" in r.stdout
 
 
 def test_telemetry_get_no_download_skips_device(cfg_with_card, monkeypatch):
@@ -144,7 +279,7 @@ def test_telemetry_get_device_error_fails(cfg_with_card, monkeypatch):
     monkeypatch.setattr(
         aim,
         "download_sessions",
-        lambda cfg, names=None, force=False, echo=None, progress=None: aim.DownloadReport(
+        lambda cfg, names=None, days=None, force=False, echo=None, progress=None: aim.DownloadReport(
             errors=["No MyChron found."]
         ),
     )

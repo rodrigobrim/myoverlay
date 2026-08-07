@@ -44,6 +44,7 @@ PLANNED: dict[str, str] = {
     "telemetry list all": "full device + disk session overview",
     "telemetry get": "telemetry-only download",
     "best-lap": "show best lap per session",
+    "meta": "edit title/description/visibility of a published video",
     "correlate": "re-run session grouping for a day",
     "sync": "manual sync anchor entry when auto-sync fails",
     "join": "join camera-split segments",

@@ -7,11 +7,13 @@
 
 # media-tools
 
-Zero-touch karting video pipeline: DJI Osmo Action footage + AiM MyChron
-telemetry in, YouTube videos with a telemetry overlay out.
+Zero-touch karting video pipeline: DJI Osmo Action / GoPro footage + AiM
+MyChron telemetry in, YouTube videos with a telemetry overlay out. Cameras
+are picked up as removable DCIM volumes (SD card / DJI over USB) or as MTP
+portable devices (GoPro over USB, which mounts no drive letter).
 
 ```
-camera SD/USB ──────┐
+camera SD/USB/MTP ──┐
                     ├─> ingest ─> correlate ─> sync ─> render ─> publish
 MyChron (USB/WiFi) ─┘              (sessions)  (audio↔RPM)  (overlay)  (YouTube)
 ```
@@ -92,6 +94,13 @@ track day).
   own protocol over USB or WiFi (see
   [docs/mychron-protocol-re.md](docs/mychron-protocol-re.md)). Only the
   MyChron6 is implemented; other AiM models use different download paths.
+- **Picking a logger over WiFi**: USB is tried first. Falling back to WiFi,
+  every `AiM-...` network in range is listed and — when there is more than
+  one — you are asked which to join, every time, so a neighbour's logger is
+  never picked for you. A password is asked for only if that network has one,
+  then kept per-SSID, encrypted with Windows DPAPI, in
+  `~/MyOverlay/wifi-credentials.json`. Both prompts need a terminal: with two
+  loggers in range the watcher reports what it needs rather than guessing.
 - The `.xrk` parser (`libxrk`) reads GPS, RPM, temperatures and lap markers;
   the session's absolute start time comes from the file's `Log Date`/`Log
   Time` metadata interpreted in `telemetry.timezone`.
@@ -101,6 +110,13 @@ track day).
 For development in this checkout, `uv run mt <command>` is the direct entry
 point (same CLI the exe forwards to), and `uv run python tools/proof_slices.py`
 renders quick HD test slices instead of full re-renders.
+
+To exercise a branch against the real library and Google credentials, run
+`.\mt <command>` from the root of the checkout (or worktree) you are working
+in. It runs that checkout's code — uncommitted edits included — with the
+working directory and bundled ffmpeg/git the installed exe uses, so nothing
+about the installed `mt` changes. `uv run mt` differs only in reading
+`config.toml` from the checkout instead of `~\MyOverlay`.
 
 ```
 uv run pytest

@@ -63,13 +63,16 @@ def test_publish_day_uploads_and_records(cfg, tmp_path):
     assert calls == [
         (
             "clip_overlay.mp4",
-            "Karting Interlagos 2026-07-12 - session 1 (best lap 1:01.56)",
+            "Interlagos 12/07/26 - BL 1:01.56",
             "private",
             None,
         )
     ]
-    assert manifest.publishes[0].video_id == "abc123"
-    assert manifest.publishes[0].url == "https://youtu.be/abc123"
+    rec = manifest.publishes["out/clip_overlay.mp4"][0]
+    assert rec.video_id == "abc123"
+    assert rec.url == "https://youtu.be/abc123"
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"
+    assert rec.description.startswith("Recorded 2026-07-12 at Interlagos.")
     assert report[0].startswith("+")
 
     # already published -> nothing to do, uploader not called again
@@ -79,7 +82,7 @@ def test_publish_day_uploads_and_records(cfg, tmp_path):
 
 
 def test_title_best_lap_ignores_fragments_and_impossible_laps(cfg, tmp_path):
-    from media_tools.publish import _title_context
+    from media_tools.meta import title_context
 
     day_dir = tmp_path / "day"
     manifest = make_manifest(day_dir)
@@ -93,7 +96,7 @@ def test_title_best_lap_ignores_fragments_and_impossible_laps(cfg, tmp_path):
         Lap(num=4, start_s=140.9, end_s=179.9),
         Lap(num=5, start_s=179.9, end_s=240.0),
     ]
-    ctx = _title_context(day_dir, manifest, 1, min_lap_s=42.0)
+    ctx = title_context(day_dir, manifest, 1, min_lap_s=42.0)
     # Best is the 61.555 s real lap, not 17 s or 39 s.
     assert ctx.best_lap == "1:01.56"
 
@@ -103,7 +106,7 @@ def test_publish_slice_gets_labeled_title(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     (day_dir / "out" / "slices").mkdir(parents=True)
     (day_dir / "out" / "slices" / "clip_overlay_25m15s-30m37s.mp4").write_bytes(b"v")
-    manifest.publishes = []
+    manifest.publishes = {}
     manifest.renders = [
         RenderOutput(
             file="out/slices/clip_overlay_25m15s-30m37s.mp4",
@@ -116,7 +119,7 @@ def test_publish_slice_gets_labeled_title(cfg, tmp_path):
     ]
     calls = []
     publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
-    assert calls == ["Karting Interlagos 2026-07-12 - session 1 (best lap 1:01.56) - 25:15-30:37"]
+    assert calls == ["Interlagos 12/07/26 - BL 1:01.56 - 25:15-30:37"]
 
 
 def test_publish_force_reuploads_already_published(cfg, tmp_path):
@@ -132,17 +135,19 @@ def test_publish_force_reuploads_already_published(cfg, tmp_path):
         return f"vid{len(calls)}"
 
     publish_day(cfg, manifest, day_dir, uploader=up)
-    assert len(calls) == 1 and len(manifest.publishes) == 1
+    assert len(calls) == 1 and len(manifest.publishes["out/clip_overlay.mp4"]) == 1
 
     # without force: already published -> skipped
     assert publish_day(cfg, manifest, day_dir, uploader=up) == ["nothing to publish"]
     assert len(calls) == 1
 
     # with force: uploads again, keeping the prior record and adding a new one
+    # under the same rendered-file key
     report = publish_day(cfg, manifest, day_dir, uploader=up, force=True)
     assert len(calls) == 2
-    assert len(manifest.publishes) == 2
-    assert manifest.publishes[-1].video_id == "vid2"
+    records = manifest.publishes["out/clip_overlay.mp4"]
+    assert len(records) == 2
+    assert records[-1].video_id == "vid2"
     assert any(line.startswith("+") for line in report)
 
 
@@ -155,7 +160,7 @@ def test_publish_uses_item_title_and_appends_best_lap(cfg, tmp_path):
     manifest.renders[0].append_best_lap = True
     calls = []
     publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
-    assert calls == ["Custom Title - 1:01.56"]
+    assert calls == ["Custom Title - Interlagos 12/07/26 - BL 1:01.56"]
 
 
 def test_publish_item_title_without_best_lap(cfg, tmp_path):
@@ -173,7 +178,7 @@ def test_publish_dry_run_uploads_nothing(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     report = publish_day(cfg, manifest, day_dir, dry_run=True)
     assert report[0].startswith("~ would upload")
-    assert manifest.publishes == []
+    assert manifest.publishes == {}
 
 
 def test_publish_refuses_raw_clip_paths(cfg, tmp_path):
@@ -186,7 +191,7 @@ def test_publish_refuses_raw_clip_paths(cfg, tmp_path):
 
     calls = []
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: calls.append(a) or "x")
-    assert calls == [] and manifest.publishes == []
+    assert calls == [] and manifest.publishes == {}
     assert "refusing to upload" in report[0]
 
 
@@ -205,7 +210,7 @@ def test_publish_refuses_render_of_unsynced_clip(cfg, tmp_path):
     ]
     calls = []
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: calls.append(a) or "x")
-    assert calls == [] and manifest.publishes == []
+    assert calls == [] and manifest.publishes == {}
     assert "no telemetry sync" in report[0]
 
 
@@ -214,4 +219,178 @@ def test_publish_missing_file_is_reported(cfg, tmp_path):
     manifest = make_manifest(day_dir)
     (day_dir / "out" / "clip_overlay.mp4").unlink()
     report = publish_day(cfg, manifest, day_dir, uploader=lambda *a: "x")
-    assert report[0].startswith("!") and manifest.publishes == []
+    assert report[0].startswith("!") and manifest.publishes == {}
+
+
+def test_publish_title_uses_source_clip_session_when_render_row_is_stale(cfg, tmp_path):
+    """A render row's session_id can be stale (re-render, or a slice written
+    before correlate reassigned the day). Pointing it at a rollout-only session
+    must not cost the uploaded title its best lap: the clip -> session link
+    wins, so the title still carries the session's 1:01.56."""
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    start = manifest.sessions[0].start_utc
+    # a second, rollout-only session (single lap -> no complete lap)
+    manifest.sessions.append(
+        TrackSession(id=2, start_utc=start - timedelta(minutes=30),
+                     end_utc=start - timedelta(minutes=29))
+    )
+    manifest.telemetry.append(
+        TelemetryLog(file="raw/telemetry/s2.xrk", source_name="s2.xrk", size_bytes=1,
+                     start_utc=start - timedelta(minutes=30),
+                     end_utc=start - timedelta(minutes=29),
+                     session_id=2, laps=[Lap(num=1, start_s=0.0, end_s=9.3)])
+    )
+    manifest.videos[0].session_id = 1   # as correlate assigns it
+    manifest.renders[0].session_id = 2  # stale; the clip still belongs to session 1
+
+    calls = []
+    publish_day(cfg, manifest, day_dir, uploader=lambda p, t, d, pr, pl: calls.append(t) or "x")
+    assert calls == ["Interlagos 12/07/26 - BL 1:01.56"]
+
+
+def _override_run(cfg, day_dir, manifest, **override_kw):
+    """publish_day with detail overrides, capturing upload+update call order."""
+    from media_tools.meta import DetailOverrides
+
+    calls = []
+
+    def up(path, title, description, privacy, playlist_id):
+        calls.append(("upload", title, privacy))
+        return "vid1"
+
+    def upd(video_id, title=None, description=None, visibility=None):
+        calls.append(("update", video_id, title, description, visibility))
+
+    report = publish_day(
+        cfg, manifest, day_dir, uploader=up, updater=upd,
+        overrides=DetailOverrides(**override_kw),
+    )
+    return calls, report
+
+
+def test_publish_applies_details_right_after_each_upload(cfg, tmp_path):
+    """--title/--description/--visibility are the meta edit, run on the video
+    the moment its upload returns: upload first, then exactly one update."""
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, report = _override_run(
+        cfg, day_dir, manifest,
+        title="Karteiros Master", description="Minha descrição.", visibility="public",
+    )
+    assert [c[0] for c in calls] == ["upload", "update"]
+    # the upload itself is unchanged - the configured default title and privacy
+    assert calls[0] == ("upload", "Interlagos 12/07/26 - BL 1:01.56", "private")
+    _, video_id, title, desc, vis = calls[1]
+    assert video_id == "vid1"
+    assert title == "Karteiros Master - Interlagos 12/07/26 - BL 1:01.56"
+    assert desc.startswith("Minha descrição.\n\nRecorded 2026-07-12 at Interlagos.")
+    assert vis == "public"
+    # the registry mirrors the applied details, not the upload-time ones
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.title == title and rec.description == desc and rec.privacy == "public"
+    assert any("details set: title, description, visibility" in line for line in report)
+
+
+def test_publish_details_only_touch_given_fields(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest, visibility="unlisted")
+    assert calls[1] == ("update", "vid1", None, None, "unlisted")
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.privacy == "unlisted"
+    # title untouched -> still the upload-time one
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"
+
+
+def test_publish_details_no_meta_is_verbatim(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest, title="Só isso", no_meta=True)
+    assert calls[1] == ("update", "vid1", "Só isso", None, None)
+
+
+def test_publish_without_details_never_updates(cfg, tmp_path):
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls, _ = _override_run(cfg, day_dir, manifest)  # no overrides given
+    assert [c[0] for c in calls] == ["upload"]
+
+
+def test_publish_details_failure_keeps_the_upload(cfg, tmp_path):
+    """The video is already on YouTube when the edit runs: a failing update is
+    reported, never rolled back, and never loses the publish record."""
+    from media_tools.meta import DetailOverrides
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+
+    def boom(video_id, title=None, description=None, visibility=None):
+        raise ValueError("video vid1 no longer exists on YouTube")
+
+    report = publish_day(
+        cfg, manifest, day_dir, uploader=lambda *a: "vid1", updater=boom,
+        overrides=DetailOverrides(title="X"),
+    )
+    assert any(line.startswith("+") for line in report)
+    assert any("details not applied" in line for line in report)
+    rec = manifest.publishes["out/clip_overlay.mp4"][-1]
+    assert rec.video_id == "vid1"
+    assert rec.title == "Interlagos 12/07/26 - BL 1:01.56"  # upload-time value kept
+
+
+def test_publish_dry_run_shows_details_without_calling(cfg, tmp_path):
+    from media_tools.meta import DetailOverrides
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    calls = []
+    report = publish_day(
+        cfg, manifest, day_dir, dry_run=True,
+        updater=lambda *a, **kw: calls.append(a),
+        overrides=DetailOverrides(title="Karteiros Master", visibility="public"),
+    )
+    assert calls == [] and manifest.publishes == {}
+    assert any("would upload" in line for line in report)
+    assert any(
+        "then would set title: Karteiros Master - Interlagos 12/07/26 - BL 1:01.56" in line
+        for line in report
+    )
+    assert any("then would set visibility: public" in line for line in report)
+
+
+def test_published_report_latest_first_then_superseded(cfg, tmp_path):
+    from media_tools.publish import published_report
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    assert published_report(manifest) == ["nothing published"]
+
+    calls = []
+
+    def up(path, title, description, privacy, playlist_id):
+        calls.append(path.name)
+        return f"vid{len(calls)}"
+
+    publish_day(cfg, manifest, day_dir, uploader=up)
+    lines = published_report(manifest)
+    assert lines[0].startswith("out/clip_overlay.mp4 -> https://youtu.be/vid1 (private, published ")
+    assert lines[0].endswith("UTC)")
+    assert lines[1] == "    title: Interlagos 12/07/26 - BL 1:01.56"
+
+    # after a --force re-upload the current video (latest) leads the block and
+    # the prior upload is shown as superseded
+    publish_day(cfg, manifest, day_dir, uploader=up, force=True)
+    lines = published_report(manifest)
+    assert "https://youtu.be/vid2" in lines[0]
+    assert any(line.strip().startswith("superseded: https://youtu.be/vid1") for line in lines)
+
+
+def test_published_report_clip_filter(cfg, tmp_path):
+    from media_tools.publish import published_report
+
+    day_dir = tmp_path / "day"
+    manifest = make_manifest(day_dir)
+    publish_day(cfg, manifest, day_dir, uploader=lambda *a: "x")
+    assert published_report(manifest, clip_filter="OVERLAY")[0].startswith("out/clip_overlay.mp4")
+    assert published_report(manifest, clip_filter="nope") == ["nothing published"]

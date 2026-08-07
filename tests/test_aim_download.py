@@ -161,6 +161,35 @@ def test_download_named_and_missing(dl_cfg, monkeypatch):
     assert (d / "a_0187.xrk").is_file()
 
 
+def test_download_by_day(dl_cfg, monkeypatch):
+    from datetime import date
+
+    csv = (
+        "name,size,date,hour\r\n"
+        f"a_0186.xrz,{len(zlib.compress(XRK))},30/07/2026,10:00:00\r\n"
+        f"a_0187.xrz,{len(zlib.compress(XRK))},31/07/2026,11:00:00\r\n"
+    )
+    cfg, d = dl_cfg
+    dev = FakeTransport(csv_text=csv)
+    monkeypatch.setattr("media_tools.aim.connect", lambda prefer=None, verbose=True: dev)
+
+    report = aim.download_sessions(cfg, days=[date(2026, 7, 31)])
+    assert dev.fetched == ["a_0187.xrz"]
+    assert (d / "a_0187.xrk").is_file() and not (d / "a_0186.xrk").exists()
+    # A day with no device sessions is not "missing": the caller decides,
+    # since the sessions may already sit on disk.
+    empty = aim.download_sessions(cfg, days=[date(1999, 1, 1)])
+    assert not empty.missing and not empty.errors and dev.fetched == ["a_0187.xrz"]
+
+
+def test_session_date_parses_day_first():
+    from datetime import date
+
+    assert aim._session_date({"date": "30/07/2026"}) == date(2026, 7, 30)
+    assert aim._session_date({"date": "2026-07-30"}) is None  # unexpected format: no guess
+    assert aim._session_date({}) is None
+
+
 def test_download_size_mismatch_is_an_error(dl_cfg, monkeypatch):
     cfg, d = dl_cfg
     dev = FakeTransport(payload=b"\x78\x9c-short")  # wrong length vs listing

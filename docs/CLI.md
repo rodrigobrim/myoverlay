@@ -107,6 +107,28 @@ Join camera-split video segments (GoPro/DJI ~4 GB rollovers) into one video.
 | `--gap-s` | `8.0` | Max seconds between segments to treat as one recording |
 | `--dry-run` | false | Show what would be joined |
 
+## mt meta
+
+    mt meta [OPTIONS] DAY [VIDEO]
+
+Show or edit the YouTube title, description and visibility of a published video.
+
+Without VIDEO, lists the day's published videos (same as
+`mt publish DAY --show-published`); with VIDEO and no option, shows that
+video's current published details.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `DAY` | yes | Day (YYYY-MM-DD) |
+| `VIDEO` | no | Published rendered file (name or substring); omit to list the day's published videos |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--title` |  | New title (auto track/date/best-lap meta appended unless --no-meta) |
+| `--description`, `--desc` |  | New description (auto meta appended unless --no-meta) |
+| `--visibility` |  | private \| unlisted \| public |
+| `--no-meta` | false | Set --title/--description verbatim, without the auto meta |
+
 ## mt plan
 
     mt plan [OPTIONS] DAY
@@ -129,6 +151,9 @@ Build the render-plan queue (review Gate 2) - one item per synced video.
 
 Upload rendered videos to YouTube (as configured, default private).
 
+--title/--description/--visibility are applied to each video the moment
+its upload completes, exactly as `mt meta` would.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `DAY` | no | Day (YYYY-MM-DD); default all |
@@ -138,6 +163,11 @@ Upload rendered videos to YouTube (as configured, default private).
 | `--dry-run` / `--no-dry-run` | false | Show what would be uploaded |
 | `--force` | false | Re-upload renders even if already published (a fresh video) |
 | `--video`, `--clip` |  | Only publish renders whose file name contains this substring |
+| `--show-published` | false | List what is already on YouTube; uploads nothing |
+| `--title` |  | Set this title on each upload (auto meta appended unless --no-meta) |
+| `--description`, `--desc` |  | Set this description on each upload (auto meta appended unless --no-meta) |
+| `--visibility` |  | private \| unlisted \| public |
+| `--no-meta` | false | Set --title/--description verbatim, without the auto meta |
 
 ## mt render
 
@@ -246,11 +276,12 @@ MyChron telemetry utilities (list / download).
 
     mt telemetry get [OPTIONS] [NAMES]...
 
-Download MyChron sessions off the device and ingest them. No camera involvement.
+Download MyChron sessions off the device and ingest them - all new, the
+named sessions, or every session of the named days. No camera involvement.
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `NAMES` | no | Session names from `mt telemetry list` (omit to download all new sessions) |
+| `NAMES` | no | Session names from `mt telemetry list`, or days (YYYY-MM-DD) to get every session recorded that day (omit to download all new sessions) |
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -287,7 +318,8 @@ download dir(s) - with its ingested state. Copies nothing.
 
     mt telemetry list remote [OPTIONS]
 
-List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing.
+List every session recorded on the MyChron, already-downloaded ones
+marked as such (connects over USB or WiFi). Downloads nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -341,7 +373,8 @@ List videos already downloaded into the library.
 
     mt video list remote [OPTIONS]
 
-List new videos on the connected camera. Copies nothing.
+List every video on the connected camera, already-ingested ones marked
+as such. Copies nothing.
 
 | Option | Default | Description |
 | --- | --- | --- |

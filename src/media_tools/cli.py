@@ -72,7 +72,9 @@ def _print_ingest_report(name: str, report) -> None:
     if not report.copied and not report.skipped_known:
         console.print("  [dim]nothing new[/dim]")
     for err in report.errors:
-        console.print(f"  [red]! {err}[/red]")
+        # style= rather than [red] tags: device errors can contain brackets,
+        # and markup=False would print the tags literally.
+        console.print(f"  ! {err}", style="red", markup=False)
 
 
 @app.command()
@@ -92,7 +94,7 @@ def ingest(
     """Copy new camera videos and MyChron sessions into the library (download only)."""
     cfg = get_config()
     if device:
-        _device_download(cfg, names=None, force=False)
+        _device_download(cfg, names=None, days=None, force=False)
     if source in ("all", "camera"):
         from .ingest.camera import ingest_camera
 
@@ -167,6 +169,31 @@ def _resolve_video(manifest, needle: str, day):
     raise typer.Exit(2)
 
 
+def _resolve_publish(manifest, needle: str, day) -> str:
+    """Resolve a --video value to ONE published rendered file: an exact path,
+    file name or stem wins, else a unique case-insensitive substring; anything
+    ambiguous lists the candidates instead of guessing."""
+    files = list(manifest.publishes)
+    exact = [f for f in files if needle in (f, Path(f).name, Path(f).stem)]
+    matches = exact or [f for f in files if needle.lower() in f.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        console.print(f"[red]'{needle}' matches {len(matches)} published videos on {day}:[/red]")
+        for f in matches:
+            console.print(f"  {f}")
+    else:
+        rendered = [r.file for r in manifest.renders if needle.lower() in r.file.lower()]
+        if rendered:
+            console.print(
+                f"[red]'{rendered[0]}' is rendered but not published - "
+                f"run `mt publish {day}` first[/red]"
+            )
+        else:
+            console.print(f"[red]no published video matching '{needle}' on {day}[/red]")
+    raise typer.Exit(2)
+
+
 def _fmt_duration(s: float | None) -> str:
     if s is None:
         return "-"
@@ -201,8 +228,11 @@ def video_list_remote(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List new videos on the connected camera. Copies nothing."""
-    _video_list_remote(include_ingested=False, json_out=json_out)
+    """List every video on the connected camera, already-ingested ones marked
+    as such. Copies nothing."""
+    # Same rule as `telemetry list remote`: a device inventory is only useful
+    # complete, so there is no flag to remember.
+    _video_list_remote(include_ingested=True, json_out=json_out)
 
 
 @video_list_app.command("local")
@@ -330,6 +360,18 @@ def video_get(
         raise typer.Exit(1)
 
 
+def _split_day_args(args: list[str] | None) -> tuple[list[date], list[str]]:
+    """Partition CLI args into days (YYYY-MM-DD) and plain names."""
+    days: list[date] = []
+    plain: list[str] = []
+    for a in args or []:
+        try:
+            days.append(date.fromisoformat(a))
+        except ValueError:
+            plain.append(a)
+    return days, plain
+
+
 def _expand_video_days(cfg: Config, names: list[str] | None):
     """Expand day-shaped args (YYYY-MM-DD) into that day's camera filenames.
 
@@ -340,13 +382,7 @@ def _expand_video_days(cfg: Config, names: list[str] | None):
         return None, []
     from .scan import list_camera_videos
 
-    expanded: list[str] = []
-    days: list[date] = []
-    for n in names:
-        try:
-            days.append(date.fromisoformat(n))
-        except ValueError:
-            expanded.append(n)
+    days, expanded = _split_day_args(names)
     missing: list[str] = []
     if days:
         camera_tz = cfg.camera.tzinfo()
@@ -387,8 +423,10 @@ def telemetry_list_remote(
         bool, typer.Option("--json", help="Machine-readable JSON (for the review GUI)")
     ] = False,
 ):
-    """List the sessions recorded on the MyChron (connects over USB or WiFi). Downloads nothing."""
-    _telemetry_list_remote(include_downloaded=False, json_out=json_out)
+    """List every session recorded on the MyChron, already-downloaded ones
+    marked as such (connects over USB or WiFi). Downloads nothing."""
+    # A device inventory is only useful complete: always the whole card.
+    _telemetry_list_remote(include_downloaded=True, json_out=json_out)
 
 
 @telemetry_list_app.command("local")
@@ -470,7 +508,10 @@ def _telemetry_list_remote(include_downloaded: bool, json_out: bool) -> None:
     if not result.sessions:
         # Only claim an empty device when the listing actually succeeded.
         if result.transport and not failed:
-            console.print("[dim]no new sessions on the device[/dim]")
+            # Nothing was filtered out, so "no new" would be a lie: the
+            # device really is empty.
+            what = "no sessions" if include_downloaded else "no new sessions"
+            console.print(f"[dim]{what} on the device[/dim]")
         return
 
     title = f"MyChron sessions ({result.transport})" if result.transport else "MyChron sessions"
@@ -525,7 +566,34 @@ def _telemetry_list_local(json_out: bool) -> None:
     console.print(table)
 
 
-def _device_download(cfg, names: Optional[list[str]], force: bool):
+def _expand_telemetry_days(cfg: Config, days: list[date]) -> tuple[list[str], list[str]]:
+    """Expand days into the on-disk telemetry filenames recorded those days.
+
+    Returns (names, days_that_matched_nothing). Runs after any device
+    download, so freshly fetched sessions count as on disk.
+    """
+    if not days:
+        return [], []
+    from .scan import list_telemetry_files
+
+    logger_tz = cfg.telemetry.tzinfo()
+    files = list_telemetry_files(cfg).files
+    names: list[str] = []
+    empty: list[str] = []
+    for d in days:
+        hits = [
+            f.source_name
+            for f in files
+            if f.start_utc and f.start_utc.astimezone(logger_tz).date() == d
+        ]
+        if hits:
+            names.extend(hits)
+        else:
+            empty.append(d.isoformat())
+    return names, empty
+
+
+def _device_download(cfg, names: Optional[list[str]], days: Optional[list[date]], force: bool):
     """Pull sessions off the MyChron, streaming per-file progress lines."""
     import sys
 
@@ -545,6 +613,7 @@ def _device_download(cfg, names: Optional[list[str]], force: bool):
     report = download_sessions(
         cfg,
         names=names,
+        days=days,
         force=force,
         echo=lambda line: console.print(f"  {line}", markup=False),
         progress=progress,
@@ -554,7 +623,7 @@ def _device_download(cfg, names: Optional[list[str]], force: bool):
     for n in report.missing:
         console.print(f"  [red]not on the device: {n}[/red]")
     for e in report.errors:
-        console.print(f"  [red]! {e}[/red]", markup=False)
+        console.print(f"  ! {e}", style="red", markup=False)
     return report
 
 
@@ -563,7 +632,8 @@ def telemetry_get(
     names: Annotated[
         Optional[list[str]],
         typer.Argument(
-            help="Session names from `mt telemetry list` (omit to download all new sessions)"
+            help="Session names from `mt telemetry list`, or days (YYYY-MM-DD) to "
+            "get every session recorded that day (omit to download all new sessions)"
         ),
     ] = None,
     download: Annotated[
@@ -579,27 +649,34 @@ def telemetry_get(
         typer.Option("--force", help="Re-download and re-ingest sessions already handled"),
     ] = False,
 ):
-    """Download MyChron sessions off the device and ingest them. No camera involvement."""
+    """Download MyChron sessions off the device and ingest them - all new, the
+    named sessions, or every session of the named days. No camera involvement."""
     from pathlib import Path as P
 
     cfg = get_config()
-    only_names = names or None
+    days, plain = _split_day_args(names)
     failed = False
+    downloaded: list[str] = []
     if download:
-        report = _device_download(cfg, names=names or None, force=force)
+        report = _device_download(cfg, names=plain or None, days=days or None, force=force)
         failed = bool(report.errors or report.missing)
-        if names:
-            # Device names (a_0186.xrz) become local .xrk files on download;
-            # ingest filters by the on-disk names.
-            only_names = [P(p).name for p in report.downloaded] or None
-            if only_names is None:
-                # Nothing newly downloaded for the requested names (already on
-                # disk, or all failed): fall back to the local-name filter so
-                # `telemetry get <name>` still re-ingests with --force. A
-                # device name (.xrz) maps to the .xrk its download produced.
-                only_names = [
-                    P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in names
-                ]
+        downloaded = [P(p).name for p in report.downloaded]
+
+    only_names = None
+    if names:
+        # A day is satisfied by files on disk after the download pass (which
+        # includes anything just fetched); one with nothing anywhere is an
+        # explicit error, mirroring `video get`.
+        day_names, empty_days = _expand_telemetry_days(cfg, days)
+        if empty_days:
+            console.print(f"[red]no telemetry for: {', '.join(empty_days)}[/red]")
+            raise typer.Exit(1)
+        # Device names (a_0186.xrz) become local .xrk files on download;
+        # ingest filters by the on-disk names, so requested names are mapped
+        # even when nothing was fetched (already on disk, --no-download, or
+        # re-ingesting with --force).
+        mapped = [P(n).stem + ".xrk" if P(n).suffix.lower() == ".xrz" else n for n in plain]
+        only_names = list(dict.fromkeys(downloaded + mapped + day_names))
 
     from .ingest.telemetry import ingest_telemetry
 
@@ -1245,23 +1322,190 @@ def publish(
         Optional[str],
         typer.Option("--video", "--clip", help="Only publish renders whose file name contains this substring"),
     ] = None,
+    show_published: Annotated[
+        bool,
+        typer.Option("--show-published", help="List what is already on YouTube; uploads nothing"),
+    ] = False,
+    title: Annotated[
+        Optional[str],
+        typer.Option("--title", help="Set this title on each upload (auto meta appended unless --no-meta)"),
+    ] = None,
+    description: Annotated[
+        Optional[str],
+        typer.Option("--description", "--desc", help="Set this description on each upload (auto meta appended unless --no-meta)"),
+    ] = None,
+    visibility: Annotated[
+        Optional[str], typer.Option("--visibility", help="private | unlisted | public")
+    ] = None,
+    no_meta: Annotated[
+        bool,
+        typer.Option("--no-meta", help="Set --title/--description verbatim, without the auto meta"),
+    ] = False,
 ):
-    """Upload rendered videos to YouTube (as configured, default private)."""
-    from .publish import publish_day
+    """Upload rendered videos to YouTube (as configured, default private).
 
+    --title/--description/--visibility are applied to each video the moment
+    its upload completes, exactly as `mt meta` would.
+    """
+    from .meta import DetailOverrides, validate_overrides
+    from .publish import publish_day, published_report
+
+    overrides = DetailOverrides(
+        title=title, description=description, visibility=visibility, no_meta=no_meta
+    )
+    error = validate_overrides(overrides)
+    if error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(2)
+    if show_published and (dry_run or force):
+        console.print("[red]--show-published only lists; drop --dry-run/--force[/red]")
+        raise typer.Exit(2)
+    if show_published and (overrides.wanted or no_meta):
+        console.print("[red]--show-published only lists; drop the detail options[/red]")
+        raise typer.Exit(2)
     cfg = get_config()
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
+    if show_published:
+        for d in days:
+            console.print(f"[bold]{d}[/bold]:")
+            for line in published_report(lib.load_day(d), clip_filter=clip):
+                console.print(f"  {line}", markup=False)
+        return
     for d in days:
         manifest = lib.load_day(d)
         lines = publish_day(
             cfg, manifest, lib.day_dir(d), dry_run=dry_run, clip_filter=clip,
             force=force, save=lambda m=manifest: lib.save_day(m),
+            overrides=overrides,
         )
         lib.save_day(manifest)
         console.print(f"[bold]{d}[/bold]:")
         for line in lines:
             console.print(f"  {line}")
+
+
+@app.command()
+def meta(
+    day: Annotated[str, typer.Argument(help="Day (YYYY-MM-DD)")],
+    video: Annotated[
+        Optional[str],
+        typer.Argument(help="Published rendered file (name or substring); omit to list the day's published videos"),
+    ] = None,
+    title: Annotated[
+        Optional[str],
+        typer.Option("--title", help="New title (auto track/date/best-lap meta appended unless --no-meta)"),
+    ] = None,
+    description: Annotated[
+        Optional[str],
+        typer.Option("--description", "--desc", help="New description (auto meta appended unless --no-meta)"),
+    ] = None,
+    visibility: Annotated[
+        Optional[str], typer.Option("--visibility", help="private | unlisted | public")
+    ] = None,
+    no_meta: Annotated[
+        bool,
+        typer.Option("--no-meta", help="Set --title/--description verbatim, without the auto meta"),
+    ] = False,
+):
+    """Show or edit the YouTube title, description and visibility of a published video.
+
+    Without VIDEO, lists the day's published videos (same as
+    `mt publish DAY --show-published`); with VIDEO and no option, shows that
+    video's current published details.
+    """
+    from .i18n import strings as i18n_strings
+    from .meta import (
+        NO_LAP,
+        DetailOverrides,
+        composed_details,
+        fetch_details,
+        render_session_id,
+        title_context,
+        update_details,
+        validate_overrides,
+        youtube_service,
+    )
+
+    overrides = DetailOverrides(
+        title=title, description=description, visibility=visibility, no_meta=no_meta
+    )
+    error = validate_overrides(overrides)
+    if error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(2)
+    if video is None:
+        if overrides.wanted:
+            console.print("[red]--title/--description/--visibility need a VIDEO argument[/red]")
+            raise typer.Exit(2)
+        # `mt meta DAY` == `mt publish DAY --show-published`.
+        publish(day=day, show_published=True)
+        return
+
+    cfg = get_config()
+    lib = Library(cfg.library_root)
+    d = date.fromisoformat(day)
+    manifest = lib.load_day(d)
+    file = _resolve_publish(manifest, video, d)
+    records = manifest.publishes[file]
+    rec = records[-1]
+    if len(records) > 1:
+        console.print(
+            f"[dim]{file} was uploaded {len(records)} times; using the latest ({rec.url})[/dim]"
+        )
+
+    service = youtube_service(cfg)
+    if not overrides.wanted:
+        details = fetch_details(rec.video_id, service)
+        if details is None:
+            console.print(f"[red]{rec.url} no longer exists on YouTube[/red]")
+            raise typer.Exit(1)
+        console.print(f"[bold]{file}[/bold] -> {rec.url}")
+        console.print(f"  title:      {details['title']}", markup=False)
+        console.print(f"  visibility: {details['visibility']}")
+        console.print(f"  published:  {details['published_at']}")
+        console.print("  description:")
+        for line in details["description"].splitlines() or [""]:
+            console.print(f"    {line}", markup=False)
+        return
+
+    new_title = new_desc = None
+    if title is not None or description is not None:
+        render = next((r for r in manifest.renders if r.file == file), None)
+        ctx = title_context(
+            lib.day_dir(d), manifest,
+            render_session_id(manifest, render), cfg.render.min_lap_s,
+        )
+        if not no_meta and ctx.best_lap == NO_LAP:
+            console.print(
+                "[yellow]no complete lap for this video's session - "
+                "title/description carry no best lap[/yellow]"
+            )
+        new_title, new_desc = composed_details(overrides, ctx, i18n_strings(cfg.language))
+        if title is not None and not new_title:
+            console.print("[red]--title must not be empty[/red]")
+            raise typer.Exit(2)
+    try:
+        update_details(rec.video_id, service, title=new_title, description=new_desc, visibility=visibility)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if new_title is not None:
+        rec.title = new_title
+    if new_desc is not None:
+        rec.description = new_desc
+    if visibility is not None:
+        rec.privacy = visibility
+    lib.save_day(manifest)
+    console.print(f"[green]+[/green] updated {rec.url}")
+    if new_title is not None:
+        console.print(f"  title: {new_title}", markup=False)
+    if new_desc is not None:
+        console.print("  description:")
+        for line in new_desc.splitlines():
+            console.print(f"    {line}", markup=False)
+    if visibility is not None:
+        console.print(f"  visibility: {visibility}")
 
 
 @app.command()
@@ -1398,8 +1642,7 @@ def status(
             if clip and clip not in v.source_name and clip not in v.file:
                 continue
             renders = [r for r in m.renders if v.file in r.source_videos]
-            render_files = {r.file for r in renders}
-            pubs = [p for p in m.publishes if p.file in render_files]
+            pubs = [p for r in renders for p in m.publishes.get(r.file, [])]
             if v.sync is None:
                 synced = "[red]no[/red]"
             else:

@@ -9,13 +9,11 @@ outcome is the RenderOutput rows execute_item produces.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from .config import Config
-from .i18n import strings as i18n_strings
 from .library import DayManifest
 from .overlay import fmt_laptime
 from .telemetry import best_lap, session_laps_derived
@@ -49,34 +47,6 @@ class RenderPlan(BaseModel):
     items: list[RenderItem] = []
 
 
-def _title_values(cfg: Config, day_dir: Path, manifest: DayManifest, session_id):
-    from .publish import _title_context
-
-    ctx = _title_context(day_dir, manifest, session_id, cfg.render.min_lap_s)
-    values = {"track": ctx.track, "date": ctx.date, "session": ctx.session,
-              "best_lap": ctx.best_lap, "lap": ""}
-    return values, ctx
-
-
-def _base_title(cfg: Config, values: dict) -> str:
-    """The default title WITHOUT the best lap, so append_best_lap can add it.
-
-    The best-lap position is marked, then the bracketed clause holding it is
-    stripped - language-agnostic for the "... (best lap {best_lap})" templates.
-    """
-    tmpl = cfg.youtube.title_template or i18n_strings(cfg.language)["title_template"]
-    marked = tmpl.format(**{**values, "best_lap": "\x00"})
-    base = re.sub(r"\s*\([^)]*\x00[^)]*\)", "", marked)
-    if "\x00" in base:  # best lap wasn't parenthesised - just drop the marker
-        base = base.replace("\x00", "").rstrip(" -")
-    return re.sub(r"\s{2,}", " ", base).strip()
-
-
-def _default_description(cfg: Config, values: dict) -> str:
-    tmpl = cfg.youtube.description_template or i18n_strings(cfg.language)["description_template"]
-    return tmpl.format(**values)
-
-
 def build_plan(cfg: Config, day_dir: Path, manifest: DayManifest) -> RenderPlan:
     """One item per synced clip, defaults taken from correlate/join/sync."""
     items: list[RenderItem] = []
@@ -95,15 +65,15 @@ def build_plan(cfg: Config, day_dir: Path, manifest: DayManifest) -> RenderPlan:
             else None
         )
         bl_s = (bl[2] - bl[1]) if bl else None
-        values, _ = _title_values(cfg, day_dir, manifest, clip.session_id)
+        # title/description stay empty: publish composes "<text> - <auto meta>"
+        # via meta.compose_*, so any prefilled default here would be duplicated
+        # in the published title. Empty text -> the auto meta alone.
         items.append(RenderItem(
             item_id=Path(clip.file).stem,
             session_id=clip.session_id,
             slices=slices,
             telemetry_files=list(session.telemetry_files) if session else [],
             quality=cfg.render.resolution,
-            title=_base_title(cfg, values),
-            description=_default_description(cfg, values),
             best_lap_s=bl_s,
             best_lap=fmt_laptime(bl_s),
         ))

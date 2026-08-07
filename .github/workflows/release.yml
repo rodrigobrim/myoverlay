@@ -1,7 +1,10 @@
 name: release
 
-# Tag a release to build and publish it:
-#     git tag v1.2.0 && git push origin v1.2.0
+# Tag a release to build and publish it - tag = build timestamp (UTC,
+# yyyyMMddHHmm), 'v'-prefixed so it matches the trigger below:
+#     powershell -File packaging\release.ps1
+# (equivalent by hand: git tag "v$([DateTime]::UtcNow.ToString('yyyyMMddHHmm'))"
+#  && git push origin --tags)
 # Or run manually from the Actions tab to get the artifacts without publishing.
 
 on:
@@ -10,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to stamp, e.g. 1.2.0 (manual runs do not publish)"
+        description: "Date tag to stamp, yyyyMMddHHmm (manual runs do not publish; default now)"
         required: false
 
 permissions:
@@ -35,20 +38,19 @@ jobs:
         id: ver
         shell: pwsh
         run: |
+          . packaging\version.ps1
           if ($env:GITHUB_REF_TYPE -eq "tag") {
-              $v = $env:GITHUB_REF_NAME -replace '^v', ''
+              $when = ConvertFrom-DateTag $env:GITHUB_REF_NAME
           } elseif ("${{ inputs.version }}") {
-              $v = "${{ inputs.version }}"
+              $when = ConvertFrom-DateTag "${{ inputs.version }}"
           } else {
-              $v = "0.0.0"
+              $when = [DateTime]::UtcNow
           }
-          # MSI ProductVersion is strictly MAJOR.MINOR.PATCH. Fail loudly here
-          # rather than let candle emit a subtly wrong installer.
-          if ($v -notmatch '^\d+\.\d+\.\d+$') {
-              throw "Version '$v' must be MAJOR.MINOR.PATCH (MSI ProductVersion)"
-          }
+          $tag = Get-DateTag $when
+          $v = ConvertTo-MsiVersion $when
+          "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$v" >> $env:GITHUB_OUTPUT
-          Write-Host "building version $v"
+          Write-Host "building $tag -> MSI version $v"
 
       # packaging/vendor/ is gitignored - the build scripts download MinGit,
       # ffmpeg, WiX 3.14 and the offline Google Cloud SDK into it (~1 GB) and
@@ -78,7 +80,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: MyOverlay-${{ steps.ver.outputs.version }}
+          name: MyOverlay-${{ steps.ver.outputs.tag }}
           path: |
             dist/MyOverlay-setup.msi
             dist/MyOverlay-win64.zip
@@ -91,6 +93,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$env:GITHUB_REF_NAME" `
-            --title "MyOverlay ${{ steps.ver.outputs.version }}" `
+            --title "MyOverlay ${{ steps.ver.outputs.tag }}" `
             --generate-notes `
             dist/MyOverlay-setup.msi dist/MyOverlay-win64.zip

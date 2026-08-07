@@ -11,10 +11,12 @@ device answers with a descriptor carrying its name, IP and serial.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import tempfile
 import time
+from typing import NamedTuple
 
 WIFI_HOST = "10.0.0.1"          # the logger is its own DHCP server and gateway
 WIFI_UDP_PORT = 36002
@@ -81,42 +83,81 @@ def _netsh(*args):
                           capture_output=True, text=True, timeout=30)
 
 
-def find_logger_ap() -> str | None:
-    """SSID of a broadcasting AiM logger, if one is in range."""
-    try:
-        out = _netsh("show", "networks").stdout
-    except Exception:
-        return None
-    for line in out.splitlines():
-        if "AiM-" in line and ":" in line:
-            ssid = line.split(":", 1)[1].strip()
-            if ssid.startswith("AiM-"):
-                return ssid
-    return None
+# WinRT WiFiAdapter.ScanAsync, reached through PowerShell. The AsTask
+# overloads are picked by parameter type because ScanAsync returns an
+# IAsyncAction while the other two return IAsyncOperations.
+_SCAN_PS = """
+$null = [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType=WindowsRuntime]
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$m = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 }
+$op = ($m | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+$act = ($m | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' })[0]
+$null = $op.MakeGenericMethod([Windows.Devices.WiFi.WiFiAccessStatus]).Invoke($null, @([Windows.Devices.WiFi.WiFiAdapter]::RequestAccessAsync())).Result
+$adapters = $op.MakeGenericMethod([System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]]).Invoke($null, @([Windows.Devices.WiFi.WiFiAdapter]::FindAllAdaptersAsync())).Result
+foreach ($a in $adapters) { $null = $act.Invoke($null, @($a.ScanAsync())).Wait(15000) }
+"""
 
 
-def ap_is_protected(ssid: str) -> bool | None:
-    """Whether `ssid` requires a password; None if it is not in the scan.
+def _force_scan(timeout: float = 30.0) -> None:
+    """Make the adapter scan now; netsh only ever reads a cache.
 
-    netsh localizes the 'Authentication' label, so the SSID's block is
-    scanned for the untranslated scheme names (WPA*, 802.1X) instead of
-    parsing by field name.
+    `netsh wlan show networks` reports the previous scan's results, and
+    while Windows is associated to an AP it rescans so rarely that a logger
+    powered on right next to the machine can stay invisible indefinitely -
+    observed as a cache holding nothing but the connected network. WinRT's
+    WiFiAdapter is the one documented way to request a scan on demand, and
+    PowerShell is how to reach it without adding a package dependency.
+
+    Best-effort by design: whatever goes wrong (no PowerShell, no adapter,
+    location consent denied), the caller still reads the cache as before.
     """
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                        "-Command", _SCAN_PS],
+                       capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        pass
+
+
+class LoggerAp(NamedTuple):
+    """A broadcasting AiM logger: its SSID, and whether it needs a password."""
+
+    ssid: str
+    protected: bool
+
+
+# 'SSID 3 : AiM-MYC6-021763-...' opens a network's block. The number and the
+# colon are what distinguish it from the indented 'BSSID 1 :' rows inside it.
+_SSID_HEADER = re.compile(r"^SSID\s+\d+\s*:\s*(.*)$")
+
+
+def find_logger_aps() -> list[LoggerAp]:
+    """Every broadcasting AiM logger in range, in the order netsh scans them.
+
+    A fresh scan is forced first - see _force_scan for why netsh alone is
+    not enough. A single `mode=bssid` listing then carries both the names
+    and the security of each network, so this is one netsh call rather than
+    one per logger. netsh localizes the 'Authentication' label, so each
+    block is scanned for the untranslated scheme names (WPA*, 802.1X)
+    instead of by field name.
+    """
+    _force_scan()
     try:
         out = _netsh("show", "networks", "mode=bssid").stdout
     except Exception:
-        return None
-    in_block = False
+        return []
+    aps: list[LoggerAp] = []
+    current = None      # index of the AiM block being read, if any
     for line in out.splitlines():
-        if ":" in line and line.split(":", 1)[1].strip() == ssid:
-            in_block = True
-            continue
-        if in_block:
-            if line.strip().startswith("SSID "):   # next network's block
-                return False
-            if "WPA" in line or "802.1X" in line:
-                return True
-    return False if in_block else None
+        header = _SSID_HEADER.match(line.strip())
+        if header:
+            ssid = header.group(1).strip()
+            current = len(aps) if ssid.startswith("AiM-") else None
+            if current is not None:
+                aps.append(LoggerAp(ssid, False))
+        elif current is not None and ("WPA" in line or "802.1X" in line):
+            aps[current] = aps[current]._replace(protected=True)
+    return aps
 
 
 def join_logger_ap(ssid: str, password: str | None = None,

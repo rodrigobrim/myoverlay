@@ -7,25 +7,24 @@
 #   3. compiles Product.wxs + WizardUI.wxs and links dist\MyOverlay-setup.msi.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File packaging\msi\build_msi.ps1
-#         ... -Version 1.2.0     (release builds; CI passes the git tag)
+#         ... -Version 0.7.1234   (release builds; CI derives this from the
+#                                  date tag - see packaging\version.ps1)
 #
 # -Version becomes the MSI ProductVersion. It MUST change between builds that
 # will be installed: Product.wxs pairs `Product Id="*"` with a fixed
 # UpgradeCode and <MajorUpgrade>, so two MSIs sharing a version never upgrade
 # each other - the second install collides with the first instead of
-# replacing it (observed live: "Setup Wizard ended prematurely"). Releases
-# pass the git tag; local builds default to a monotonic timestamp version
-# (0.<months since 2026-01>.<minute of month>) so every rebuild cleanly
-# MajorUpgrades the previous install. Two builds in the same minute still
-# collide - pass -Version explicitly then.
+# replacing it (observed live: "Setup Wizard ended prematurely"). Local
+# builds default to a monotonic date-derived version (packaging\version.ps1 -
+# same scheme tagged releases use) so every rebuild cleanly MajorUpgrades the
+# previous install. Two builds in the same minute still collide - pass
+# -Version explicitly then.
 param([string]$Version = "")
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "..\version.ps1")
 if (-not $Version) {
-    $now = [DateTime]::UtcNow
-    $minor = (($now.Year - 2026) * 12) + $now.Month - 1
-    $patch = ($now.Day * 1440) + ($now.Hour * 60) + $now.Minute
-    $Version = "0.$minor.$patch"
+    $Version = ConvertTo-MsiVersion
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version '$Version' must be MAJOR.MINOR.PATCH (MSI ProductVersion)."
