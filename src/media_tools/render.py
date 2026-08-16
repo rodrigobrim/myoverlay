@@ -727,7 +727,10 @@ def render_clip(
         language=cfg.language,
     )
 
-    dest = day_dir / "out" / f"{video.stem}_{suffix}.mp4"
+    # The resolution is part of the name: the same clip rendered at two
+    # presets gives two files instead of one silently overwriting the other,
+    # and what you are about to upload is readable from the filename.
+    dest = day_dir / "out" / f"{video.stem}_{suffix}_{cfg.render.resolution}.mp4"
     dest.parent.mkdir(parents=True, exist_ok=True)
     if progress is not None:
         progress.start_clip(clip.file, len(timeline.frames))
@@ -859,7 +862,7 @@ def render_day(
                 f"completed) - a race starts at 0 laps, so the auto-sync is wrong. "
                 f"Set it manually: mt sync {manifest.date} --clip {clip.source_name} "
                 f"--lap N --at MM:SS  (N = the telemetry lap you are starting at "
-                f"video time MM:SS)"
+                f"video time MM:SS; add .mmm for sub-second precision)"
             )
         except RuntimeError as exc:
             # A locked output (open in a player), an ffmpeg error, etc. must

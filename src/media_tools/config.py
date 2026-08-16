@@ -92,6 +92,15 @@ RESOLUTIONS: dict[str, int] = json.loads(
     Path(__file__).with_name("resolutions.json").read_text(encoding="utf-8")
 )
 
+# Each preset's common name (its height in p: fhd = 1080p), so a resolution
+# can be given either way. Derived from RESOLUTIONS, so the two spellings
+# can never drift apart. Aliases normalize to the preset name: everything
+# downstream (render filenames, the GUI combo, config.toml) sees only the
+# canonical key.
+RESOLUTION_ALIASES: dict[str, str] = {
+    f"{height}p": name for name, height in RESOLUTIONS.items()
+}
+
 
 class RenderConfig(BaseModel):
     # Re-validate on assignment so a CLI --resolution override is checked;
@@ -130,9 +139,11 @@ class RenderConfig(BaseModel):
     @classmethod
     def _valid_resolution(cls, v: str) -> str:
         key = v.strip().lower()
+        key = RESOLUTION_ALIASES.get(key, key)
         if key not in RESOLUTIONS:
             raise ValueError(
-                f"resolution must be one of {list(RESOLUTIONS)} (got {v!r})"
+                f"resolution must be one of {list(RESOLUTIONS)} "
+                f"or {list(RESOLUTION_ALIASES)} (got {v!r})"
             )
         return key
 

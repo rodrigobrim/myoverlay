@@ -33,7 +33,7 @@ class RenderItem(BaseModel):
     start_s: float = 0.0
     end_enabled: bool = False
     end_s: float = 0.0
-    quality: str = "2k"                  # combo: hd|fhd|2k|4k
+    quality: str = "2k"                  # combo: any RESOLUTIONS preset
     title: str = ""
     description: str = ""
     append_best_lap: bool = True         # checkbox (default checked)

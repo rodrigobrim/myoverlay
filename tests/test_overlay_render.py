@@ -71,6 +71,34 @@ def test_resolution_presets_and_validation():
         cfg.resolution = "nope"
 
 
+def test_resolution_common_name_aliases():
+    """A resolution may be given as the preset or as its common name; the
+    alias normalizes to the preset, so nothing downstream sees the alias."""
+    import pytest as _pytest
+
+    from media_tools.config import RESOLUTION_ALIASES, RESOLUTIONS, RenderConfig
+
+    # One alias per preset, derived from the heights - no hand-kept table.
+    assert RESOLUTION_ALIASES == {
+        "360p": "nhd", "480p": "sd", "720p": "hd",
+        "1080p": "fhd", "1440p": "2k", "2160p": "4k",
+    }
+    for alias, preset in RESOLUTION_ALIASES.items():
+        cfg = RenderConfig(resolution=alias)
+        assert cfg.resolution == preset  # stored canonical, not as typed
+        assert cfg.target_height() == RESOLUTIONS[preset]
+    assert RenderConfig(resolution=" 1080P ").resolution == "fhd"  # case/space
+    # Assignment (the CLI --res path) normalizes too.
+    cfg = RenderConfig()
+    cfg.resolution = "1440p"
+    assert cfg.resolution == "2k"
+    # A height that is not a preset is still rejected, and the error names
+    # both spellings.
+    with _pytest.raises(ValueError, match="resolution must be one of") as exc:
+        RenderConfig(resolution="1200p")
+    assert "1080p" in str(exc.value) and "fhd" in str(exc.value)
+
+
 def test_recent_laps_last_five():
     df = make_session_df(duration_s=500.0)
     laps = (
@@ -389,6 +417,53 @@ def test_render_allows_start_before_first_lap(cfg, tmp_path, monkeypatch):
     assert any(l.startswith("+") for l in lines)  # rendered, no guard
 
 
+def test_render_filename_carries_the_resolution(cfg, tmp_path, monkeypatch):
+    """The output name ends in the preset, so the same clip rendered at two
+    resolutions gives two files instead of one overwriting the other."""
+    import media_tools.render as render_mod
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 14, 12, 0, tzinfo=timezone.utc)
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=[(1, 0.0, 45.0)])
+    clip = VideoClip(
+        file="raw/video/d.MP4", source_name="d.MP4", size_bytes=1, duration_s=300.0,
+        start_utc_estimate=start,
+        sync=SyncInfo(video_start_utc=start, confidence=0.9, method="manual"),
+    )
+    manifest = DayManifest(date=date(2026, 7, 14), videos=[clip])
+    (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
+
+    def fake_composite(video, frames, size, dest, *a, **k):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+
+    monkeypatch.setattr(render_mod, "composite_stream", fake_composite)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+
+    cfg.render.resolution = "2k"
+    dest_2k = render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
+    assert dest_2k.name == "d_overlay_2k.mp4"
+
+    # Given the common name, the file is still named after the preset.
+    cfg.render.resolution = "1080p"
+    dest_fhd = render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
+    assert dest_fhd.name == "d_overlay_fhd.mp4"
+    assert dest_2k.is_file()  # the 2K render survived the 1080p one
+    assert sorted(r.file for r in manifest.renders) == [
+        "out/d_overlay_2k.mp4",
+        "out/d_overlay_fhd.mp4",
+    ]
+
+    # Lap and sample renders keep their own suffix and gain the preset too.
+    lap = render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day, lap_num=1)
+    assert lap.name == "d_lap1_fhd.mp4"
+    sample = render_mod.render_clip(
+        cfg, tmp_path / "day", manifest, clip, day, window_start_s=10.0, window_end_s=40.0
+    )
+    assert sample.name == "d_overlay_sample_10-40_fhd.mp4"
+
+
 def test_render_clip_caps_duration_at_race_end(cfg, tmp_path, monkeypatch):
     """A detected race end must cap BOTH the overlay window and the ffmpeg
     duration (a real -t), and the scan must not rerun when cached."""
@@ -637,7 +712,7 @@ def test_render_day_end_to_end(cfg, tmp_path, monkeypatch):
 
     report = render_day(cfg, manifest, day_dir)
     assert any(line.startswith("+") for line in report), report
-    out = day_dir / "out" / "DJI_test_overlay.mp4"
+    out = day_dir / "out" / f"DJI_test_overlay_{cfg.render.resolution}.mp4"
     assert out.is_file() and out.stat().st_size > 10_000
     assert manifest.renders and manifest.renders[0].kind == "session"
 
