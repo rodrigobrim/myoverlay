@@ -182,7 +182,7 @@ Render telemetry overlays onto synced videos (or an edited --plan).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--force` / `--no-force` | false | Re-render already rendered videos |
-| `--resolution`, `--res` |  | Output resolution: nhd\|sd\|hd\|fhd\|2k\|4k (default from config) |
+| `--resolution`, `--res` |  | Output resolution: nhd(360p)\|sd(480p)\|hd(720p)\|fhd(1080p)\|2k(1440p)\|4k(2160p) (default from config) |
 | `--scan-race-end` / `--no-scan-race-end` | false | Trim the video after the engine shutdown (default from config) |
 | `--video`, `--clip` |  | Only render videos whose name contains this substring (re-renders them) |
 | `--from` |  | Render only from this video time (MM:SS or seconds) - a short sample to validate the trim without rendering the whole video |
@@ -209,7 +209,7 @@ rendered; ingest still runs, since fresh material may belong to it.
 | --- | --- | --- |
 | `--publish` / `--no-publish` | false | Also upload to YouTube |
 | `--download` / `--no-download` | false | Pull new sessions off the MyChron first (default: with DAY always, otherwise [telemetry] auto_download) |
-| `--resolution`, `--res` |  | Output resolution: nhd\|sd\|hd\|fhd\|2k\|4k (default from config) |
+| `--resolution`, `--res` |  | Output resolution: nhd(360p)\|sd(480p)\|hd(720p)\|fhd(1080p)\|2k(1440p)\|4k(2160p) (default from config) |
 
 ## mt scan
 
@@ -273,7 +273,7 @@ Align videos with telemetry (auto, or manual --video with --video-start or --lap
 | `--video`, `--clip` |  | Manual mode: video source name |
 | `--video-start` |  | Manual mode: exact UTC start of the video (ISO 8601) |
 | `--lap` |  | Manual mode: telemetry lap number you start at video time --at |
-| `--at` |  | Manual mode: video time (MM:SS) of the --lap start/finish crossing |
+| `--at` |  | Manual mode: video time of the --lap start/finish crossing (MM:SS, or MM:SS.mmm for sub-second precision) |
 | `--force` / `--no-force` | false | Re-sync videos that already have a sync |
 
 ## mt telemetry

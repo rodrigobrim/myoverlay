@@ -14,7 +14,13 @@ from rich.table import Table
 from .config import RESOLUTIONS, Config, load_config
 from .library import Library
 
-_RES_HELP = f"Output resolution: {'|'.join(RESOLUTIONS)} (default from config)"
+# Each preset with its common name in parentheses; --res takes either
+# spelling (fhd or 1080p).
+_RES_HELP = (
+    "Output resolution: "
+    + "|".join(f"{name}({height}p)" for name, height in RESOLUTIONS.items())
+    + " (default from config)"
+)
 
 app = typer.Typer(help="Zero-touch karting video + telemetry pipeline.", no_args_is_help=True)
 video_app = typer.Typer(help="Camera video utilities (list / selective download).", no_args_is_help=True)
@@ -1002,7 +1008,11 @@ def sync(
     ] = None,
     at: Annotated[
         Optional[str],
-        typer.Option("--at", help="Manual mode: video time (MM:SS) of the --lap start/finish crossing"),
+        typer.Option(
+            "--at",
+            help="Manual mode: video time of the --lap start/finish crossing "
+            "(MM:SS, or MM:SS.mmm for sub-second precision)",
+        ),
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
 ):
@@ -1034,7 +1044,17 @@ def sync(
             from .slice import parse_timestamp
 
             if at is None:
-                console.print("[red]--lap needs --at MM:SS[/red]")
+                console.print("[red]--lap needs --at MM:SS (or MM:SS.mmm)[/red]")
+                raise typer.Exit(2)
+            # A start/finish crossing is worth pinning to the millisecond, so
+            # --at takes fractional seconds; parse before the lap lookup so a
+            # typo fails fast (and as an error, not a traceback).
+            try:
+                at_s = parse_timestamp(at)
+            except ValueError:
+                console.print(
+                    f"[red]invalid --at {at!r}: expected MM:SS, MM:SS.mmm or seconds[/red]"
+                )
                 raise typer.Exit(2)
             lap_utc = None
             for t in manifest.telemetry:
@@ -1050,7 +1070,7 @@ def sync(
                     f"(id {target.session_id}); run 'mt correlate {day}' first[/red]"
                 )
                 raise typer.Exit(2)
-            vs = lap_utc - timedelta(seconds=parse_timestamp(at))
+            vs = lap_utc - timedelta(seconds=at_s)
         else:
             vs = dt.fromisoformat(video_start)
 

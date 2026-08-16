@@ -371,6 +371,102 @@ def test_sync_manual_mode_still_validates(cfg_with_card):
     assert "manual mode needs" in r.stdout
 
 
+def _library_with_lap_telemetry(cfg):
+    """A day whose clip has a correlated session with telemetry lap 3, so
+    `sync --lap 3 --at ...` has something to anchor to."""
+    from datetime import date, datetime, timedelta, timezone
+
+    from media_tools.library import (
+        DayManifest, Lap, Library, TelemetryLog, TrackSession, VideoClip,
+    )
+
+    start = datetime(2026, 7, 12, 13, 0, tzinfo=timezone.utc)
+    m = DayManifest(
+        date=date(2026, 7, 12),
+        sessions=[TrackSession(id=1, start_utc=start, end_utc=start + timedelta(minutes=20))],
+        telemetry=[
+            TelemetryLog(
+                file="raw/telemetry/s.xrk", source_name="s.xrk", size_bytes=1,
+                start_utc=start, end_utc=start + timedelta(minutes=20), session_id=1,
+                laps=[Lap(num=3, start_s=180.0, end_s=225.0)],
+            )
+        ],
+    )
+    m.videos = [
+        VideoClip(
+            file="raw/video/a.MP4", source_name="a.MP4", size_bytes=1,
+            duration_s=600, start_utc_estimate=start, session_id=1,
+        )
+    ]
+    Library(cfg.library_root).save_day(m)
+    return start
+
+
+def _pinned_start(cfg):
+    from media_tools.library import Library
+
+    return Library(cfg.library_root).load_day(date(2026, 7, 12)).videos[0].sync
+
+
+def test_sync_lap_anchor_takes_whole_seconds_and_milliseconds(cfg_with_card):
+    """--at MM:SS and --at MM:SS.mmm must both work: a start/finish crossing
+    is worth pinning to the millisecond."""
+    from datetime import timedelta
+
+    start = _library_with_lap_telemetry(cfg_with_card)
+
+    # Whole seconds: lap 3 starts 180 s in, seen at video time 1:00.
+    r = runner.invoke(
+        cli.app,
+        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "01:00"],
+    )
+    assert r.exit_code == 0, r.stdout
+    sync = _pinned_start(cfg_with_card)
+    assert sync.method == "manual"
+    assert sync.video_start_utc == start + timedelta(seconds=120)
+
+    # Milliseconds: 571 ms later on the video is 571 ms earlier for the start.
+    r2 = runner.invoke(
+        cli.app,
+        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "01:00.571"],
+    )
+    assert r2.exit_code == 0, r2.stdout
+    pinned = _pinned_start(cfg_with_card).video_start_utc
+    # Survives the manifest JSON round-trip at full precision.
+    assert pinned == start + timedelta(seconds=119, milliseconds=429)
+    assert pinned.microsecond == 429_000
+
+
+def test_sync_lap_anchor_rejects_an_unparsable_at(cfg_with_card):
+    _library_with_lap_telemetry(cfg_with_card)
+    r = runner.invoke(
+        cli.app,
+        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "1:00,571"],
+    )
+    assert r.exit_code == 2
+    assert "invalid --at" in r.stdout
+    assert _pinned_start(cfg_with_card) is None  # nothing pinned
+
+
+def test_render_res_accepts_preset_or_common_name(cfg_with_card):
+    """--res takes either spelling, and reports the preset it resolved to."""
+    from media_tools.config import RESOLUTIONS
+
+    _library_with_video(cfg_with_card)  # no sync -> nothing renders
+    r = runner.invoke(cli.app, ["render", "--res", "1080p"])
+    assert r.exit_code == 0, r.stdout
+    assert "output resolution: fhd (1080p)" in r.stdout
+    assert runner.invoke(cli.app, ["render", "--res", "fhd"]).exit_code == 0
+
+    bad = runner.invoke(cli.app, ["render", "--res", "1200p"])
+    assert bad.exit_code == 2
+    assert "resolution must be one of" in bad.stdout
+
+    # The help offers both spellings, straight from resolutions.json.
+    for name, height in RESOLUTIONS.items():
+        assert f"{name}({height}p)" in cli._RES_HELP
+
+
 def _library_with_two_synced_videos(cfg):
     from datetime import date, datetime, timedelta, timezone
 
