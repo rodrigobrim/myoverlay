@@ -15,7 +15,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent / "src"))
 from media_tools.config import load_config
 from media_tools.relap import line_length_m, line_midpoint
 
-SF_LINE = load_config().track.line()    # [track] start-finish-line
+TRACK, LAYOUT = "kgv", "default"        # which [tracks.*] layout to draw
+SF_LINE = load_config().tracks.tracks[TRACK].layouts[LAYOUT].start_finish.line()
 SF_LAT, SF_LON = line_midpoint(SF_LINE)  # centre of the view
 ZOOM = 19           # 19: the ~8 m line is several px long on screen
 LYRS = "y"          # y = hybrid (satellite + labels); s = pure satellite

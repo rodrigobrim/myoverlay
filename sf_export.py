@@ -25,7 +25,6 @@ from media_tools.relap import crossings_by_line, laps_from_crossings
 
 PATH = r"C:\Users\rodrigobrim\Videos\karting\2026-07-16\raw\telemetry\kgv e2_Race_a_0096.xrk"
 OUT = r"C:\Users\rodrigobrim\Videos\karting\2026-07-16\raw\telemetry\kgv e2_Race_a_0096.sf-relapped.parquet"
-SF_LINE = load_config().track.line()             # [track] start-finish-line - the real S/F
 EARLY_LAT, EARLY_LON = -23.6042405, -46.8368762  # deliberately-early beacon pin (old trip point)
 
 log = aim_xrk(PATH)
@@ -57,6 +56,9 @@ t_end = int(tcol.max())
 # (media_tools.relap: a crossing is where the GPS track intersects the S/F
 # LINE, interpolated between the two straddling fixes; direction, movement
 # and track distance filter the rest - never a clock. Same code the tests pin.)
+# The track/layout is resolved from where this session actually drove.
+SF_LINE = load_config().tracks.start_finish_for_position(
+    float(np.nanmean(gps["GPS Latitude"])), float(np.nanmean(gps["GPS Longitude"])))
 gps_t = log.select_channels(["GPS Latitude"]).get_channels_as_table().to_pandas()["timecodes"].to_numpy(np.int64)
 # relap works in seconds (its filters reason about speed); .xrk timecodes are ms.
 cross = [int(round(c * 1000)) for c in crossings_by_line(
@@ -81,7 +83,7 @@ table = pa.table({
 meta = {
     b"format": b"media-tools xrk full-export v1 (long-format, native rates)",
     b"source_xrk": PATH.encode(),
-    b"start_finish_line": json.dumps({"ends": SF_LINE, "note": "real S/F line ([track] start-finish-line); laps re-derived here"}).encode(),
+    b"start_finish_line": json.dumps({"ends": SF_LINE, "note": "real S/F line ([tracks] start-finish, resolved by GPS); laps re-derived here"}).encode(),
     b"early_pin": json.dumps({"lat": EARLY_LAT, "lon": EARLY_LON, "note": "deliberately-early beacon pin that generated the original laps"}).encode(),
     b"early_offset_ms": str(mean_offset).encode(),
     b"xrk_metadata": json.dumps(log.metadata, default=str).encode(),
