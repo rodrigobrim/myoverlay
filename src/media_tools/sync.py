@@ -305,6 +305,67 @@ def detect_engine_shutdown(
     return float(last_start / feature_hz)
 
 
+# Launch detection: a launch is where the engine goes from standing to
+# sustained pulling. Used ONLY as the manual-sync anchor - it says nothing
+# about where the race starts (that is the start/finish line, which sits
+# ahead of every grid slot; see media_tools.relap).
+LAUNCH_MIN_RUN_S = 8.0
+LAUNCH_ONSET_FRACTION = 0.1
+
+
+def engine_launches(
+    df: pd.DataFrame, min_run_s: float = LAUNCH_MIN_RUN_S
+) -> list[float]:
+    """Telemetry times (s from frame start) where the kart launches.
+
+    A launch is the onset of a sustained pull: a run of at least `min_run_s`
+    above the engine channel's activity threshold, walked back to where the
+    trace last sat at its quiet floor. That instant - revs rising off idle -
+    is what a person sees and hears in the video, so it is what the manual
+    sync anchors on.
+    """
+    if df.empty:
+        return []
+    try:
+        col = engine_column(df)
+    except ValueError:
+        return []  # a flat trace never pulls away - no anchor to offer
+    t = df["t_s"].to_numpy(dtype=float)
+    grid = np.arange(float(t[0]), float(t[-1]), 1.0 / FEATURE_HZ)
+    if len(grid) < 3:
+        return []
+    raw = np.interp(grid, t, df[col].to_numpy(dtype=float))
+    # A launch needs a genuine STANDSTILL to launch from: the quiet floor
+    # must sit near zero against the driving level. Without that contrast
+    # (a trace that never stops - e.g. a mid-race log), the percentile
+    # threshold would slice ordinary rpm/speed variation into fake launches.
+    lo, hi = np.percentile(raw, [10, 90])
+    if not (hi > 1e-9 and lo < 0.25 * hi):
+        return []
+    # Smoothed only to decide WHICH runs are launches; the onset itself is
+    # read off the raw trace, because a smoothing window drags a rising edge
+    # up to half its width earlier - a fifth of a second of anchor error.
+    sig = _smooth(raw, FEATURE_HZ, 0.5)
+    threshold = _activity_threshold(sig)
+    onset_level = lo + LAUNCH_ONSET_FRACTION * (hi - lo)
+
+    launches: list[float] = []
+    min_len = max(1, int(min_run_s * FEATURE_HZ))
+    for start, end in _mask_runs(sig > threshold):
+        if end - start < min_len:
+            continue
+        # Back out of the ramp to the last idle sample, then forward to the
+        # first sample that has actually left idle: the instant the revs
+        # rise, whatever the shape of the pull-away.
+        k = start
+        while k > 0 and raw[k - 1] > onset_level:
+            k -= 1
+        while k < end and raw[k] <= onset_level:
+            k += 1
+        launches.append(float(grid[k]))
+    return launches
+
+
 def rpm_feature(df: pd.DataFrame, feature_hz: float = FEATURE_HZ) -> np.ndarray:
     """Engine trace resampled onto a uniform 10 Hz grid from telemetry t=0."""
     if df.empty:

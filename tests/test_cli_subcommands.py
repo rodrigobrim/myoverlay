@@ -365,15 +365,31 @@ def test_sync_video_accepts_substring(cfg_with_card, monkeypatch):
 
 def test_sync_manual_mode_still_validates(cfg_with_card):
     _library_with_video(cfg_with_card)
-    # An anchor option without the rest is still the manual-mode error.
-    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "00:30"])
+    # An anchor option without --video is still the manual-mode error.
+    r = runner.invoke(cli.app, ["sync", "2026-07-12", "--at", "00:30"])
     assert r.exit_code == 2
     assert "manual mode needs" in r.stdout
 
 
+def _launch_frame(monkeypatch, start, launch_s: float = 180.0):
+    """Stand in for the day's telemetry with a trace that launches at
+    `launch_s`: stationary, then pulling away and driving."""
+    import numpy as np
+    import pandas as pd
+
+    from media_tools import telemetry as telemetry_mod
+
+    t = np.arange(0.0, launch_s + 300.0, 0.1)
+    frame = telemetry_mod.DayFrame(
+        df=pd.DataFrame({"t_s": t, "speed_ms": np.where(t < launch_s, 0.0, 22.0)}),
+        start_utc=start,
+        laps=[],
+    )
+    monkeypatch.setattr(telemetry_mod, "load_day_frame", lambda *a, **k: frame)
+
+
 def _library_with_lap_telemetry(cfg):
-    """A day whose clip has a correlated session with telemetry lap 3, so
-    `sync --lap 3 --at ...` has something to anchor to."""
+    """A day whose clip has a correlated session with telemetry lap 3."""
     from datetime import date, datetime, timedelta, timezone
 
     from media_tools.library import (
@@ -408,17 +424,18 @@ def _pinned_start(cfg):
     return Library(cfg.library_root).load_day(date(2026, 7, 12)).videos[0].sync
 
 
-def test_sync_lap_anchor_takes_whole_seconds_and_milliseconds(cfg_with_card):
-    """--at MM:SS and --at MM:SS.mmm must both work: a start/finish crossing
-    is worth pinning to the millisecond."""
+def test_sync_launch_anchor_takes_whole_seconds_and_milliseconds(cfg_with_card, monkeypatch):
+    """--at is the video time the kart pulls away, and both --at MM:SS and
+    --at MM:SS.mmm work: the anchor is worth pinning to the millisecond."""
     from datetime import timedelta
 
     start = _library_with_lap_telemetry(cfg_with_card)
+    _launch_frame(monkeypatch, start, launch_s=180.0)
 
-    # Whole seconds: lap 3 starts 180 s in, seen at video time 1:00.
+    # Whole seconds: the kart launches 180 s into the telemetry, seen at
+    # video time 1:00, so the video started 120 s into the telemetry.
     r = runner.invoke(
-        cli.app,
-        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "01:00"],
+        cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00"]
     )
     assert r.exit_code == 0, r.stdout
     sync = _pinned_start(cfg_with_card)
@@ -427,8 +444,7 @@ def test_sync_lap_anchor_takes_whole_seconds_and_milliseconds(cfg_with_card):
 
     # Milliseconds: 571 ms later on the video is 571 ms earlier for the start.
     r2 = runner.invoke(
-        cli.app,
-        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "01:00.571"],
+        cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00.571"]
     )
     assert r2.exit_code == 0, r2.stdout
     pinned = _pinned_start(cfg_with_card).video_start_utc
@@ -437,15 +453,91 @@ def test_sync_lap_anchor_takes_whole_seconds_and_milliseconds(cfg_with_card):
     assert pinned.microsecond == 429_000
 
 
-def test_sync_lap_anchor_rejects_an_unparsable_at(cfg_with_card):
-    _library_with_lap_telemetry(cfg_with_card)
+def test_sync_launch_anchor_rejects_an_unparsable_at(cfg_with_card, monkeypatch):
+    start = _library_with_lap_telemetry(cfg_with_card)
+    _launch_frame(monkeypatch, start)
     r = runner.invoke(
-        cli.app,
-        ["sync", "2026-07-12", "--video", "a.MP4", "--lap", "3", "--at", "1:00,571"],
+        cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "1:00,571"]
     )
     assert r.exit_code == 2
     assert "invalid --at" in r.stdout
     assert _pinned_start(cfg_with_card) is None  # nothing pinned
+
+
+def test_sync_launch_anchor_reports_no_launch(cfg_with_card, monkeypatch):
+    """A day whose kart never pulls away offers no anchor - say so and pin
+    nothing, rather than guessing."""
+    import numpy as np
+    import pandas as pd
+
+    from media_tools import telemetry as telemetry_mod
+
+    start = _library_with_lap_telemetry(cfg_with_card)
+    t = np.arange(0.0, 300.0, 0.1)
+    monkeypatch.setattr(
+        telemetry_mod,
+        "load_day_frame",
+        lambda *a, **k: telemetry_mod.DayFrame(
+            df=pd.DataFrame({"t_s": t, "speed_ms": np.zeros_like(t)}),
+            start_utc=start,
+            laps=[],
+        ),
+    )
+    r = runner.invoke(
+        cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00"]
+    )
+    assert r.exit_code == 2
+    assert "no launch found" in r.stdout
+    assert _pinned_start(cfg_with_card) is None
+
+
+def test_sync_launch_anchor_picks_the_launch_nearest_the_camera_clock(
+    cfg_with_card, monkeypatch
+):
+    """Two launches (pit out-lap, then the grid start): the clip's own clock
+    decides which --at refers to, and --launch N overrides it."""
+    from datetime import timedelta
+
+    import numpy as np
+    import pandas as pd
+
+    from media_tools import telemetry as telemetry_mod
+
+    start = _library_with_lap_telemetry(cfg_with_card)  # clip clock == start
+    t = np.arange(0.0, 900.0, 0.1)
+    speed = np.zeros_like(t)
+    speed[(t >= 120.0) & (t < 300.0)] = 20.0   # out-lap launch at 120 s
+    speed[t >= 600.0] = 22.0                   # race launch at 600 s
+    monkeypatch.setattr(
+        telemetry_mod,
+        "load_day_frame",
+        lambda *a, **k: telemetry_mod.DayFrame(
+            df=pd.DataFrame({"t_s": t, "speed_ms": speed}), start_utc=start, laps=[]
+        ),
+    )
+
+    # The clip's clock says it started at `start`, so --at 01:00 points at
+    # 60 s - nearest the 120 s launch.
+    r = runner.invoke(
+        cli.app, ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00"]
+    )
+    assert r.exit_code == 0, r.stdout
+    assert _pinned_start(cfg_with_card).video_start_utc == start + timedelta(seconds=60)
+
+    # --launch 2 forces the race launch instead.
+    r2 = runner.invoke(
+        cli.app,
+        ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00", "--launch", "2"],
+    )
+    assert r2.exit_code == 0, r2.stdout
+    assert _pinned_start(cfg_with_card).video_start_utc == start + timedelta(seconds=540)
+
+    r3 = runner.invoke(
+        cli.app,
+        ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00", "--launch", "9"],
+    )
+    assert r3.exit_code == 2
+    assert "out of range" in r3.stdout
 
 
 def test_render_res_accepts_preset_or_common_name(cfg_with_card):

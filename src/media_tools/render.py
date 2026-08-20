@@ -591,9 +591,32 @@ def composite(
     tmp.replace(dest)
 
 
-# Keep this many seconds of lead-in before the first lap (the launch / race
-# start), dropping the pre-race grid staging.
+# Keep this many seconds of lead-in before the launch, dropping the pre-race
+# grid staging.
 RACE_START_BUFFER_S = 15.0
+
+
+def _race_launch_s(df, laps) -> float | None:
+    """Telemetry time of the launch that starts the race, or None.
+
+    Two different things mark the beginning of a race and they must not be
+    confused: the LAUNCH is where the revs rise and the kart pulls away, and
+    the RACE START is where it crosses the start/finish line - metres or many
+    seconds later, depending on the grid slot. This returns the launch: the
+    last pull-away before the first line crossing, which is the boundary the
+    first lap closes on.
+    """
+    from .sync import engine_launches
+
+    launches = engine_launches(df)
+    if not launches:
+        return None
+    # The first S/F crossing is the first lap's end - the out-lap's close.
+    # The launch is necessarily before it, so a later pull-away (rejoining
+    # after a spin, a second stint) can never be mistaken for the start.
+    first_crossing = min(e for _, _, e in laps)
+    before = [s for s in launches if s <= first_crossing]
+    return before[-1] if before else None
 
 
 def render_clip(
@@ -655,15 +678,20 @@ def render_clip(
             duration_s = cut
             race_end_cut = True
 
-    # Race-start trim: begin RACE_START_BUFFER_S before the first lap (the
-    # launch), dropping the pre-race grid staging. Only for a full clip render
-    # (not a lap render or an explicit --from sample). `duration_s` here holds
-    # the END time (the race-end cut, or the full clip length since start was
-    # 0); convert it to a render length once start_s moves.
+    # Race-start trim: begin RACE_START_BUFFER_S before the LAUNCH - the revs
+    # rising and the kart pulling away - dropping the pre-race grid staging.
+    # Not the first start/finish crossing: the line lies ahead of every grid
+    # slot, so from a back row the launch is many seconds earlier, and it is
+    # the launch a viewer expects the video to open on. Only for a full clip
+    # render (not a lap render or an explicit --from sample). `duration_s`
+    # here holds the END time (the race-end cut, or the full clip length
+    # since start was 0); convert it to a render length once start_s moves.
     race_start_trim = False
     if lap_num is None and window_start_s == 0.0 and window_end_s == 0.0 and laps:
-        first_lap_video = min(st for _, st, _ in laps) - video_offset_s
-        rs = first_lap_video - RACE_START_BUFFER_S
+        anchor = _race_launch_s(df, laps)
+        if anchor is None:
+            anchor = min(st for _, st, _ in laps)
+        rs = anchor - video_offset_s - RACE_START_BUFFER_S
         if rs > start_s + 0.5:
             end_time = duration_s
             start_s = rs
@@ -861,8 +889,8 @@ def render_day(
                 f"! {clip.file}: starts mid-race ({exc.laps_done} lap(s) already "
                 f"completed) - a race starts at 0 laps, so the auto-sync is wrong. "
                 f"Set it manually: mt sync {manifest.date} --clip {clip.source_name} "
-                f"--lap N --at MM:SS  (N = the telemetry lap you are starting at "
-                f"video time MM:SS; add .mmm for sub-second precision)"
+                f"--at MM:SS  (MM:SS = the video time where the revs rise and you "
+                f"pull away; add .mmm for sub-second precision)"
             )
         except RuntimeError as exc:
             # A locked output (open in a player), an ffmpeg error, etc. must

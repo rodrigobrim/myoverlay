@@ -1,16 +1,23 @@
-"""Unauthenticated Google Maps snapshot of the start-finish-coordinate.
+"""Unauthenticated Google Maps snapshot of the start-finish-line.
 
 Pulls Google's public satellite/hybrid map tiles (mt*.google.com/vt, no API
-key / OAuth), stitches a grid, marks the exact S/F point and crops a small
-view. Pure standalone script - not wired into the pipeline.
+key / OAuth), stitches a grid, marks the configured S/F line and crops a
+small view. Pure standalone script - not wired into the pipeline.
 """
 import io
 import math
+import pathlib
+import sys
 import urllib.request
 from PIL import Image, ImageDraw
 
-SF_LAT, SF_LON = -23.60492, -46.83631   # start-finish-coordinate (default) - configured S/F
-ZOOM = 18
+sys.path.insert(0, str(pathlib.Path(__file__).parent / "src"))
+from media_tools.config import load_config
+from media_tools.relap import line_length_m, line_midpoint
+
+SF_LINE = load_config().track.line()    # [track] start-finish-line
+SF_LAT, SF_LON = line_midpoint(SF_LINE)  # centre of the view
+ZOOM = 19           # 19: the ~8 m line is several px long on screen
 LYRS = "y"          # y = hybrid (satellite + labels); s = pure satellite
 GRID = 3            # NxN tiles stitched
 CROP = 460          # final crop size (px), centred on the point
@@ -58,14 +65,20 @@ img = canvas.crop((left, top, left + CROP, top + CROP))
 cx, cy = mx - left, my - top
 
 d = ImageDraw.Draw(img)
-# crosshair + ring on the exact coordinate
-r = 11
-d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(255, 40, 40), width=3)
-d.line([cx - r - 8, cy, cx + r + 8, cy], fill=(255, 40, 40), width=2)
-d.line([cx, cy - r - 8, cx, cy + r + 8], fill=(255, 40, 40), width=2)
-d.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=(255, 40, 40))
-label = f"S/F  {SF_LAT:.7f}, {SF_LON:.7f}"
-d.rectangle([6, 6, 6 + 8 * len(label), 24], fill=(0, 0, 0))
+# The line itself, end to end - the gate a lap boundary is cut on.
+ends = []
+for lat, lon in SF_LINE:
+    ex, ey = world_px(lat, lon, ZOOM)
+    ends.append((ex - x0 * TILE - left, ey - y0 * TILE - top))
+d.line([ends[0], ends[1]], fill=(255, 40, 40), width=3)
+for ex, ey in ends:  # end caps: where the gate stops (past them = no crossing)
+    d.ellipse([ex - 4, ey - 4, ex + 4, ey + 4], fill=(255, 40, 40))
+d.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=(255, 255, 255))
+label = (
+    f"S/F line  {SF_LINE[0][0]:.6f},{SF_LINE[0][1]:.6f} -> "
+    f"{SF_LINE[1][0]:.6f},{SF_LINE[1][1]:.6f}  ({line_length_m(SF_LINE):.1f} m)"
+)
+d.rectangle([6, 6, 6 + 6 * len(label), 24], fill=(0, 0, 0))
 d.text((10, 10), label, fill=(255, 255, 255))
 
 img.save(OUT)

@@ -260,7 +260,14 @@ Show the pipeline state of one or all track days, one line per video.
 
     mt sync [OPTIONS] [DAY]
 
-Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at).
+Align videos with telemetry (auto, or manual --video with --video-start or --at).
+
+Manual mode anchors on the LAUNCH: --at is the video time where you hear
+the revs rise and the kart pulls away, matched to the same moment in the
+telemetry. That only aligns the two clocks - it is not the race start.
+The race starts where the GPS track crosses the start/finish line, which
+lies ahead of every grid slot, so it is derived separately and needs no
+input from you.
 
 --video alone (no anchor) auto-syncs just that clip.
 
@@ -272,8 +279,8 @@ Align videos with telemetry (auto, or manual --video with --video-start or --lap
 | --- | --- | --- |
 | `--video`, `--clip` |  | Manual mode: video source name |
 | `--video-start` |  | Manual mode: exact UTC start of the video (ISO 8601) |
-| `--lap` |  | Manual mode: telemetry lap number you start at video time --at |
-| `--at` |  | Manual mode: video time of the --lap start/finish crossing (MM:SS, or MM:SS.mmm for sub-second precision) |
+| `--at` |  | Manual mode: video time at which the engine revs up and the kart pulls away (MM:SS, or MM:SS.mmm for sub-second precision) |
+| `--launch` |  | Manual mode: which detected launch --at refers to (1-based, in time order); default is the one nearest the camera clock |
 | `--force` / `--no-force` | false | Re-sync videos that already have a sync |
 
 ## mt telemetry

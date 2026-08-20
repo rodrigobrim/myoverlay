@@ -77,6 +77,40 @@ class TelemetryConfig(BaseModel):
         return ZoneInfo(self.timezone) if self.timezone else _local_tzinfo()
 
 
+class TrackConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    # The painted start/finish line, as the coordinates of its two ends
+    # ([[lat, lon], [lat, lon]]). Laps are cut where the GPS track crosses
+    # the segment BETWEEN these points, so the line must span the asphalt:
+    # a kart passing beyond either end (pit lane) does not trip it. The
+    # default is Kartodromo Granja Viana's line, measured off satellite
+    # imagery. Do NOT use the MyChron beacon pin here - it sits ~95 m early
+    # on purpose; this is the real line.
+    start_finish_line: list[list[float]] | None = Field(
+        default_factory=lambda: [[-23.604910, -46.836278], [-23.604930, -46.836352]],
+        alias="start-finish-line",
+    )
+
+    @field_validator("start_finish_line")
+    @classmethod
+    def _valid_line(cls, v):
+        if v is None:
+            return v
+        if len(v) != 2 or any(len(p) != 2 for p in v):
+            raise ValueError(
+                "start_finish_line must be two [lat, lon] pairs (the ends of the line)"
+            )
+        return [[float(p[0]), float(p[1])] for p in v]
+
+    def line(self) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """The S/F line as nested tuples, as media_tools.relap expects it."""
+        if self.start_finish_line is None:
+            return None
+        (a_lat, a_lon), (b_lat, b_lon) = self.start_finish_line
+        return ((a_lat, a_lon), (b_lat, b_lon))
+
+
 class WatchConfig(BaseModel):
     poll_s: float = 30.0
     # Give the OS/camera a moment to finish mounting before ingesting.
@@ -196,6 +230,7 @@ class Config(BaseModel):
     language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    track: TrackConfig = Field(default_factory=TrackConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
