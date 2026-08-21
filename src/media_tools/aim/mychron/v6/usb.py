@@ -26,7 +26,7 @@ Driver interface, recovered from AIM_USBdrv_11CC_0110_64a.sys:
                   +0x10 u32 bytes transferred (out)
                   +0x14 u32 status flags      (out)
 
-Two behaviours are easy to miss and both look like a wrong request format:
+Three behaviours are easy to miss and all look like a wrong request format:
 
   * The descriptor + driver-info preamble is mandatory. Without it, on the
     same handle, every command comes back as an empty frame.
@@ -34,6 +34,13 @@ Two behaviours are easy to miss and both look like a wrong request format:
     next only after a zero-length control OUT with bRequest 2. That same
     call also terminates a finished transfer - skip it and the logger stays
     busy until it is power-cycled.
+  * Firmware 667+ (device updates OTA via the AiM app) stages a ~4 KB
+    settings bundle as OP_IDENTIFY's payload, where earlier firmware staged
+    nothing. Until that bundle is read out, the device serves no further
+    command - and the staged payload survives CloseHandle, so a run that
+    skips it leaves the logger deaf to EVERY later session (the classic
+    symptom: "no reply to opcode 0x10010") until it is power-cycled. Hence
+    _drain_payloads() at connect and after identify.
 """
 
 from __future__ import annotations
@@ -97,6 +104,10 @@ class Transport:
                            "is it plugged in?")
         self.h = h
         self._preamble()
+        # A payload a dead run never read (see the firmware-667 note in the
+        # module docstring) blocks every command; recover the logger rather
+        # than surface it as a mute device.
+        self._drain_payloads(wait_s=0.25)
 
     # -------------------------------------------------------------- plumbing
     def _ioctl(self, code, buf, size):
@@ -198,10 +209,51 @@ class Transport:
             time.sleep(0.02)
         raise UsbError("payload never became ready")
 
+    def _drain_payloads(self, wait_s: float) -> int:
+        """Read out and discard whatever payload the device has staged.
+
+        Firmware 667+ stages a settings bundle behind OP_IDENTIFY (module
+        docstring, third bullet); nothing downstream wants it, but the
+        device serves no further command until it is gone. Any state code
+        counts: a freshly staged payload reads state 0, one parked by a
+        dead session reads 0x14 - both must be drained. Staging takes
+        ~100 ms after the command reply, so wait_s bounds the wait for a
+        payload to appear at all; pre-667 firmware stages nothing here and
+        simply spends the wait. Returns the number of bytes drained.
+        """
+        drained = 0
+        sb = ctypes.create_string_buffer(8)
+        deadline = time.monotonic() + wait_s
+        for _ in range(50):               # a stuck announcement must not spin
+            if time.monotonic() >= deadline:
+                break
+            ctypes.memset(sb, 0, 8)
+            self._control(DIR_IN, sb, 8, breq=0x02, wval=0)
+            _state, length = struct.unpack("<II", sb.raw)
+            if not length:
+                time.sleep(0.02)
+                continue
+            try:
+                chunk = self._bulk_in(min(length, MAX_BULK))
+            except UsbError:
+                self._request_next()
+                break
+            self._request_next()
+            # A parked payload keeps announcing its length after the data
+            # has been read out; an empty read is the sign it is spent.
+            if not chunk:
+                break
+            drained += len(chunk)
+            deadline = time.monotonic() + 0.3
+        return drained
+
     # ---------------------------------------------------------------- public
     def session_csv(self) -> str:
         from ...catalog import strip_status_word
         self.command(OP_IDENTIFY)
+        # Firmware 667+ stages a settings bundle as identify's payload and
+        # withholds OP_SESSION_LIST until it has been read out.
+        self._drain_payloads(wait_s=1.5)
         _reply, length = self.command(OP_SESSION_LIST)
         ready = self.wait_payload()
         return strip_status_word(self._bulk_in(ready or length))
