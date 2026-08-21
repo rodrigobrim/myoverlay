@@ -128,6 +128,42 @@ Frida script hooking `DeviceIoControl` inside RS3
 (`tools/research/trace_ioctl.py`), which is what revealed the mandatory
 descriptor preamble and the chunk handshake.
 
+## Firmware 667: identify grew a payload
+
+Observed live on 2026-08-21, after the logger took an OTA update (identity
+record version `0x0235`/565 in the July captures, `0x029B`/667 after). The
+command layer is unchanged, but `LcyIdentitissima` (`0x00010010`) now stages
+a ~4 KB payload of its own: a sequence of ASCII-tagged frames (`iMST`
+identity, `iHW ` hardware, `iUSR`, `iPTH`, `iLCK`, `iSST`, `iLTS`, and an
+`iPRL` settings table in CSV) — the same framing the TCP transport uses,
+now appearing on the USB payload channel.
+
+Two consequences, both fatal to the pre-667 dialogue:
+
+1. The device withholds `leggiSummaryFilesRegistrati` (`0x00020024`) until
+   identify's bundle has been bulk-read. A client that sends identify and
+   immediately asks for the listing polls forever ("no reply to opcode
+   0x20024").
+2. The staged bundle **survives CloseHandle**. A session that dies without
+   reading it leaves the logger re-serving the stale identify reply to
+   every new handle — the state poll reads `[0x14, length]` instead of
+   `[0, length]` and no command is answered ("no reply to opcode
+   0x10010") until the logger is power-cycled or the bundle is drained.
+
+The client's answer is `_drain_payloads()` in `mychron/v6/usb.py`: read out
+and discard any staged payload right after connecting (recovers a logger a
+dead run left parked) and again after identify (consumes the bundle so the
+listing is served). A parked bundle keeps announcing its length after its
+data has been read; the empty follow-up bulk read is the sign it is spent.
+Pre-667 firmware stages nothing in either spot and is unaffected.
+
+The bundle itself is worth knowing about: the `iPRL` table is the device's
+settings menu (`GRP,KEY,TXT,TYPE,VAL,DEF,VALS`), including
+`Date Time / tm_adj_tp / Time / Date Synchronization`, which on this unit
+reads **"PC Synchronization"** — the logger takes its clock from whatever
+PC or phone connects to it. The alternatives are "by GPS Track" and
+"Manual (by Menu Display)".
+
 ## Beyond the MyChron6
 
 None of the command layer here is known to generalise. RS3 splits devices
