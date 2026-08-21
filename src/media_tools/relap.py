@@ -16,10 +16,11 @@ sub-metre radius of the line. Only an intersection test resolves the crossing
 below the sample spacing; `LINE_TOLERANCE_M` (0.4 m) is just the band in which
 a fix counts as sitting ON the line rather than on either side of it.
 
-The standalone export uses these helpers to write
-`<stem>.sf-relapped.parquet`, which the render then consumes
-(telemetry._derived_laps). The render pipeline never calls this module
-directly; it only reads the derived file.
+This is the pipeline's primary lap source: telemetry._log_laps calls
+crossings_by_line for every log (resolving the track/layout from the log's
+own GPS), so the overlay chronometer, lap counter, delta and best lap all
+start at the real line. A sibling `<stem>.sf-relapped.parquet` (the
+standalone export) overrides it; the .xrk beacon laps are the last resort.
 """
 
 from __future__ import annotations

@@ -672,7 +672,7 @@ def sync_day(
 
     report: list[str] = []
     try:
-        day = load_day_frame(day_dir, manifest)
+        day = load_day_frame(day_dir, manifest, cfg.tracks)
     except ValueError:
         return ["no telemetry for this day; nothing to sync"]
 

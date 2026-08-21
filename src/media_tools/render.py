@@ -876,7 +876,7 @@ def render_day(
     for clip in to_render:
         clip_force = force or bool(clip_filter)
         if day is None:
-            day = load_day_frame(day_dir, manifest)
+            day = load_day_frame(day_dir, manifest, cfg.tracks)
         try:
             dest = render_clip(
                 cfg, day_dir, manifest, clip, day, force=clip_force,

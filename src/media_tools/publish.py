@@ -199,7 +199,8 @@ def publish_day(
             )
             continue
         ctx = title_context(
-            day_dir, manifest, render_session_id(manifest, render), cfg.render.min_lap_s
+            day_dir, manifest, render_session_id(manifest, render),
+            cfg.render.min_lap_s, tracks=cfg.tracks,
         )
         values = {
             "track": ctx.track,

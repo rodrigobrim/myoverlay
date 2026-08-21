@@ -219,7 +219,7 @@ def test_sync_day_seeds_unsynced_clips(cfg, tmp_path, monkeypatch):
         start_utc=start,
         laps=[],
     )
-    monkeypatch.setattr("media_tools.telemetry.load_day_frame", lambda d, m2: fake_day)
+    monkeypatch.setattr("media_tools.telemetry.load_day_frame", lambda d, m2, *a: fake_day)
     monkeypatch.setattr(sync_mod, "extract_audio_pcm", lambda p: p)  # pass path through
 
     calls = {"n": 0}
@@ -288,7 +288,7 @@ def test_sync_day_only_syncs_named_clip(cfg, tmp_path, monkeypatch):
         start_utc=start,
         laps=[],
     )
-    monkeypatch.setattr("media_tools.telemetry.load_day_frame", lambda d, m2: fake_day)
+    monkeypatch.setattr("media_tools.telemetry.load_day_frame", lambda d, m2, *a: fake_day)
     monkeypatch.setattr(sync_mod, "extract_audio_pcm", lambda p: p)
 
     synced_paths = []

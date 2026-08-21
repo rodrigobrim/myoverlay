@@ -363,7 +363,7 @@ def test_render_stops_when_video_starts_mid_race(cfg, tmp_path, monkeypatch):
     manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
     (tmp_path / "day").mkdir()
     cfg.render.scan_video_for_race_end = False
-    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf, *a: day)
     monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
     monkeypatch.setattr(render_mod, "composite_stream", lambda *a, **k: None)
 
@@ -405,7 +405,7 @@ def test_render_allows_start_before_first_lap(cfg, tmp_path, monkeypatch):
     manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
     (tmp_path / "day").mkdir()
     cfg.render.scan_video_for_race_end = False
-    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf, *a: day)
     monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
     monkeypatch.setattr(
         render_mod, "composite_stream",
@@ -703,7 +703,7 @@ def test_render_day_end_to_end(cfg, tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "media_tools.render.load_day_frame",
-        lambda day_dir, manifest: DayFrame(
+        lambda day_dir, manifest, *a: DayFrame(
             df=make_session_df(),
             start_utc=start,
             laps=[(1, 0.0, 50.0), (2, 50.0, 95.0)],

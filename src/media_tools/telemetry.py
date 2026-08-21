@@ -179,7 +179,75 @@ def _derived_laps(
     ]
 
 
-def load_day_frame(day_dir: Path, manifest) -> DayFrame:
+def _line_laps(df: pd.DataFrame, tracks) -> list[tuple[int, float, float]] | None:
+    """Laps re-derived at the configured start/finish LINE, or None.
+
+    This is the pipeline's primary lap source: the chronometer, delta and lap
+    counter must all start where the kart crosses the real painted line - not
+    at the MyChron's deliberately-early beacon pin (the .xrk lap table) and
+    not at the audio-sync anchor (which only aligns clocks). The track/layout
+    is resolved from the log's own GPS; returns None (caller falls back to
+    the beacon laps) when the config knows no line near where the kart drove,
+    the log has no GPS, or the track never crosses the line.
+
+    `df` is ONE log's unified frame with t_s from its own start; returned
+    times are on that same axis.
+    """
+    import numpy as np
+
+    if tracks is None or "lat" not in df.columns or "lon" not in df.columns:
+        return None
+    from .relap import crossings_by_line, laps_from_crossings
+
+    t = df["t_s"].to_numpy(dtype=float)
+    lat = df["lat"].to_numpy(dtype=float)
+    lon = df["lon"].to_numpy(dtype=float)
+    ok = np.isfinite(lat) & np.isfinite(lon)
+    if int(ok.sum()) < 2:
+        return None
+    t, lat, lon = t[ok], lat[ok], lon[ok]
+    line = tracks.start_finish_for_position(float(np.mean(lat)), float(np.mean(lon)))
+    if line is None:
+        return None
+    cross = crossings_by_line(t, lat, lon, line)
+    if not cross:
+        return None
+    return [
+        (lp["num"], lp["start_time"], lp["end_time"])
+        for lp in laps_from_crossings(cross, float(t[0]), float(t[-1]))
+    ]
+
+
+def _log_laps(
+    xrk_path: Path, log, base: float, tracks, df: pd.DataFrame | None = None
+) -> list[tuple[int, float, float]]:
+    """One log's lap table, best source first: a sibling .sf-relapped.parquet
+    (manual override) > the configured start/finish line crossed by this
+    log's GPS > the .xrk beacon laps (which trip early on purpose).
+
+    `df` is the log's unified frame if the caller already has it; otherwise
+    it is loaded here only when the line source actually applies.
+    """
+    derived = _derived_laps(xrk_path, base)
+    if derived is not None:
+        return derived
+    if tracks is not None:
+        if df is None and xrk_path.is_file():
+            df = load_unified(xrk_path)
+        if df is not None:
+            from_line = _line_laps(df, tracks)
+            if from_line is not None:
+                return [(n, base + st, base + e) for n, st, e in from_line]
+    return [(lap.num, base + lap.start_s, base + lap.end_s) for lap in log.laps]
+
+
+def load_day_frame(day_dir: Path, manifest, tracks=None) -> DayFrame:
+    """All of a day's telemetry on one timeline.
+
+    `tracks` (config.TracksConfig) enables line-based lapping - pass it
+    wherever the laps drive anything user-visible (overlay, best lap,
+    race-end); without it only the derived-parquet/beacon sources apply.
+    """
     import numpy as np
 
     logs = [t for t in manifest.telemetry if t.start_utc]
@@ -194,6 +262,7 @@ def load_day_frame(day_dir: Path, manifest) -> DayFrame:
     for log in logs:
         df = load_unified(day_dir / log.file).copy()
         base = (log.start_utc - start_utc).total_seconds()
+        laps.extend(_log_laps(day_dir / log.file, log, base, tracks, df=df))
         df["t_s"] = df["t_s"] + base
         gap_start = prev_end_s
         if gap_start is not None and float(df["t_s"].iloc[0]) - gap_start > 2.0:
@@ -206,12 +275,6 @@ def load_day_frame(day_dir: Path, manifest) -> DayFrame:
             parts.append(gap)
         parts.append(df)
         prev_end_s = float(df["t_s"].iloc[-1])
-        derived = _derived_laps(day_dir / log.file, base)
-        if derived is not None:
-            laps.extend(derived)
-        else:
-            for lap in log.laps:
-                laps.append((lap.num, base + lap.start_s, base + lap.end_s))
 
     merged = pd.concat(parts, ignore_index=True).sort_values("t_s").reset_index(drop=True)
     laps.sort(key=lambda x: x[1])
@@ -252,26 +315,22 @@ def session_laps(manifest, session) -> list[tuple[int, float, float]]:
 
 
 def session_laps_derived(
-    day_dir: Path, manifest, session
+    day_dir: Path, manifest, session, tracks=None
 ) -> list[tuple[int, float, float]]:
-    """session_laps, but S/F-relap-corrected.
+    """session_laps, but corrected to the real start/finish.
 
-    If a `<stem>.sf-relapped.parquet` sits next to a log's .xrk, its corrected
-    lap table is used (the same laps the overlay renders via load_day_frame),
-    otherwise the raw .xrk beacon laps. Use this - not session_laps - anywhere
-    a best lap is derived, so the title and the video never disagree.
+    Same lap-source priority as load_day_frame (_log_laps): a sibling
+    `.sf-relapped.parquet` > the configured start/finish line crossed by the
+    log's GPS (pass `tracks` from config) > the raw .xrk beacon laps. Use
+    this - not session_laps - anywhere a best lap is derived, so the title
+    and the video never disagree.
     """
     laps: list[tuple[int, float, float]] = []
     for log in manifest.telemetry:
         if log.session_id != session.id or not log.start_utc:
             continue
         base = (log.start_utc - session.start_utc).total_seconds()
-        derived = _derived_laps(day_dir / log.file, base)
-        if derived is not None:
-            laps.extend(derived)
-        else:
-            for lap in log.laps:
-                laps.append((lap.num, base + lap.start_s, base + lap.end_s))
+        laps.extend(_log_laps(day_dir / log.file, log, base, tracks))
     laps.sort(key=lambda x: x[1])
     return laps
 

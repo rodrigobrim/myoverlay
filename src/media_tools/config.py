@@ -159,11 +159,13 @@ class TracksConfig(BaseModel):
     ) -> tuple[str, str, LayoutConfig] | None:
         """(track, layout, config) whose start/finish line is nearest to
         (lat, lon) - typically the session's mean GPS position. None when no
-        configured layout has a start/finish line."""
+        configured layout has a start/finish line within ~5 km: a session
+        driven at a circuit the config does not know must not borrow another
+        circuit's line."""
         import math
 
         best = None
-        best_d = math.inf
+        best_d = 5000.0 / 111320.0  # ~5 km in degrees
         for track_name, track in self.tracks.items():
             for layout_name, layout in track.layouts.items():
                 if layout.start_finish is None:

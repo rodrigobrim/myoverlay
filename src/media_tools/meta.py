@@ -91,15 +91,22 @@ class TitleContext:
 
 
 def title_context(
-    day_dir: Path, manifest: DayManifest, session_id: int | None, min_lap_s: float = 0.0
+    day_dir: Path,
+    manifest: DayManifest,
+    session_id: int | None,
+    min_lap_s: float = 0.0,
+    tracks=None,
 ) -> TitleContext:
     # Best lap via the single source of truth (telemetry.best_lap) over the
-    # S/F-relap-corrected laps (session_laps_derived), so the title's best lap
-    # is exactly the one the overlay shows - never the raw early-beacon lap.
+    # S/F-corrected laps (session_laps_derived, pass cfg.tracks), so the
+    # title's best lap is exactly the one the overlay shows - never the raw
+    # early-beacon lap.
     best_s: float | None = None
     for session in manifest.sessions:
         if session_id is None or session.id == session_id:
-            lap = best_lap(session_laps_derived(day_dir, manifest, session), min_lap_s)
+            lap = best_lap(
+                session_laps_derived(day_dir, manifest, session, tracks), min_lap_s
+            )
             if lap is not None:
                 dur = lap[2] - lap[1]
                 best_s = dur if best_s is None else min(best_s, dur)

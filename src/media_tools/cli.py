@@ -782,7 +782,9 @@ def best_lap_cmd(
     for s in manifest.sessions:
         if session is not None and s.id != session:
             continue
-        bl = best_lap(session_laps_derived(day_dir, manifest, s), cfg.render.min_lap_s)
+        bl = best_lap(
+            session_laps_derived(day_dir, manifest, s, cfg.tracks), cfg.render.min_lap_s
+        )
         out[s.id] = fmt_laptime((bl[2] - bl[1]) if bl else None)
     if json_out:
         typer.echo(_json.dumps(out))
@@ -1067,7 +1069,7 @@ def sync(
                 )
                 raise typer.Exit(2)
             try:
-                frame = load_day_frame(lib.day_dir(date.fromisoformat(day)), manifest)
+                frame = load_day_frame(lib.day_dir(date.fromisoformat(day)), manifest, cfg.tracks)
             except ValueError as exc:
                 console.print(f"[red]{exc}; nothing to anchor to[/red]")
                 raise typer.Exit(2)
@@ -1191,7 +1193,7 @@ def render(
         manifest = lib.load_day(d)
         day_dir = lib.day_dir(d)
         plan_obj = load_plan(plan_file)
-        dayframe = load_day_frame(day_dir, manifest)
+        dayframe = load_day_frame(day_dir, manifest, cfg.tracks)
         console.print(f"[bold]{d}[/bold] (plan {plan_file.name}):")
         for item in plan_obj.items:
             line = execute_item(
@@ -1528,6 +1530,7 @@ def meta(
         ctx = title_context(
             lib.day_dir(d), manifest,
             render_session_id(manifest, render), cfg.render.min_lap_s,
+            tracks=cfg.tracks,
         )
         if not no_meta and ctx.best_lap == NO_LAP:
             console.print(
