@@ -1012,17 +1012,6 @@ def sync(
             "kart pulls away (MM:SS, or MM:SS.mmm for sub-second precision)",
         ),
     ] = None,
-    launch: Annotated[
-        Optional[int],
-        typer.Option(
-            help="Manual mode: a track day has several pull-aways (out of the "
-            "pits, the race start, a second stint...) and --at must be matched "
-            "to the right one in the telemetry. Normally the video file's own "
-            "timestamp picks it and you don't pass this. If it picked the "
-            "wrong one, say which pull-away of the day your --at moment is: "
-            "--launch 1 = the day's first, 2 = the second, ..."
-        ),
-    ] = None,
     force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
 ):
     """Align videos with telemetry (auto, or manual --video with --video-start or --at).
@@ -1045,7 +1034,7 @@ def sync(
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
 
-    if video_start or at is not None or launch is not None:
+    if video_start or at is not None:
         if not (clip and day and (video_start or at is not None)):
             console.print(
                 "[red]manual mode needs DAY, --video and either --video-start or --at[/red]"
@@ -1056,8 +1045,9 @@ def sync(
 
         if at is not None:
             # Launch anchor: the kart pulls away at video time --at, so
-            # video_start = launch_utc - at. Which launch that is comes from
-            # the camera clock (or --launch N).
+            # video_start = launch_utc - at. Which of the day's pull-aways
+            # that is comes from the camera clock (minutes-accurate, plenty
+            # to disambiguate launches that sit stints apart).
             from .slice import parse_timestamp
             from .sync import engine_launches
             from .telemetry import load_day_frame
@@ -1086,24 +1076,13 @@ def sync(
                     "pulls away); pin the clip with --video-start instead[/red]"
                 )
                 raise typer.Exit(2)
-            if launch is not None:
-                if not 1 <= launch <= len(candidates):
-                    console.print(
-                        f"[red]--launch {launch} out of range: {len(candidates)} "
-                        f"launch(es) detected[/red]"
-                    )
-                    raise typer.Exit(2)
-                launch_utc = candidates[launch - 1]
-            else:
-                # The clip's own clock says roughly when its --at moment
-                # happened; the nearest launch to that is the one meant.
-                seen_at = target.start_utc_estimate + timedelta(seconds=at_s)
-                launch_utc = min(candidates, key=lambda c: abs((c - seen_at).total_seconds()))
-            picked = candidates.index(launch_utc) + 1
+            # The clip's own clock says roughly when its --at moment
+            # happened; the nearest pull-away to that is the one meant.
+            seen_at = target.start_utc_estimate + timedelta(seconds=at_s)
+            launch_utc = min(candidates, key=lambda c: abs((c - seen_at).total_seconds()))
             console.print(
-                f"[dim]matched --at to pull-away {picked} of {len(candidates)} "
-                f"this day, at {launch_utc.isoformat()} - if that is the wrong "
-                f"one, re-run with --launch N[/dim]"
+                f"[dim]matched --at to the pull-away at {launch_utc.isoformat()} "
+                f"(of {len(candidates)} this day)[/dim]"
             )
             vs = launch_utc - timedelta(seconds=at_s)
         else:

@@ -495,7 +495,7 @@ def test_sync_launch_anchor_picks_the_launch_nearest_the_camera_clock(
     cfg_with_card, monkeypatch
 ):
     """Two launches (pit out-lap, then the grid start): the clip's own clock
-    decides which --at refers to, and --launch N overrides it."""
+    decides which one --at refers to."""
     from datetime import timedelta
 
     import numpy as np
@@ -523,21 +523,6 @@ def test_sync_launch_anchor_picks_the_launch_nearest_the_camera_clock(
     )
     assert r.exit_code == 0, r.stdout
     assert _pinned_start(cfg_with_card).video_start_utc == start + timedelta(seconds=60)
-
-    # --launch 2 forces the race launch instead.
-    r2 = runner.invoke(
-        cli.app,
-        ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00", "--launch", "2"],
-    )
-    assert r2.exit_code == 0, r2.stdout
-    assert _pinned_start(cfg_with_card).video_start_utc == start + timedelta(seconds=540)
-
-    r3 = runner.invoke(
-        cli.app,
-        ["sync", "2026-07-12", "--video", "a.MP4", "--at", "01:00", "--launch", "9"],
-    )
-    assert r3.exit_code == 2
-    assert "out of range" in r3.stdout
 
 
 def test_render_res_accepts_preset_or_common_name(cfg_with_card):
