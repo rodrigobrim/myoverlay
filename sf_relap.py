@@ -8,10 +8,10 @@ import numpy as np
 sys.path.insert(0, str(pathlib.Path(__file__).parent / "src"))
 from libxrk import aim_xrk
 
-from media_tools.relap import crossings_by_coordinate
+from media_tools.config import load_config
+from media_tools.relap import crossings_by_line
 
 PATH = r"C:\Users\rodrigobrim\Videos\karting\2026-07-16\raw\telemetry\kgv e2_Race_a_0096.xrk"
-SF_LAT, SF_LON = -23.60492, -46.83631   # start-finish-coordinate (default) - real S/F
 
 log = aim_xrk(PATH)
 laps = log.laps.to_pylist()
@@ -22,7 +22,12 @@ gt = tbl["timecodes"].to_numpy(dtype=float)
 glat = tbl[[c for c in tbl.columns if "Lat" in c][0]].to_numpy(dtype=float)
 glon = tbl[[c for c in tbl.columns if "Lon" in c][0]].to_numpy(dtype=float)
 
-cross = crossings_by_coordinate(gt, glat, glon, SF_LAT, SF_LON)
+# The track/layout is resolved from where this session actually drove.
+sf_line = load_config().tracks.start_finish_for_position(
+    float(np.nanmean(glat)), float(np.nanmean(glon)))
+
+# relap works in seconds; .xrk timecodes are ms.
+cross = [c * 1000.0 for c in crossings_by_line(gt / 1000.0, glat, glon, sf_line)]
 
 print(f"original beacon crossings = {len(orig_cross)}")
 print(f"re-derived (real S/F)     = {len(cross)}\n")

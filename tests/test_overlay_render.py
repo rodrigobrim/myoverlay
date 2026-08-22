@@ -363,7 +363,7 @@ def test_render_stops_when_video_starts_mid_race(cfg, tmp_path, monkeypatch):
     manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
     (tmp_path / "day").mkdir()
     cfg.render.scan_video_for_race_end = False
-    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf, *a: day)
     monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
     monkeypatch.setattr(render_mod, "composite_stream", lambda *a, **k: None)
 
@@ -405,7 +405,7 @@ def test_render_allows_start_before_first_lap(cfg, tmp_path, monkeypatch):
     manifest = DayManifest(date=date(2026, 7, 16), videos=[clip], sessions=[sess])
     (tmp_path / "day").mkdir()
     cfg.render.scan_video_for_race_end = False
-    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf: day)
+    monkeypatch.setattr(render_mod, "load_day_frame", lambda dd, mf, *a: day)
     monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
     monkeypatch.setattr(
         render_mod, "composite_stream",
@@ -703,7 +703,7 @@ def test_render_day_end_to_end(cfg, tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "media_tools.render.load_day_frame",
-        lambda day_dir, manifest: DayFrame(
+        lambda day_dir, manifest, *a: DayFrame(
             df=make_session_df(),
             start_utc=start,
             laps=[(1, 0.0, 50.0), (2, 50.0, 95.0)],
@@ -719,3 +719,44 @@ def test_render_day_end_to_end(cfg, tmp_path, monkeypatch):
     # idempotent second run
     report2 = render_day(cfg, manifest, day_dir)
     assert any(line.startswith("=") for line in report2)
+
+
+
+def test_race_start_trim_anchors_on_the_first_crossing_not_the_revs(
+    cfg, tmp_path, monkeypatch
+):
+    """The rendered video opens RACE_START_BUFFER_S before the first
+    start/finish-line crossing (the race start). The revs rising earlier is
+    only the telemetry-sync anchor and must play no part here."""
+    import media_tools.render as render_mod
+    from media_tools.telemetry import DayFrame
+
+    start = datetime(2026, 7, 16, 13, 0, tzinfo=timezone.utc)
+    # Out-lap 0-90 s (kart launches at 60 s, crosses the line at 90 s),
+    # then two full laps. Race start = 90 s.
+    laps = [(0, 0.0, 90.0), (1, 90.0, 150.0), (2, 150.0, 210.0)]
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=laps)
+    clip = VideoClip(
+        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1, duration_s=240.0,
+        start_utc_estimate=start,
+        sync=SyncInfo(video_start_utc=start, confidence=1.0, method="manual"),
+    )
+    manifest = DayManifest(date=date(2026, 7, 16), videos=[clip])
+    (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
+
+    captured = {}
+
+    def fake_composite(video, frames, size, dest, fps, start_s, duration_s, *a, **k):
+        captured["start_s"] = start_s
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+
+    monkeypatch.setattr(render_mod, "composite_stream", fake_composite)
+    monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
+    render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
+    # 90 s crossing - 15 s buffer = 75 s: after the 60 s launch would-be
+    # anchor, proving the crossing (not the revs) set the cut.
+    assert captured["start_s"] == pytest.approx(
+        90.0 - render_mod.RACE_START_BUFFER_S
+    )

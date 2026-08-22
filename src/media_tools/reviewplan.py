@@ -60,7 +60,10 @@ def build_plan(cfg: Config, day_dir: Path, manifest: DayManifest) -> RenderPlan:
             else [RenderSlice(file=clip.file, source_name=clip.source_name)]
         )
         bl = (
-            best_lap(session_laps_derived(day_dir, manifest, session), cfg.render.min_lap_s)
+            best_lap(
+                session_laps_derived(day_dir, manifest, session, cfg.tracks),
+                cfg.render.min_lap_s,
+            )
             if session
             else None
         )

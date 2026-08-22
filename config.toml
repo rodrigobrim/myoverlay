@@ -47,6 +47,30 @@
 # local time.
 # example: timezone = "America/Sao_Paulo"
 
+# Tracks: every circuit the pipeline knows, each with named layouts, each
+# layout declaring the physical lines on the asphalt as the coordinates of
+# their two ends (read them off satellite imagery). A line is crossed where
+# the GPS track intersects the segment BETWEEN its two coordinates - a kart
+# passing beyond either end does not trip it - so each pair must span the
+# width of the asphalt. Which track/layout applies to a session is resolved
+# automatically from the session's own GPS (the nearest start-finish line),
+# never configured per day. `start-finish` cuts the laps and marks the race
+# start; `box-entry` / `box-exit` bound the pit lane. Kartodromo Granja
+# Viana ships built in (that's this same block, active without uncommenting;
+# note its line is the REAL one, not the MyChron beacon pin - the logger's
+# beacon is placed ~95 m early on purpose and the lap table is corrected
+# against this line). Add your own circuits alongside it:
+# [tracks.kgv.layouts.default.start-finish]
+# coordinate1 = [-23.604910, -46.836278]
+# coordinate2 = [-23.604930, -46.836352]
+# example:
+# [tracks.interlagos-kart.layouts.full.start-finish]
+# coordinate1 = [-23.699000, -46.697000]
+# coordinate2 = [-23.699050, -46.697080]
+# [tracks.interlagos-kart.layouts.full.box-entry]
+# coordinate1 = [-23.699500, -46.696500]
+# coordinate2 = [-23.699550, -46.696580]
+
 [watch]
 # The watcher (`mt watch`) checks for a newly plugged camera / new files this
 # often, in seconds.
@@ -80,7 +104,7 @@
 # Font for the overlay text; omit for the built-in default.
 # example: font_path = "C:/Windows/Fonts/arialbd.ttf"
 # Clips synced below this confidence are not rendered (use `mt sync --video
-# ... --lap ... --at ...` to pin them manually).
+# ... --at MM:SS` - the video time you pull away - to pin them manually).
 # min_sync_confidence = 0.5
 # When you forget to stop recording after the race, this listens to the
 # video's engine sound to find where the kart was switched off, then trims

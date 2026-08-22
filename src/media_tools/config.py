@@ -77,6 +77,114 @@ class TelemetryConfig(BaseModel):
         return ZoneInfo(self.timezone) if self.timezone else _local_tzinfo()
 
 
+Line = tuple[tuple[float, float], tuple[float, float]]
+
+
+class LineSpec(BaseModel):
+    """A physical line on the asphalt, as the coordinates of its two ends.
+
+    A crossing is detected where the GPS track intersects the segment
+    BETWEEN these points, so the pair must span the width of the asphalt: a
+    kart passing beyond either end does not trip it.
+    """
+
+    coordinate1: list[float]
+    coordinate2: list[float]
+
+    @field_validator("coordinate1", "coordinate2")
+    @classmethod
+    def _valid_coordinate(cls, v):
+        if len(v) != 2:
+            raise ValueError("a coordinate is [lat, lon]")
+        return [float(v[0]), float(v[1])]
+
+    def line(self) -> Line:
+        """The line as nested tuples, as media_tools.relap expects it."""
+        return (
+            (self.coordinate1[0], self.coordinate1[1]),
+            (self.coordinate2[0], self.coordinate2[1]),
+        )
+
+
+class LayoutConfig(BaseModel):
+    """One layout of a circuit: where its lines lie on the map.
+
+    `start_finish` cuts the laps (and marks the race start); `box_entry` /
+    `box_exit` bound the pit lane. Only start-finish drives the pipeline
+    today - the box lines are declared for pit-stop detection.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    start_finish: LineSpec | None = Field(default=None, alias="start-finish")
+    box_entry: LineSpec | None = Field(default=None, alias="box-entry")
+    box_exit: LineSpec | None = Field(default=None, alias="box-exit")
+
+
+# Kartodromo Granja Viana, measured off satellite imagery. NOT the MyChron
+# beacon pin - that sits ~95 m early on purpose; this is the real line.
+_KGV_DEFAULT = {
+    "layouts": {
+        "default": {
+            "start-finish": {
+                "coordinate1": [-23.604910, -46.836278],
+                "coordinate2": [-23.604930, -46.836352],
+            },
+        }
+    }
+}
+
+
+class TrackConfig(BaseModel):
+    """A circuit: named layouts, each declaring its lines."""
+
+    layouts: dict[str, LayoutConfig] = Field(default_factory=dict)
+
+
+class TracksConfig(BaseModel):
+    """Every circuit the pipeline knows, keyed by track name.
+
+    Which track/layout applies to a session is never configured per day: it
+    is resolved from the session's own GPS with `layout_for_position` - the
+    layout whose start/finish line is nearest to where the kart actually
+    drove. KGV ships as the default.
+    """
+
+    tracks: dict[str, TrackConfig] = Field(
+        default_factory=lambda: {"kgv": TrackConfig(**_KGV_DEFAULT)}
+    )
+
+    def layout_for_position(
+        self, lat: float, lon: float
+    ) -> tuple[str, str, LayoutConfig] | None:
+        """(track, layout, config) whose start/finish line is nearest to
+        (lat, lon) - typically the session's mean GPS position. None when no
+        configured layout has a start/finish line within ~5 km: a session
+        driven at a circuit the config does not know must not borrow another
+        circuit's line."""
+        import math
+
+        best = None
+        best_d = 5000.0 / 111320.0  # ~5 km in degrees
+        for track_name, track in self.tracks.items():
+            for layout_name, layout in track.layouts.items():
+                if layout.start_finish is None:
+                    continue
+                (a_lat, a_lon), (b_lat, b_lon) = layout.start_finish.line()
+                mid_lat, mid_lon = (a_lat + b_lat) / 2, (a_lon + b_lon) / 2
+                dx = (mid_lon - lon) * math.cos(math.radians(lat))
+                dy = mid_lat - lat
+                d = math.hypot(dx, dy)
+                if d < best_d:
+                    best_d = d
+                    best = (track_name, layout_name, layout)
+        return best
+
+    def start_finish_for_position(self, lat: float, lon: float) -> Line | None:
+        found = self.layout_for_position(lat, lon)
+        return found[2].start_finish.line() if found else None
+
+
 class WatchConfig(BaseModel):
     poll_s: float = 30.0
     # Give the OS/camera a moment to finish mounting before ingesting.
@@ -196,7 +304,20 @@ class Config(BaseModel):
     language: str = "en"
     camera: CameraConfig = Field(default_factory=CameraConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    tracks: TracksConfig = Field(default_factory=TracksConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
+
+    @field_validator("tracks", mode="before")
+    @classmethod
+    def _wrap_tracks(cls, v):
+        # In TOML the tracks live directly under [tracks.<name>...]; wrap the
+        # raw name->track mapping into the TracksConfig container. The
+        # built-in KGV stays available alongside configured tracks (an
+        # explicit [tracks.kgv] replaces it) - adding your home circuit must
+        # not silently drop the shipped one.
+        if isinstance(v, dict) and "tracks" not in v:
+            return {"tracks": {"kgv": _KGV_DEFAULT, **v}}
+        return v
     render: RenderConfig = Field(default_factory=RenderConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

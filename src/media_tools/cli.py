@@ -782,7 +782,9 @@ def best_lap_cmd(
     for s in manifest.sessions:
         if session is not None and s.id != session:
             continue
-        bl = best_lap(session_laps_derived(day_dir, manifest, s), cfg.render.min_lap_s)
+        bl = best_lap(
+            session_laps_derived(day_dir, manifest, s, cfg.tracks), cfg.render.min_lap_s
+        )
         out[s.id] = fmt_laptime((bl[2] - bl[1]) if bl else None)
     if json_out:
         typer.echo(_json.dumps(out))
@@ -1002,21 +1004,24 @@ def sync(
         Optional[str],
         typer.Option(help="Manual mode: exact UTC start of the video (ISO 8601)"),
     ] = None,
-    lap: Annotated[
-        Optional[int],
-        typer.Option(help="Manual mode: telemetry lap number you start at video time --at"),
-    ] = None,
     at: Annotated[
         Optional[str],
         typer.Option(
             "--at",
-            help="Manual mode: video time of the --lap start/finish crossing "
-            "(MM:SS, or MM:SS.mmm for sub-second precision)",
+            help="Manual mode: video time at which the engine revs up and the "
+            "kart pulls away (MM:SS, or MM:SS.mmm for sub-second precision)",
         ),
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
 ):
-    """Align videos with telemetry (auto, or manual --video with --video-start or --lap/--at).
+    """Align videos with telemetry (auto, or manual --video with --video-start or --at).
+
+    Manual mode anchors on the LAUNCH: --at is the video time where you hear
+    the revs rise and the kart pulls away, matched to the same moment in the
+    telemetry. That only aligns the two clocks - it is not the race start.
+    The race starts where the GPS track crosses the start/finish line, which
+    lies ahead of every grid slot, so it is derived separately and needs no
+    input from you.
 
     --video alone (no anchor) auto-syncs just that clip.
     """
@@ -1029,26 +1034,27 @@ def sync(
     lib = Library(cfg.library_root)
     days = [date.fromisoformat(day)] if day else lib.day_dates()
 
-    if video_start or lap is not None or at is not None:
-        if not (clip and day and (video_start or lap is not None)):
+    if video_start or at is not None:
+        if not (clip and day and (video_start or at is not None)):
             console.print(
-                "[red]manual mode needs DAY, --video and either --video-start or --lap/--at[/red]"
+                "[red]manual mode needs DAY, --video and either --video-start or --at[/red]"
             )
             raise typer.Exit(2)
         manifest = lib.load_day(date.fromisoformat(day))
         target = _resolve_video(manifest, clip, day)
 
-        if lap is not None:
-            # Lap anchor: telemetry lap N of the clip's session starts at
-            # video time --at, so video_start = lap_N_start_utc - at.
+        if at is not None:
+            # Launch anchor: the kart pulls away at video time --at, so
+            # video_start = launch_utc - at. Which of the day's pull-aways
+            # that is comes from the camera clock (minutes-accurate, plenty
+            # to disambiguate launches that sit stints apart).
             from .slice import parse_timestamp
+            from .sync import engine_launches
+            from .telemetry import load_day_frame
 
-            if at is None:
-                console.print("[red]--lap needs --at MM:SS (or MM:SS.mmm)[/red]")
-                raise typer.Exit(2)
-            # A start/finish crossing is worth pinning to the millisecond, so
-            # --at takes fractional seconds; parse before the lap lookup so a
-            # typo fails fast (and as an error, not a traceback).
+            # The anchor is worth pinning to the millisecond, so --at takes
+            # fractional seconds; parse first so a typo fails fast (and as an
+            # error, not a traceback).
             try:
                 at_s = parse_timestamp(at)
             except ValueError:
@@ -1056,21 +1062,29 @@ def sync(
                     f"[red]invalid --at {at!r}: expected MM:SS, MM:SS.mmm or seconds[/red]"
                 )
                 raise typer.Exit(2)
-            lap_utc = None
-            for t in manifest.telemetry:
-                if t.session_id != target.session_id:
-                    continue
-                for lp in t.laps:
-                    if lp.num == lap:
-                        lap_utc = t.start_utc + timedelta(seconds=lp.start_s)
-                        break
-            if lap_utc is None:
+            try:
+                frame = load_day_frame(lib.day_dir(date.fromisoformat(day)), manifest, cfg.tracks)
+            except ValueError as exc:
+                console.print(f"[red]{exc}; nothing to anchor to[/red]")
+                raise typer.Exit(2)
+            candidates = [
+                frame.start_utc + timedelta(seconds=s) for s in engine_launches(frame.df)
+            ]
+            if not candidates:
                 console.print(
-                    f"[red]no telemetry lap {lap} in {target.source_name}'s session "
-                    f"(id {target.session_id}); run 'mt correlate {day}' first[/red]"
+                    "[red]no launch found in the day's telemetry (engine never "
+                    "pulls away); pin the clip with --video-start instead[/red]"
                 )
                 raise typer.Exit(2)
-            vs = lap_utc - timedelta(seconds=at_s)
+            # The clip's own clock says roughly when its --at moment
+            # happened; the nearest pull-away to that is the one meant.
+            seen_at = target.start_utc_estimate + timedelta(seconds=at_s)
+            launch_utc = min(candidates, key=lambda c: abs((c - seen_at).total_seconds()))
+            console.print(
+                f"[dim]matched --at to the pull-away at {launch_utc.isoformat()} "
+                f"(of {len(candidates)} this day)[/dim]"
+            )
+            vs = launch_utc - timedelta(seconds=at_s)
         else:
             vs = dt.fromisoformat(video_start)
 
@@ -1163,7 +1177,7 @@ def render(
         manifest = lib.load_day(d)
         day_dir = lib.day_dir(d)
         plan_obj = load_plan(plan_file)
-        dayframe = load_day_frame(day_dir, manifest)
+        dayframe = load_day_frame(day_dir, manifest, cfg.tracks)
         console.print(f"[bold]{d}[/bold] (plan {plan_file.name}):")
         for item in plan_obj.items:
             line = execute_item(
@@ -1500,6 +1514,7 @@ def meta(
         ctx = title_context(
             lib.day_dir(d), manifest,
             render_session_id(manifest, render), cfg.render.min_lap_s,
+            tracks=cfg.tracks,
         )
         if not no_meta and ctx.best_lap == NO_LAP:
             console.print(

@@ -591,9 +591,28 @@ def composite(
     tmp.replace(dest)
 
 
-# Keep this many seconds of lead-in before the first lap (the launch / race
-# start), dropping the pre-race grid staging.
+# Keep this many seconds of lead-in before the race start (the first
+# start/finish-line crossing), dropping the pre-race grid staging. Wide
+# enough that the launch - which happens metres before the line - is always
+# in frame.
 RACE_START_BUFFER_S = 15.0
+
+
+def _race_start_s(laps) -> float | None:
+    """Telemetry time of the race start: the FIRST start/finish crossing.
+
+    The race starts when the kart crosses the line - never at the revs
+    rising (that is only the telemetry-sync anchor). A crossing is a lap
+    boundary shared between two laps (one lap's end == the next lap's
+    start); the out-lap's start is recording power-on, not a crossing, so
+    the earliest shared boundary is the race start. None when the lap table
+    holds no shared boundary (a single opened lap: nothing to anchor on).
+    """
+    starts = sorted(st for _, st, _ in laps)
+    crossings = [
+        e for _, _, e in laps if any(abs(s - e) <= 0.05 for s in starts)
+    ]
+    return min(crossings) if crossings else None
 
 
 def render_clip(
@@ -655,16 +674,23 @@ def render_clip(
             duration_s = cut
             race_end_cut = True
 
-    # Race-start trim: begin RACE_START_BUFFER_S before the first lap (the
-    # launch), dropping the pre-race grid staging. Only for a full clip render
-    # (not a lap render or an explicit --from sample). `duration_s` here holds
-    # the END time (the race-end cut, or the full clip length since start was
-    # 0); convert it to a render length once start_s moves.
+    # Race-start trim: begin RACE_START_BUFFER_S before the race start - the
+    # first start/finish-line crossing - dropping the pre-race grid staging.
+    # The buffer keeps the launch in frame (it happens metres before the
+    # line). Only for a full clip render (not a lap render or an explicit
+    # --from sample). `duration_s` here holds the END time (the race-end
+    # cut, or the full clip length since start was 0); convert it to a
+    # render length once start_s moves.
     race_start_trim = False
     if lap_num is None and window_start_s == 0.0 and window_end_s == 0.0 and laps:
-        first_lap_video = min(st for _, st, _ in laps) - video_offset_s
-        rs = first_lap_video - RACE_START_BUFFER_S
-        if rs > start_s + 0.5:
+        anchor = _race_start_s(laps)
+        if anchor is None:
+            anchor = min(st for _, st, _ in laps)
+        rs = anchor - video_offset_s - RACE_START_BUFFER_S
+        # Trim only when the cut point actually falls inside the clip: a
+        # crossing beyond the recording (clip stopped early, wrong-session
+        # laps) must not produce an empty or negative render window.
+        if start_s + 0.5 < rs < duration_s - 1.0:
             end_time = duration_s
             start_s = rs
             duration_s = end_time - start_s
@@ -848,7 +874,7 @@ def render_day(
     for clip in to_render:
         clip_force = force or bool(clip_filter)
         if day is None:
-            day = load_day_frame(day_dir, manifest)
+            day = load_day_frame(day_dir, manifest, cfg.tracks)
         try:
             dest = render_clip(
                 cfg, day_dir, manifest, clip, day, force=clip_force,
@@ -861,8 +887,8 @@ def render_day(
                 f"! {clip.file}: starts mid-race ({exc.laps_done} lap(s) already "
                 f"completed) - a race starts at 0 laps, so the auto-sync is wrong. "
                 f"Set it manually: mt sync {manifest.date} --clip {clip.source_name} "
-                f"--lap N --at MM:SS  (N = the telemetry lap you are starting at "
-                f"video time MM:SS; add .mmm for sub-second precision)"
+                f"--at MM:SS  (MM:SS = the video time where the revs rise and you "
+                f"pull away; add .mmm for sub-second precision)"
             )
         except RuntimeError as exc:
             # A locked output (open in a player), an ffmpeg error, etc. must
