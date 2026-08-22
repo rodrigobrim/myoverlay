@@ -1015,8 +1015,12 @@ def sync(
     launch: Annotated[
         Optional[int],
         typer.Option(
-            help="Manual mode: which detected launch --at refers to (1-based, "
-            "in time order); default is the one nearest the camera clock"
+            help="Manual mode: a track day has several pull-aways (out of the "
+            "pits, the race start, a second stint...) and --at must be matched "
+            "to the right one in the telemetry. Normally the video file's own "
+            "timestamp picks it and you don't pass this. If it picked the "
+            "wrong one, say which pull-away of the day your --at moment is: "
+            "--launch 1 = the day's first, 2 = the second, ..."
         ),
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-sync videos that already have a sync")] = False,
@@ -1097,8 +1101,9 @@ def sync(
                 launch_utc = min(candidates, key=lambda c: abs((c - seen_at).total_seconds()))
             picked = candidates.index(launch_utc) + 1
             console.print(
-                f"[dim]launch {picked}/{len(candidates)} at "
-                f"{launch_utc.isoformat()} (telemetry)[/dim]"
+                f"[dim]matched --at to pull-away {picked} of {len(candidates)} "
+                f"this day, at {launch_utc.isoformat()} - if that is the wrong "
+                f"one, re-run with --launch N[/dim]"
             )
             vs = launch_utc - timedelta(seconds=at_s)
         else:

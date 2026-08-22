@@ -280,7 +280,7 @@ input from you.
 | `--video`, `--clip` |  | Manual mode: video source name |
 | `--video-start` |  | Manual mode: exact UTC start of the video (ISO 8601) |
 | `--at` |  | Manual mode: video time at which the engine revs up and the kart pulls away (MM:SS, or MM:SS.mmm for sub-second precision) |
-| `--launch` |  | Manual mode: which detected launch --at refers to (1-based, in time order); default is the one nearest the camera clock |
+| `--launch` |  | Manual mode: a track day has several pull-aways (out of the pits, the race start, a second stint...) and --at must be matched to the right one in the telemetry. Normally the video file's own timestamp picks it and you don't pass this. If it picked the wrong one, say which pull-away of the day your --at moment is: --launch 1 = the day's first, 2 = the second, ... |
 | `--force` / `--no-force` | false | Re-sync videos that already have a sync |
 
 ## mt telemetry
