@@ -721,45 +721,42 @@ def test_render_day_end_to_end(cfg, tmp_path, monkeypatch):
     assert any(line.startswith("=") for line in report2)
 
 
-def test_race_start_trim_anchors_on_the_launch_not_the_line(cfg, tmp_path, monkeypatch):
-    """The render opens on the LAUNCH (revs rising, kart pulling away), not
-    on the first start/finish crossing: from a back grid slot the line is
-    crossed seconds after the launch, and those seconds are the start of the
-    race - they must stay in the video."""
+
+def test_race_start_trim_anchors_on_the_first_crossing_not_the_revs(
+    cfg, tmp_path, monkeypatch
+):
+    """The rendered video opens RACE_START_BUFFER_S before the first
+    start/finish-line crossing (the race start). The revs rising earlier is
+    only the telemetry-sync anchor and must play no part here."""
     import media_tools.render as render_mod
     from media_tools.telemetry import DayFrame
 
-    start = datetime(2026, 7, 13, 11, 0, tzinfo=timezone.utc)
-    # Standing on the grid for 60 s, launching at t=60, crossing the line
-    # (first lap start) 8 s later at t=68.
-    t = np.arange(0.0, 300.0, 0.1)
-    df = pd.DataFrame({"t_s": t, "speed_ms": np.where(t < 60.0, 0.0, 22.0)})
-    day = DayFrame(df=df, start_utc=start,
-                   laps=[(0, 0.0, 68.0), (1, 68.0, 118.0), (2, 118.0, 168.0)])
+    start = datetime(2026, 7, 16, 13, 0, tzinfo=timezone.utc)
+    # Out-lap 0-90 s (kart launches at 60 s, crosses the line at 90 s),
+    # then two full laps. Race start = 90 s.
+    laps = [(0, 0.0, 90.0), (1, 90.0, 150.0), (2, 150.0, 210.0)]
+    day = DayFrame(df=make_session_df(300.0), start_utc=start, laps=laps)
     clip = VideoClip(
-        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1,
-        duration_s=300.0, start_utc_estimate=start,
-        sync=SyncInfo(video_start_utc=start, confidence=0.9, method="manual"),
+        file="raw/video/c.MP4", source_name="c.MP4", size_bytes=1, duration_s=240.0,
+        start_utc_estimate=start,
+        sync=SyncInfo(video_start_utc=start, confidence=1.0, method="manual"),
     )
-    manifest = DayManifest(date=date(2026, 7, 13), videos=[clip])
+    manifest = DayManifest(date=date(2026, 7, 16), videos=[clip])
     (tmp_path / "day").mkdir()
+    cfg.render.scan_video_for_race_end = False
 
     captured = {}
 
     def fake_composite(video, frames, size, dest, fps, start_s, duration_s, *a, **k):
         captured["start_s"] = start_s
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"out")
+        dest.write_bytes(b"x")
 
     monkeypatch.setattr(render_mod, "composite_stream", fake_composite)
     monkeypatch.setattr(render_mod, "probe_video_size", lambda p: (1920, 1080))
-    monkeypatch.setattr(
-        "media_tools.raceend.detect_race_end", lambda *a, **k: __import__(
-            "media_tools.library", fromlist=["RaceEnd"]).RaceEnd()
-    )
-
     render_mod.render_clip(cfg, tmp_path / "day", manifest, clip, day)
-    # Launch at 60 s minus the 15 s buffer - NOT 68 - 15 = 53.
+    # 90 s crossing - 15 s buffer = 75 s: after the 60 s launch would-be
+    # anchor, proving the crossing (not the revs) set the cut.
     assert captured["start_s"] == pytest.approx(
-        60.0 - render_mod.RACE_START_BUFFER_S, abs=0.5
+        90.0 - render_mod.RACE_START_BUFFER_S
     )
